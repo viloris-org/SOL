@@ -13,14 +13,16 @@
 use std::os::unix::io::OwnedFd;
 
 use smithay::{
-    delegate_compositor, delegate_data_device, delegate_layer_shell, delegate_seat, delegate_shm,
-    delegate_xdg_shell,
+    delegate_compositor, delegate_data_device, delegate_input_method_manager, delegate_layer_shell,
+    delegate_seat, delegate_shm, delegate_text_input_manager, delegate_xdg_shell,
     input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
     reexports::wayland_server::{Client, DisplayHandle, Resource, protocol::wl_seat},
     utils::Serial,
     wayland::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState},
+        input_method::InputMethodHandler,
+        input_method::InputMethodManagerState,
         seat::WaylandFocus,
         selection::{
             SelectionHandler,
@@ -39,6 +41,7 @@ use smithay::{
             },
         },
         shm::{ShmHandler, ShmState},
+        text_input::TextInputManagerState,
     },
 };
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -60,6 +63,14 @@ pub struct SolState {
     pub seat_state: SeatState<SolState>,
     pub data_device_state: DataDeviceState,
     pub layer_shell_state: WlrLayerShellState,
+    /// Phase 1 IME: text-input v3 + input-method v2 manager globals.
+    ///
+    /// Kept as fields to hold the global registrations alive; the delegate
+    /// macros wire the protocol dispatch into these internal manager states.
+    #[allow(dead_code)]
+    pub text_input_state: TextInputManagerState,
+    #[allow(dead_code)]
+    pub input_method_state: InputMethodManagerState,
     pub seat: Seat<SolState>,
     /// Pointer device handle used by the interactive move/resize grabs.
     pub pointer: smithay::input::pointer::PointerHandle<SolState>,
@@ -82,6 +93,8 @@ impl SolState {
             seat_state,
             data_device_state: DataDeviceState::new::<SolState>(display),
             layer_shell_state: WlrLayerShellState::new::<SolState>(display),
+            text_input_state: TextInputManagerState::new::<SolState>(display),
+            input_method_state: InputMethodManagerState::new::<SolState, _>(display, |_| true),
             seat,
             pointer,
             window_manager: window::WindowManager::default(),
@@ -278,6 +291,24 @@ impl WlrLayerShellHandler for SolState {
     }
 }
 
+impl InputMethodHandler for SolState {
+    fn new_popup(&mut self, _surface: smithay::wayland::input_method::PopupSurface) {
+        // IME popups are rendered by `sol-ime` with `sol-design` tokens; the
+        // compositor tracks them but does not need to do anything else yet.
+    }
+
+    fn dismiss_popup(&mut self, _surface: smithay::wayland::input_method::PopupSurface) {}
+
+    fn popup_repositioned(&mut self, _surface: smithay::wayland::input_method::PopupSurface) {}
+
+    fn parent_geometry(
+        &self,
+        _parent: &WlSurface,
+    ) -> smithay::utils::Rectangle<i32, smithay::utils::Logical> {
+        smithay::utils::Rectangle::default()
+    }
+}
+
 impl SeatHandler for SolState {
     type KeyboardFocus = WlSurface;
     type PointerFocus = WlSurface;
@@ -298,3 +329,5 @@ delegate_xdg_shell!(SolState);
 delegate_seat!(SolState);
 delegate_data_device!(SolState);
 delegate_layer_shell!(SolState);
+delegate_text_input_manager!(SolState);
+delegate_input_method_manager!(SolState);
