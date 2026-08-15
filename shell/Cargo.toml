@@ -7,3 +7,13 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ctrlc = { version = "3", features = ["termination"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["client"] }
+anyhow = "1.0"
+
+# SOL design tokens (single source of truth for visual parameters — PRD §19).
+sol-design = { path = "../sdk/sol-design" }

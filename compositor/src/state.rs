@@ -257,14 +257,18 @@ impl WlrLayerShellHandler for SolState {
         _layer: Layer,
         namespace: String,
     ) {
-        // Track the layer surface and send an initial configure so the client
-        // knows its size. The shell provides its own geometry via the
-        // layer-shell protocol; we just need to acknowledge it exists.
         tracing::debug!(%namespace, "new layer surface");
 
-        // Default to a reasonable size if the client hasn't set one yet.
+        // Provide a default size until the client resolves its own. The shell
+        // top bar anchors to the full output width, but at global-creation
+        // time we only know a fallback. A real implementation would read the
+        // output's mode; for now give the shell a workable width.
         surface.with_pending_state(|state| {
-            state.size = Some(smithay::utils::Size::new(0, 0));
+            let size = state.size.unwrap_or_default();
+            state.size = Some(smithay::utils::Size::new(
+                if size.w > 0 { size.w } else { 800 },
+                if size.h > 0 { size.h } else { 40 },
+            ));
         });
         surface.send_configure();
     }
