@@ -83,7 +83,8 @@ later implementation.
       the first toplevel" placeholder in `main.rs`)
 - [x] Window model: window state / position / size / geometry based on
       `ToplevelSurface` (`compositor/src/window.rs`, `WindowManager`)
-- [ ] Move / resize (`xdg_toplevel` move/resize interactions)
+- [x] Move / resize (`xdg_toplevel` move/resize interactions) — interactive
+      pointer grabs in `compositor/src/grabs.rs`
 - [ ] Tiling / snapping foundation: Floating + Snap (PRD §12); Tiling optional
       (§41 #11 undecided)
 - [x] Keyboard focus switching (Alt+Tab to start); correct
