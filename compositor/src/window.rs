@@ -29,6 +29,9 @@ pub struct Window {
     pub surface: ToplevelSurface,
     pub rect: Rectangle<i32, Logical>,
     pub z_index: usize,
+    /// The workspace this window belongs to (0-indexed). Windows on the active
+    /// workspace are shown/focused; the rest are hidden (PRD §13).
+    pub workspace: usize,
 }
 
 impl Window {
@@ -45,6 +48,11 @@ pub struct WindowManager {
     /// The logical screen region available to windows (the "work area"), used
     /// by cascade placement and edge snapping (PRD §12 Floating + Snap).
     work_area: Rectangle<i32, Logical>,
+    /// The active workspace (0-indexed). `windows` whose `workspace` equals
+    /// this are visible; the rest are hidden (PRD §13).
+    active_workspace: usize,
+    /// Total number of workspaces.
+    workspace_count: usize,
 }
 
 impl Default for WindowManager {
@@ -53,8 +61,27 @@ impl Default for WindowManager {
             windows: Vec::new(),
             focused: None,
             work_area: Rectangle::from_size(Size::new(1920, 1080)),
+            active_workspace: 0,
+            workspace_count: 4,
         }
     }
+}
+
+/// A handle describing an in-progress interactive workspace transition
+/// (PRD §13 / §4.4).
+///
+/// In M1 this reserves the interface for touchpad-driven transitions — the full
+/// gesture-to-UI-progress wiring lands in Phase 4. It captures the source and
+/// destination workspace plus a `progress: 0.0..=1.0` value so callers can
+/// drive an interruptible, reversible, cancellable transition.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorkspaceTransition {
+    /// Workspace the gesture started on (the "from" state).
+    pub from: usize,
+    /// Workspace being revealed (the "to" state).
+    pub to: usize,
+    /// Normalized gesture progress in `0.0..=1.0`.
+    pub progress: f32,
 }
 
 /// The type of snap edge a window can be attached to.
@@ -78,7 +105,8 @@ fn default_window_size() -> Size<i32, Logical> {
 
 impl WindowManager {
     /// Register a freshly created toplevel surface and give it an initial
-    /// position. The new window becomes the focused, topmost window.
+    /// position. The new window becomes the focused, topmost window, and
+    /// belongs to the currently active workspace.
     pub fn new_toplevel(&mut self, surface: ToplevelSurface) {
         self.ensure_alive();
         let rect = self.next_placeholder_rect();
@@ -86,11 +114,13 @@ impl WindowManager {
             surface,
             rect,
             z_index: self.windows.len(),
+            workspace: self.active_workspace,
         });
         self.focused = Some(self.windows.len() - 1);
     }
 
-    /// Find the topmost window whose rectangle contains `pos`.
+    /// Find the topmost window belonging to the active workspace whose
+    /// rectangle contains `pos`.
     ///
     /// `pos` is in logical compositor space (scale 1.0). We iterate topmost
     /// (highest z) first, so an overlapping window wins over one beneath it.
@@ -100,9 +130,14 @@ impl WindowManager {
             .map(|w| w.wl_surface().clone())
     }
 
-    /// The toplevels in hit-test order (topmost / highest z first).
+    /// The visible (active-workspace) toplevels in hit-test order (topmost /
+    /// highest z first).
     fn hit_test_order(&self) -> impl Iterator<Item = &Window> {
-        let mut order: Vec<&Window> = self.windows.iter().collect();
+        let mut order: Vec<&Window> = self
+            .windows
+            .iter()
+            .filter(|w| w.workspace == self.active_workspace)
+            .collect();
         order.sort_by_key(|w| std::cmp::Reverse(w.z_index));
         order.into_iter()
     }
@@ -111,6 +146,7 @@ impl WindowManager {
     pub fn focused_surface(&self) -> Option<WlSurface> {
         self.focused
             .and_then(|i| self.windows.get(i))
+            .filter(|w| w.workspace == self.active_workspace)
             .map(|w| w.wl_surface().clone())
     }
 
@@ -120,6 +156,9 @@ impl WindowManager {
         let Some(idx) = self.windows.iter().position(|w| w.wl_surface() == surface) else {
             return;
         };
+        if self.windows[idx].workspace != self.active_workspace {
+            return;
+        }
         if self.focused == Some(idx) {
             return;
         }
@@ -132,14 +171,22 @@ impl WindowManager {
     /// Returns the newly focused surface's principal WlSurface, if any.
     pub fn cycle_focus(&mut self) -> Option<WlSurface> {
         self.ensure_alive();
-        if self.windows.is_empty() {
+        let visible: Vec<usize> = self
+            .windows
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| w.workspace == self.active_workspace)
+            .map(|(i, _)| i)
+            .collect();
+        if visible.is_empty() {
             self.focused = None;
             return None;
         }
         // Bring the window after the currently focused one to the front.
-        let next = match self.focused {
-            Some(f) => (f + 1) % self.windows.len(),
-            None => 0,
+        let cur = visible.iter().position(|&i| self.focused == Some(i));
+        let next = match cur {
+            Some(c) => visible[(c + 1) % visible.len()],
+            None => visible[0],
         };
         self.promote(next);
         self.focused_surface()
@@ -192,9 +239,13 @@ impl WindowManager {
         }
     }
 
-    /// The list of toplevel surfaces (for rendering), in creation order.
+    /// The list of toplevel surfaces belonging to the **active** workspace, in
+    /// creation order. Renders only these.
     pub fn toplevel_surfaces(&self) -> impl Iterator<Item = &ToplevelSurface> {
-        self.windows.iter().map(|w| &w.surface)
+        self.windows
+            .iter()
+            .filter(|w| w.workspace == self.active_workspace)
+            .map(|w| &w.surface)
     }
 
     /// Set the work area (the screen region windows can occupy). Used by
@@ -264,6 +315,84 @@ impl WindowManager {
             .unwrap_or(false)
     }
 
+    // -- Workspaces (PRD §13) -------------------------------------------------
+
+    /// The index of the currently active workspace (0-indexed).
+    #[allow(dead_code)]
+    pub fn active_workspace(&self) -> usize {
+        self.active_workspace
+    }
+
+    /// Total number of workspaces.
+    #[allow(dead_code)]
+    pub fn workspace_count(&self) -> usize {
+        self.workspace_count
+    }
+
+    /// Set the number of workspaces. If the active workspace is beyond the new
+    /// count, it is clamped. Defaults to 4.
+    #[allow(dead_code)]
+    pub fn set_workspace_count(&mut self, count: usize) {
+        assert!(count >= 1, "at least one workspace required");
+        self.workspace_count = count;
+        if self.active_workspace >= count {
+            self.active_workspace = count - 1;
+        }
+    }
+
+    /// Switch the active workspace (PRD §13). Windows on the new workspace
+    /// become visible; those on the prior workspace are hidden. Returns the
+    /// workspace index switched to.
+    #[allow(dead_code)]
+    pub fn switch_workspace(&mut self, index: usize) -> usize {
+        assert!(index < self.workspace_count, "workspace index out of range");
+        self.active_workspace = index;
+        // Focus the topmost window on the new workspace, if any.
+        let top_surface = self.hit_test_order().next().map(|w| w.surface.clone());
+        self.focused = top_surface.as_ref().and_then(|s| {
+            self.windows
+                .iter()
+                .position(|w| w.wl_surface() == s.wl_surface())
+        });
+        self.active_workspace
+    }
+
+    /// Move a window to another workspace.
+    #[allow(dead_code)]
+    pub fn move_to_workspace(&mut self, surface: &WlSurface, workspace: usize) {
+        assert!(
+            workspace < self.workspace_count,
+            "workspace index out of range"
+        );
+        if let Some(w) = self.windows.iter_mut().find(|w| w.wl_surface() == surface) {
+            w.workspace = workspace;
+        }
+        self.ensure_alive();
+    }
+
+    /// The toplevel surfaces belonging to a given workspace.
+    #[allow(dead_code)]
+    pub fn workspace_surfaces(&self, workspace: usize) -> impl Iterator<Item = &ToplevelSurface> {
+        let ws = workspace;
+        self.windows
+            .iter()
+            .filter(move |w| w.workspace == ws)
+            .map(|w| &w.surface)
+    }
+
+    /// Begin a (placeholder) interactive workspace transition. The full
+    /// gesture-to-progress wiring lands in Phase 4 (PRD §4.4); this reserves
+    /// the `WorkspaceTransition` type and the switch entry point so callers can
+    /// reference it during M1.
+    #[allow(dead_code)]
+    pub fn begin_workspace_transition(&self, from: usize, to: usize) -> WorkspaceTransition {
+        WorkspaceTransition {
+            from,
+            to,
+            progress: 0.0,
+        }
+    }
+
     /// Simple cascade placement: stagger each new window down-right so several
     /// windows stay visually distinct before any real tiling/snapping lands.
     fn next_placeholder_rect(&self) -> Rectangle<i32, Logical> {
@@ -294,5 +423,40 @@ mod tests {
         let mut wm = WindowManager::default();
         wm.set_work_area(Rectangle::from_size(Size::new(2560, 1440)));
         assert_eq!(wm.work_area().size.w, 2560);
+    }
+
+    #[test]
+    fn default_workspace_is_zero_with_four_count() {
+        let wm = WindowManager::default();
+        assert_eq!(wm.active_workspace(), 0);
+        assert_eq!(wm.workspace_count(), 4);
+    }
+
+    #[test]
+    fn resizing_workspace_count_clamps_active() {
+        let mut wm = WindowManager::default();
+        wm.switch_workspace(3);
+        wm.set_workspace_count(2);
+        assert_eq!(wm.active_workspace(), 1);
+        assert_eq!(wm.workspace_count(), 2);
+    }
+
+    #[test]
+    fn switching_to_invalid_workspace_panics() {
+        let wm = WindowManager::default();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut w = wm;
+            w.switch_workspace(5);
+        }));
+        assert!(result.is_err(), "out-of-range workspace should panic");
+    }
+
+    #[test]
+    fn transition_handle_records_from_and_to() {
+        let wm = WindowManager::default();
+        let t = wm.begin_workspace_transition(0, 1);
+        assert_eq!(t.from, 0);
+        assert_eq!(t.to, 1);
+        assert_eq!(t.progress, 0.0);
     }
 }
