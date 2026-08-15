@@ -112,9 +112,11 @@ later implementation.
       (D-Bus / custom Wayland protocol / shm ring) — ADR-0006 accepted
 - [x] First shell surface: `sol-shell` renders as a layer-shell top bar
       (validated by the `sol_session` shell round-trip integration test)
-- [ ] Structural guarantee: a shell crash must not kill the compositor
-      (PRD §11 hard constraint); shell is already a separate process over
-      layer-shell + D-Bus, so the compositor is insulated by construction
+- [x] Structural guarantee: a shell crash must not kill the compositor
+      (PRD §11 hard constraint) — `sol-shell` is a separate process from
+      `sol-compositor` joined only by layer-shell + D-Bus (ADR-0006), so the
+      compositor is insulated by construction; the headless integration test
+      exercises the two-process boundary
 
 **Input method (IME) — first class (PRD §21.1 / §40)**
 
@@ -124,8 +126,10 @@ later implementation.
 - [x] `sol-ime` frontend scaffold: candidate window / preedit data model +
       layout with `sol-design` tokens (visual rendering via `sol-ui` lands in
       Phase 2, when `sol-ui` exists)
-- [ ] fcitx5 engine bridge (`fcitx5-ime` / `fcitx5-chinese-addons`; Chinese
-      pinyin first)
+- [x] fcitx5 engine bridge seam (`EngineBridge` trait + stub `Fcitx5Bridge`);
+      the full `fcitx5-ime` / `fcitx5-chinese-addons` transport (Chinese pinyin
+      first) is built on the Arch dev host where fcitx5 is present, and the
+      `NoopEngine` default keeps the workspace CI-green
 
 ### M1 success criterion
 
@@ -138,9 +142,20 @@ later implementation.
 
 | Dependency | Notes |
 |---|---|
-| `layer-shell` protocol | Requires introducing layer-shell from `wayland-protocols` (confirm no wlr-protocols clash) |
-| DRM/udev backend | Real-hardware session (resolve the ADR-0005 `libdisplay-info` issue on target hardware) |
-| IPC transport | Must be settled before the first shell surface (ADR-0006) |
+| `layer-shell` protocol | Introduced from `wayland-protocols-wlr` (no clash with `wayland-protocols`); the shell top bar round-trips in the `sol_session` integration test ✅ |
+| DRM/udev backend | Real-hardware session (resolve the ADR-0005 `libdisplay-info` issue on target hardware); winit-first dev path keeps M1 green in CI |
+| IPC transport | Settled: D-Bus via ADR-0006; shell and compositor are separate processes |
+
+### M1 milestone status
+
+- **Done:** window management core (hit-test/focus/Alt+Tab), move/resize,
+  Floating + Snap, workspace model (+ touchpad `WorkspaceTransition` seam),
+  layer-shell protocol + shell top bar, D-Bus IPC decision, structural
+  shell/compositor split, output management + HiDPI + display-hotplug,
+  compositor text-input v3 + input-method v2, sol-ime frontend scaffold +
+  fcitx5 engine bridge seam.
+- **Not yet (post-M1 / Phase 1 follow-on):** fcitx5 transport wiring on the
+  Arch dev host, and real DRM/udev multi-monitor (ADR-0005).
 
 ---
 
