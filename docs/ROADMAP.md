@@ -102,19 +102,24 @@ later implementation.
 
 **Shell integration & IPC**
 
-- [ ] `layer-shell` protocol integration (prerequisite for the shell top bar /
+- [x] `layer-shell` protocol integration (prerequisite for the shell top bar /
       dock; a key ADR-0004 validation point)
-- [ ] **Typed IPC decision:** choose among ADR-0006's three options
-      (D-Bus / custom Wayland protocol / shm ring) and record a new ADR
-- [ ] First shell surface: `sol-shell` renders as a layer-shell top bar
+- [x] **Typed IPC decision:** D-Bus chosen among ADR-0006's three options
+      (D-Bus / custom Wayland protocol / shm ring) — ADR-0006 accepted
+- [x] First shell surface: `sol-shell` renders as a layer-shell top bar
+      (validated by the `sol_session` shell round-trip integration test)
 - [ ] Structural guarantee: a shell crash must not kill the compositor
-      (PRD §11 hard constraint)
+      (PRD §11 hard constraint); shell is already a separate process over
+      layer-shell + D-Bus, so the compositor is insulated by construction
 
 **Input method (IME) — first class (PRD §21.1 / §40)**
 
-- [ ] Compositor-side `text-input v4` + `input-method v3` protocol integration
-- [ ] `sol-ime` frontend scaffold: candidate window / preedit rendered with
-      `sol-ui` + `sol-design`
+- [x] Compositor-side `text-input v3` + `input-method v2` protocol integration
+      (note: Smithay 0.7 ships text-input v3 + input-method v2 — the newer v4 /
+      v3 staging protocols are evaluated when Smithay raises them; ADR-0007)
+- [x] `sol-ime` frontend scaffold: candidate window / preedit data model +
+      layout with `sol-design` tokens (visual rendering via `sol-ui` lands in
+      Phase 2, when `sol-ui` exists)
 - [ ] fcitx5 engine bridge (`fcitx5-ime` / `fcitx5-chinese-addons`; Chinese
       pinyin first)
 
