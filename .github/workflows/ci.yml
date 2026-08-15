@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable-2024)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt check
+        run: cargo fmt --all -- --check
+
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system libs (DBus for services, GBM/EGL for compositor)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libegl1 libgles2 libgbm1 \
+            libwayland-dev libwayland-bin \
+            libxkbcommon-dev \
+            libinput-dev libseat-dev libudev-dev \
+            mesa-common-dev
+      - name: Install Rust (stable-2024)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check (workspace)
+        run: cargo check --workspace --all-features
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libegl1 libgles2 libgbm1 \
+            libwayland-dev libwayland-bin \
+            libxkbcommon-dev \
+            libinput-dev libseat-dev libudev-dev \
+            mesa-common-dev
+      - name: Install Rust (stable-2024)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    # GUI composition needs a display; run headless CI tests in xvfb.
+    services: {}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system libs + xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libegl1 libgles2 libgbm1 \
+            libwayland-dev libwayland-bin \
+            libxkbcommon-dev \
+            libinput-dev libseat-dev libudev-dev \
+            mesa-common-dev
+      - name: Install Rust (stable-2024)
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test (workspace)
+        run: xvfb-run -a cargo test --workspace -- --nocapture
