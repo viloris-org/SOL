@@ -1,8 +1,4 @@
-use sol_design::{
-    color::Color,
-    motion::Motion,
-    spacing::Spacing,
-};
+use sol_design::{color::Color, motion::Motion, spacing::Spacing};
 
 #[test]
 fn spacing_scale_is_monotonic() {

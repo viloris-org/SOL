@@ -28,23 +28,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install system libs (DBus for services, GBM/EGL for compositor)
+      - name: Install system libs (EGL/Wayland for the compositor winit backend)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libdbus-1-dev \
-            libegl1 libgles2 libgbm1 \
+            libegl1 libgles2 libgbm1 libgl1-mesa-dri \
             libwayland-dev libwayland-bin \
             libxkbcommon-dev \
-            libinput-dev libseat-dev libudev-dev \
-            mesa-common-dev
+            xwayland xvfb
       - name: Install Rust (stable-2024)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: cargo check (workspace)
-        run: cargo check --workspace --all-features
+      # Default features only. The `udev` feature (DRM/GBM/libseat) requires a
+      # host libdisplay-info < 0.3.0 and a real seat (ADR-0005); it is
+      # exercised on hardware in Phase 1+, not in CI.
+      - name: cargo check (workspace, default features)
+        run: cargo check --workspace
 
   clippy:
     name: Clippy
@@ -55,25 +56,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libdbus-1-dev \
-            libegl1 libgles2 libgbm1 \
+            libegl1 libgles2 libgbm1 libgl1-mesa-dri \
             libwayland-dev libwayland-bin \
-            libxkbcommon-dev \
-            libinput-dev libseat-dev libudev-dev \
-            mesa-common-dev
+            libxkbcommon-dev
       - name: Install Rust (stable-2024)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-features -- -D warnings
+      - name: cargo clippy (workspace, default features)
+        run: cargo clippy --workspace -- -D warnings
 
   test:
     name: Test
     runs-on: ubuntu-latest
-    # GUI composition needs a display; run headless CI tests in xvfb.
-    services: {}
+    # The compositor's winit backend needs an X/Wayland display; run tests
+    # under xvfb so the integration suite (sol_session) can actually draw.
     steps:
       - uses: actions/checkout@v4
       - name: Install system libs + xvfb
@@ -81,11 +79,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             xvfb \
-            libegl1 libgles2 libgbm1 \
+            libegl1 libgles2 libgbm1 libgl1-mesa-dri \
             libwayland-dev libwayland-bin \
-            libxkbcommon-dev \
-            libinput-dev libseat-dev libudev-dev \
-            mesa-common-dev
+            libxkbcommon-dev
       - name: Install Rust (stable-2024)
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

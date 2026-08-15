@@ -14,17 +14,11 @@
 //! SOL_WAYLAND_SOCKET=wayland-sol cargo run -p sol-compositor --example test-client
 //! ```
 
-use std::{
-    fs::File,
-    os::fd::AsFd,
-};
+use std::{fs::File, os::fd::AsFd};
 
 use wayland_client::{
-    delegate_noop,
-    protocol::{
-        wl_buffer, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
-    },
-    Connection, Dispatch, QueueHandle,
+    Connection, Dispatch, QueueHandle, delegate_noop,
+    protocol::{wl_buffer, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface},
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
@@ -104,7 +98,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        if let wl_registry::Event::Global { name, interface, .. } = event {
+        if let wl_registry::Event::Global {
+            name, interface, ..
+        } = event
+        {
             match &interface[..] {
                 "wl_compositor" => {
                     let compositor =

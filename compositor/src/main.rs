@@ -22,33 +22,31 @@ mod state;
 
 use std::{sync::Arc, time::Instant};
 
+use ::winit::platform::pump_events::PumpStatus;
 use smithay::{
     backend::{
         input::{InputEvent, KeyboardKeyEvent},
         renderer::{
+            Color32F, Frame, Renderer,
             element::{
-                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
                 Kind,
+                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
             gles::GlesRenderer,
             utils::draw_render_elements,
-            Color32F, Frame, Renderer,
         },
         winit::{self, WinitEvent},
     },
     input::keyboard::FilterResult,
     reexports::wayland_server::{
+        Display, ListeningSocket,
         backend::{ClientData, ClientId, DisconnectReason},
         protocol::wl_surface::WlSurface,
-        Display, ListeningSocket,
     },
     utils::{Rectangle, Transform},
-    wayland::compositor::{
-        with_surface_tree_downward, SurfaceAttributes, TraversalAction,
-    },
+    wayland::compositor::{SurfaceAttributes, TraversalAction, with_surface_tree_downward},
 };
 use state::{ClientState, SolState};
-use ::winit::platform::pump_events::PumpStatus;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env() {
@@ -111,7 +109,11 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
                     // Give keyboard input somewhere to go: focus the first
                     // toplevel on any pointer motion. Real focus handling is
                     // Phase 1 window management.
-                    let focus = state.xdg_shell_state.toplevel_surfaces().first().map(|s| s.wl_surface().clone());
+                    let focus = state
+                        .xdg_shell_state
+                        .toplevel_surfaces()
+                        .first()
+                        .map(|s| s.wl_surface().clone());
                     keyboard.set_focus(&mut state, focus, 0.into());
                 }
                 _ => {}
@@ -129,12 +131,8 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
 
         // Collect the toplevel surfaces first so the borrow of `state` used
         // for rendering ends before we hand `state` to `dispatch_clients`.
-        let toplevel_surfaces: Vec<smithay::wayland::shell::xdg::ToplevelSurface> = state
-            .xdg_shell_state
-            .toplevel_surfaces()
-            .iter()
-            .cloned()
-            .collect();
+        let toplevel_surfaces: Vec<smithay::wayland::shell::xdg::ToplevelSurface> =
+            state.xdg_shell_state.toplevel_surfaces().to_vec();
 
         // Render and dispatch inside a scope so the framebuffer/renderer
         // borrows of `backend` are released before `backend.submit` below.
@@ -163,7 +161,10 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
         }
 
         for surface in &toplevel_surfaces {
-            send_frames_surface_tree(surface.wl_surface(), start_time.elapsed().as_millis() as u32);
+            send_frames_surface_tree(
+                surface.wl_surface(),
+                start_time.elapsed().as_millis() as u32,
+            );
         }
 
         // Accept any clients that connected to our socket.
