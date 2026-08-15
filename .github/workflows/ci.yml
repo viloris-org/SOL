@@ -70,15 +70,15 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    # The compositor's winit backend needs an X/Wayland display; run tests
-    # under xvfb so the integration suite (sol_session) can actually draw.
+    # The sol_session integration test drives the compositor in `--headless`
+    # mode (no GPU / no display needed). System libs are still installed so the
+    # compositor binary builds (winit/EGL dev path is the default feature set).
     steps:
       - uses: actions/checkout@v4
-      - name: Install system libs + xvfb
+      - name: Install system libs
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            xvfb \
             libegl1 libgles2 libgbm1 libgl1-mesa-dri \
             libwayland-dev libwayland-bin \
             libxkbcommon-dev
@@ -86,4 +86,4 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo test (workspace)
-        run: xvfb-run -a cargo test --workspace -- --nocapture
+        run: cargo test --workspace -- --nocapture

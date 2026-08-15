@@ -42,6 +42,10 @@ impl Session {
 
         let compositor = Command::new(compositor_bin)
             .env("SOL_WAYLAND_SOCKET", &socket)
+            // Run the compositor in headless mode: no winit window, no GL.
+            // This is the CI path — the protocol loop runs without any GPU /
+            // display, so the test is deterministic on any runner.
+            .arg("--headless")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -114,12 +118,6 @@ fn path_for_spec(tree: &PathBuf, spec: &str) -> PathBuf {
 #[test]
 #[serial]
 fn client_round_trip_against_compositor() {
-    // If the environment does not expose a display, skip (CI without a WM).
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
-        eprintln!("no display available; skipping headless-in-socket test");
-        return;
-    }
-
     let _session = Session::start();
     assert!(
         wait_for_socket(&_session.socket, Duration::from_secs(10)),

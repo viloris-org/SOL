@@ -17,34 +17,22 @@
 //! the wire protocols every client needs (`wl_compositor`, `wl_shm`,
 //! `xdg_shell`, seat, data-device) plus the render/frame-callback loop. Window
 //! management, workspaces, layer-shell (shell) and XWayland are Phase 1.
+//!
+//! A `--headless` mode runs the same protocol loop with no render backend at
+//! all (no GPU, no display). It is driven by the integration tests and by CI,
+//! which therefore do not depend on a host X/Wayland session or GL drivers.
 
 mod state;
 
 use std::{sync::Arc, time::Instant};
 
-use ::winit::platform::pump_events::PumpStatus;
-use smithay::{
-    backend::{
-        input::{InputEvent, KeyboardKeyEvent},
-        renderer::{
-            Color32F, Frame, Renderer,
-            element::{
-                Kind,
-                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
-            },
-            gles::GlesRenderer,
-            utils::draw_render_elements,
-        },
-        winit::{self, WinitEvent},
-    },
-    input::keyboard::FilterResult,
-    reexports::wayland_server::{
-        Display, ListeningSocket,
-        backend::{ClientData, ClientId, DisconnectReason},
-        protocol::wl_surface::WlSurface,
-    },
-    utils::{Rectangle, Transform},
-    wayland::compositor::{SurfaceAttributes, TraversalAction, with_surface_tree_downward},
+use smithay::reexports::wayland_server::{
+    Display, ListeningSocket,
+    backend::{ClientData, ClientId, DisconnectReason},
+    protocol::wl_surface::WlSurface,
+};
+use smithay::wayland::compositor::{
+    SurfaceAttributes, TraversalAction, with_surface_tree_downward,
 };
 use state::{ClientState, SolState};
 
@@ -62,7 +50,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .position(|a| a == "--spawn")
         .and_then(|i| std::env::args().nth(i + 1));
 
-    run_winit(spawn)?;
+    // `--headless` runs the protocol loop without a render backend; used by
+    // the integration tests and CI (no GPU / no display required).
+    let headless = std::env::args().any(|a| a == "--headless");
+
+    if headless {
+        return run_headless(spawn);
+    }
+
+    #[cfg(feature = "winit")]
+    {
+        return run_winit(spawn);
+    }
+    #[cfg(not(feature = "winit"))]
+    {
+        tracing::error!("no backend enabled; pass --headless or build with the `winit` feature");
+        std::process::exit(2);
+    }
+    #[allow(unreachable_code)]
     Ok(())
 }
 
@@ -72,7 +77,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// (default `wayland-sol`). `--spawn <client>` launches a Wayland client
 /// against that socket once listening, for quick interactive checks
 /// (e.g. `--spawn weston-terminal`).
+#[cfg(feature = "winit")]
 pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    use ::winit::platform::pump_events::PumpStatus;
+    use smithay::{
+        backend::{
+            input::{InputEvent, KeyboardKeyEvent},
+            renderer::{
+                Color32F, Frame, Renderer,
+                element::{
+                    Kind,
+                    surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+                },
+                gles::GlesRenderer,
+                utils::draw_render_elements,
+            },
+            winit::{self, WinitEvent},
+        },
+        input::keyboard::FilterResult,
+        utils::{Rectangle, Transform},
+    };
+
     let mut display: Display<SolState> = Display::new()?;
     let mut dh = display.handle();
     let mut state = SolState::new(&dh);
@@ -86,10 +111,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
     let keyboard = state.seat.add_keyboard(Default::default(), 200, 200)?;
     let start_time = Instant::now();
 
-    if let Some(bin) = spawn {
-        tracing::info!(%bin, "spawning test client");
-        std::process::Command::new(&bin).spawn().ok();
-    }
+    spawn_client(&spawn);
 
     loop {
         let status = winit.dispatch_new_events(|event| match event {
@@ -167,18 +189,33 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
             );
         }
 
-        // Accept any clients that connected to our socket.
-        while let Some(stream) = listener.accept()? {
-            tracing::debug!("accepting client");
-            let _ = dh.insert_client(stream, Arc::new(ClientState::default()))?;
-        }
-
+        accept_clients(&mut dh, &listener)?;
         display.dispatch_clients(&mut state)?;
         display.flush_clients()?;
 
         // Must dispatch + flush before swapping buffers; the swap can block.
         backend.submit(Some(&[damage]))?;
     }
+}
+
+/// Spawn a Wayland client against the listener socket, if requested.
+fn spawn_client(spawn: &Option<String>) {
+    if let Some(bin) = spawn {
+        tracing::info!(%bin, "spawning test client");
+        std::process::Command::new(bin).spawn().ok();
+    }
+}
+
+/// Accept any clients that connected to our socket.
+fn accept_clients(
+    dh: &mut smithay::reexports::wayland_server::DisplayHandle,
+    listener: &ListeningSocket,
+) -> Result<(), Box<dyn std::error::Error>> {
+    while let Some(stream) = listener.accept()? {
+        tracing::debug!("accepting client");
+        let _ = dh.insert_client(stream, Arc::new(ClientState::default()))?;
+    }
+    Ok(())
 }
 
 /// Send frame callbacks to every surface in the tree, so clients repaint.
@@ -209,5 +246,43 @@ impl ClientData for ClientState {
 
     fn disconnected(&self, client_id: ClientId, _reason: DisconnectReason) {
         tracing::debug!(?client_id, "client disconnected");
+    }
+}
+
+/// Run the compositor headless: bind the socket and service Wayland clients,
+/// with no render backend. Used by integration tests and CI.
+pub fn run_headless(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut display: Display<SolState> = Display::new()?;
+    let mut dh = display.handle();
+    let mut state = SolState::new(&dh);
+
+    let socket_name = std::env::var("SOL_WAYLAND_SOCKET").unwrap_or_else(|_| "wayland-sol".into());
+    let listener = ListeningSocket::bind(&socket_name)?;
+    tracing::info!(socket = %socket_name, "SOL compositor listening");
+
+    let start_time = Instant::now();
+
+    spawn_client(&spawn);
+
+    loop {
+        // Collect the toplevel surfaces first so the borrow of `state` used
+        // for rendering ends before we hand `state` to `dispatch_clients`.
+        let toplevel_surfaces: Vec<smithay::wayland::shell::xdg::ToplevelSurface> =
+            state.xdg_shell_state.toplevel_surfaces().to_vec();
+
+        // Send frame callbacks so committed clients can keep presenting.
+        for surface in &toplevel_surfaces {
+            send_frames_surface_tree(
+                surface.wl_surface(),
+                start_time.elapsed().as_millis() as u32,
+            );
+        }
+
+        accept_clients(&mut dh, &listener)?;
+        display.dispatch_clients(&mut state)?;
+        display.flush_clients()?;
+
+        // Busy-free pacing so headless CI doesn't spin a core at 100%.
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }

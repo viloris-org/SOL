@@ -22,17 +22,19 @@ winit = { version = "0.30", default-features = false, features = ["wayland", "x1
 [features]
 # Phase 0 default: the winit backend renders into a window on the surrounding
 # session, so the compositor builds and runs with no DRM grab, no root, and no
-# extra system libraries.
-default = [ "egl"]
+# extra system libraries. `winit` is part of the default build so the dev path
+# (and the `state.seat` it uses) stays live; `--headless` runs the same protocol
+# loop with no render backend at all.
+default = ["winit", "egl"]
 # Backends
 winit = ["smithay/backend_winit"]
 egl = ["smithay/backend_egl"]
 # Real-hardware session backend (Phase 1+). Requires compatible system
 # `libdisplay-info` (< 0.3.0), plus DRM/GBM/libinput/libseat dev packages.
 udev = ["smithay/backend_udev", "smithay/backend_libinput", "smithay/backend_drm", "smithay/backend_gbm", "smithay/backend_session_libseat", "smithay-drm-extras"]
-# Headless: no GPU or display required; meant to be driven by a test client
-# over the socket. Useful for CI.
-headless = []
+# NOTE: there is intentionally no `headless` Cargo feature. Headless mode is a
+# runtime `--headless` flag (see main.rs): the protocol loop runs with no render
+# backend, and is used by the integration tests / CI.
 
 [dev-dependencies]
 serial_test = "4.0.1"
