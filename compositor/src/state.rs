@@ -74,7 +74,6 @@ pub struct SolState {
     pub input_method_state: InputMethodManagerState,
     /// Phase 1 outputs: `wl_output` / `zxdg_output` globals + the primary
     /// output. The window manager's work area is derived from this.
-    #[allow(dead_code)]
     pub outputs: Outputs,
     pub seat: Seat<SolState>,
     /// Pointer device handle used by the interactive move/resize grabs.

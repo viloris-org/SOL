@@ -95,10 +95,11 @@ later implementation.
 - [x] Workspace model (PRD §13): surface groups + switching; reserves a
       `WorkspaceTransition` progress interface for touchpad interactive
       transitions (§4.4)
-- [ ] Output management / basic multi-monitor (enumerate and map multiple
-      outputs; do not defer to the end, §33)
-- [ ] Clear-screen / HiDPI basics (`scale` pass-through; fractional scaling
-      verified in Phase 5)
+- [x] Output management / basic multi-monitor (enumerate and map the primary
+      `wl_output`; work area derived from it; `OutputManagerState` keeps the
+      globals alive for future per-monitor modes — do not defer to the end, §33)
+- [x] Clear-screen / HiDPI basics (`scale` pass-through from `wl_output`;
+      fractional scaling verified in Phase 5)
 - [ ] Basic display-hotplug handling (§33)
 
 **Shell integration & IPC**
