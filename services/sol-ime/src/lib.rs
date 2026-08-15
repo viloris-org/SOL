@@ -17,6 +17,7 @@
 //! connect as an input-method client over that global.
 
 pub mod candidate;
+pub mod engine;
 pub mod preedit;
 
 use sol_design::color::Color;

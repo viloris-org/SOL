@@ -42,7 +42,7 @@ pub const LABEL_GAP: f32 = 4.0;
 /// Vertical gap between candidate windows in the list.
 pub const ROW_PADDING_Y: f32 = 4.0;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CandidateWindow {
     /// The full candidate list from the engine (pinyin entries, etc.).
     pub candidates: Vec<String>,
