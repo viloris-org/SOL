@@ -85,9 +85,17 @@ fn wait_for_socket(socket: &str, timeout: Duration) -> bool {
 }
 
 fn build_bin(spec: &str) -> PathBuf {
-    // `cargo build` the target first so we can execute it directly.
+    // `cargo build` both binaries first so we can execute them directly.
+    // The workspace layout means a single `--all` build covers all crates.
     let status = Command::new(env!("CARGO"))
-        .args(["build", "--quiet", "-p", "sol-compositor"])
+        .args([
+            "build",
+            "--quiet",
+            "-p",
+            "sol-compositor",
+            "-p",
+            "sol-shell",
+        ])
         .status()
         .expect("cargo build");
     assert!(status.success(), "cargo build failed for {spec}");
@@ -144,5 +152,42 @@ fn client_round_trip_against_compositor() {
     assert!(
         stderr.contains("success") || stdout.contains("success"),
         "test-client did not report a successful round-trip"
+    );
+}
+
+/// Prove the layer-shell top bar round-trip (Roadmap Phase 1 M1).
+///
+/// The compositor advertises `zwlr_layer_shell_v1`; the shell binds it, creates
+/// a layer surface, receives a Configure, renders a frame, and exits 0 in
+/// `--once` mode. This validates that the shell top bar and the compositor
+/// coexist over the layer-shell protocol without crashing either side.
+#[test]
+#[serial]
+fn shell_top_bar_round_trip_against_compositor() {
+    let _session = Session::start();
+    assert!(
+        wait_for_socket(&_session.socket, Duration::from_secs(10)),
+        "compositor socket never appeared"
+    );
+
+    let shell_bin = build_bin("sol-shell");
+    let output = Command::new(shell_bin)
+        .env("WAYLAND_DISPLAY", &_session.socket)
+        .arg("--once")
+        .output()
+        .expect("run sol-shell --once");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!("shell stdout: {stdout}");
+    eprintln!("shell stderr: {stderr}");
+    assert!(
+        output.status.success(),
+        "sol-shell --once failed with {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("round-trip OK") || stderr.contains("round-trip OK"),
+        "sol-shell did not report a successful layer-surface round-trip"
     );
 }

@@ -70,9 +70,12 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    # The sol_session integration test drives the compositor in `--headless`
-    # mode (no GPU / no display needed). System libs are still installed so the
-    # compositor binary builds (winit/EGL dev path is the default feature set).
+    # The sol_session integration tests drive the compositor in `--headless`
+    # mode (no GPU / no display needed) and exercise two end-to-end paths:
+    #   1. the Phase 0 reference client (`test-client`),
+    #   2. the Phase 1 M1 layer-shell top bar (`sol-shell --once`),
+    # asserting the layer-shell configure round-trip. System libs are still
+    # installed so the binaries build (winit/EGL dev path is the default set).
     steps:
       - uses: actions/checkout@v4
       - name: Install system libs

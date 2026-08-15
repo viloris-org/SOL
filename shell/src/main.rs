@@ -59,6 +59,8 @@ pub struct Shell {
     pool_file: File,
     /// The wl_shm_pool proxy that owns the fd exposed to the compositor.
     pool: WlShmPool,
+    /// Queue handle for creating new buffer objects against this event queue.
+    qh: QueueHandle<Self>,
     /// Current render dimensions.
     width: i32,
     height: i32,
@@ -222,6 +224,7 @@ impl Shell {
             layer_surface,
             pool_file,
             pool,
+            qh: qh.clone(),
             width: 480,
             height: BAR_HEIGHT,
             configured: false,
@@ -261,18 +264,12 @@ impl Shell {
             self.height,
             stride,
             wl_shm::Format::Argb8888,
-            &self.event_queue(),
+            &self.qh,
             (),
         );
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface.commit();
         self.committed = true;
-    }
-
-    /// Acquire a `QueueHandle` for creating new buffer objects.
-    fn event_queue(&self) -> QueueHandle<Self> {
-        // We store the queue handle at construction; expose it here.
-        todo!()
     }
 }
 
@@ -283,9 +280,20 @@ fn alloc_shm_pool(
     width: i32,
     height: i32,
 ) -> (File, WlShmPool) {
-    let file = std::fs::File::create("/tmp/sol-shell-buffer").expect("create shm backing file");
-    let fd = file.as_fd();
     let size = width * height * 4;
+    let path = std::path::PathBuf::from("/tmp/sol-shell-buffer");
+    // Open create/truncate with the requested size, then hand the fd to the
+    // compositor for mmap. The file must already be sized or `wl_shm` mmap
+    // will fail.
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .read(true)
+        .open(&path)
+        .expect("create shm backing file");
+    let _ = file.set_len(size as u64);
+    let fd = file.as_fd();
     let pool = shm.create_pool(fd, size, qh, ());
     (file, pool)
 }
