@@ -1769,6 +1769,10 @@ version = "0.1.0"
 [[package]]
 name = "sol-ime"
 version = "0.1.0"
+dependencies = [
+ "sol-design",
+ "tracing",
+]
 
 [[package]]
 name = "sol-notificationd"

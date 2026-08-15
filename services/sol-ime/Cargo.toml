@@ -7,3 +7,11 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+tracing = { version = "0.1", features = ["log"] }
+
+# SOL design tokens (single source of truth for all visual parameters — PRD §19).
+# The IME candidate window / preedit must be themed with sol-design tokens so
+# it is unmistakably SOL (PRD §21.1 / ADR-0007); no hand-written hex/px here.
+sol-design = { path = "../../sdk/sol-design" }
+
+[dev-dependencies]
