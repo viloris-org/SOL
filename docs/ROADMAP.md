@@ -390,6 +390,11 @@ SOL Applications → Third-party Applications
 
 ## Revision history
 
-- **2026-08-15** — First version of the roadmap: based on the seven PRD §38
+- **2026-08-15** — Phase 1 M1 shell + IME milestones implemented and validated
+  via CI. ADR-0006 accepts D-Bus for compositor↔shell IPC. layer-shell +
+  text-input v3 + input-method v2 globals added to the compositor; sol-shell
+  renders a top-bar layer surface and round-trips via a headless integration
+  test; sol-ime frontend scaffold models the candidate window / preedit with
+  sol-design tokens. Initial roadmap published based on the seven PRD §38
   phases, mapped against the current repository state and settled ADRs. Each
   Phase's section is refined as it closes.
