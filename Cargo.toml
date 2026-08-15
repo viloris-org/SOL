@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = [
+    "compositor",
+    "shell",
+    "sdk/sol-design",
+    "sdk/sol-ui",
+    "sdk/sol-app",
+    "sdk/sol-graphics",
+    "sdk/sol-animation",
+    "sdk/sol-system",
+    "services/sol-settingsd",
+    "services/sol-notificationd",
+    "services/sol-portal",
+    "services/sol-ime",
+    "apps/sol-files",
+    "apps/sol-terminal",
+    "apps/sol-settings",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://example.invalid/sol"
+homepage = "https://example.invalid/sol"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

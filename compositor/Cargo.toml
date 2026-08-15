@@ -1,0 +1,39 @@
+[package]
+name = "sol-compositor"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+smithay = { version = "0.7", default-features = false, features = ["backend_winit", "renderer_gl", "wayland_frontend"] }
+smithay-drm-extras = { version = "0.1", optional = true }
+
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+xkbcommon = "0.8"
+xcursor = "0.3"
+wayland-server = "0.31"
+wayland-protocols = "0.32"
+winit = { version = "0.30", default-features = false, features = ["wayland", "x11", "rwh_06"] }
+
+[features]
+# Phase 0 default: the winit backend renders into a window on the surrounding
+# session, so the compositor builds and runs with no DRM grab, no root, and no
+# extra system libraries.
+default = [ "egl"]
+# Backends
+winit = ["smithay/backend_winit"]
+egl = ["smithay/backend_egl"]
+# Real-hardware session backend (Phase 1+). Requires compatible system
+# `libdisplay-info` (< 0.3.0), plus DRM/GBM/libinput/libseat dev packages.
+udev = ["smithay/backend_udev", "smithay/backend_libinput", "smithay/backend_drm", "smithay/backend_gbm", "smithay/backend_session_libseat", "smithay-drm-extras"]
+# Headless: no GPU or display required; meant to be driven by a test client
+# over the socket. Useful for CI.
+headless = []
+
+[dev-dependencies]
+serial_test = "4.0.1"
+wayland-client = "0.31.15"

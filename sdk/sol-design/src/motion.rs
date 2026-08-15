@@ -1,0 +1,58 @@
+//! Motion tokens.
+//!
+//! Motion is a first-class interaction primitive (PRD §4.4 / §19), not
+//! decoration. Animations are named by semantic intent, so the *same* action
+//! across the shell and apps shares duration + curve from this single
+//! table — preventing the "one off, two off" micro-timing drift that reads
+//! as inconsistent.
+
+/// Semantic motion intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motion {
+    /// Instant / near-zero, only to preserve causality.
+    None,
+    /// Hover / state flips, immediate feedback.
+    Fast,
+    /// Panel, menu, popover appearance.
+    Panel,
+    /// Window move / resize / snap.
+    Window,
+    /// Workspace / overview paging.
+    Workspace,
+}
+
+/// Duration + spring tuning emitted to the animation runtime.
+#[derive(Debug, Clone, Copy)]
+pub struct MotionSpec {
+    /// Milliseconds for the settling duration (0 for `None`/`Fast`).
+    pub duration_ms: u32,
+    /// Natural frequency / damping for spring; `None` => ease curve.
+    pub spring: Option<(f32, f32)>,
+}
+
+impl Motion {
+    pub fn spec(self) -> MotionSpec {
+        match self {
+            Motion::None => MotionSpec {
+                duration_ms: 0,
+                spring: None,
+            },
+            Motion::Fast => MotionSpec {
+                duration_ms: 90,
+                spring: None,
+            },
+            Motion::Panel => MotionSpec {
+                duration_ms: 170,
+                spring: None,
+            },
+            Motion::Window => MotionSpec {
+                duration_ms: 260,
+                spring: Some((20.0, 0.85)),
+            },
+            Motion::Workspace => MotionSpec {
+                duration_ms: 340,
+                spring: Some((16.0, 0.82)),
+            },
+        }
+    }
+}
