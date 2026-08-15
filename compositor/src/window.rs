@@ -19,7 +19,7 @@
 
 use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Rectangle, Size},
+    utils::{Logical, Point, Rectangle, Size},
     wayland::shell::xdg::ToplevelSurface,
 };
 
@@ -142,6 +142,28 @@ impl WindowManager {
     /// A window's rectangle may be resized by the client (a configure ack).
     /// Keep the position, update the size.
     pub fn update_size(&mut self, surface: &WlSurface, size: Size<i32, Logical>) {
+        if let Some(w) = self.windows.iter_mut().find(|w| w.wl_surface() == surface) {
+            w.rect.size = size;
+        }
+    }
+
+    /// The current geometry (rectangle) of a window, if known.
+    pub fn surface_geometry(&self, surface: &WlSurface) -> Option<Rectangle<i32, Logical>> {
+        self.windows
+            .iter()
+            .find(|w| w.wl_surface() == surface)
+            .map(|w| w.rect)
+    }
+
+    /// Move a window's top-left to `loc` (interactive move).
+    pub fn move_window(&mut self, surface: &WlSurface, loc: Point<i32, Logical>) {
+        if let Some(w) = self.windows.iter_mut().find(|w| w.wl_surface() == surface) {
+            w.rect.loc = loc;
+        }
+    }
+
+    /// Resize a window to `size` (interactive resize); position is kept.
+    pub fn resize_window(&mut self, surface: &WlSurface, size: Size<i32, Logical>) {
         if let Some(w) = self.windows.iter_mut().find(|w| w.wl_surface() == surface) {
             w.rect.size = size;
         }

@@ -15,11 +15,12 @@ use std::os::unix::io::OwnedFd;
 use smithay::{
     delegate_compositor, delegate_data_device, delegate_seat, delegate_shm, delegate_xdg_shell,
     input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
-    reexports::wayland_server::{Client, DisplayHandle, protocol::wl_seat},
+    reexports::wayland_server::{Client, DisplayHandle, Resource, protocol::wl_seat},
     utils::Serial,
     wayland::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState},
+        seat::WaylandFocus,
         selection::{
             SelectionHandler,
             data_device::{
@@ -52,6 +53,8 @@ pub struct SolState {
     pub seat_state: SeatState<SolState>,
     pub data_device_state: DataDeviceState,
     pub seat: Seat<SolState>,
+    /// Pointer device handle used by the interactive move/resize grabs.
+    pub pointer: smithay::input::pointer::PointerHandle<SolState>,
     /// Phase 1 window management: layout, hit-testing and focus.
     pub window_manager: window::WindowManager,
 }
@@ -61,7 +64,8 @@ impl SolState {
         let compositor_state = CompositorState::new::<SolState>(display);
         let shm_state = ShmState::new::<SolState>(display, vec![]);
         let mut seat_state = SeatState::new();
-        let seat = seat_state.new_wl_seat(display, "sol");
+        let mut seat = seat_state.new_wl_seat(display, "sol");
+        let pointer = seat.add_pointer();
 
         SolState {
             compositor_state,
@@ -70,6 +74,7 @@ impl SolState {
             seat_state,
             data_device_state: DataDeviceState::new::<SolState>(display),
             seat,
+            pointer,
             window_manager: window::WindowManager::default(),
         }
     }
@@ -136,6 +141,83 @@ impl XdgShellHandler for SolState {
         _positioner: PositionerState,
         _token: u32,
     ) {
+    }
+
+    /// A client requested an interactive move (`xdg_toplevel.move`).
+    fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial) {
+        // Clone the handle so we can mutate `self` while it is in scope.
+        let pointer = self.pointer.clone();
+        if !pointer.has_grab(serial) {
+            return;
+        }
+        let start_data = pointer.grab_start_data().unwrap();
+
+        // Only honor the move if the grab's focus belongs to this surface.
+        let same_client = start_data
+            .focus
+            .as_ref()
+            .map(|(s, _)| s.same_client_as(&surface.wl_surface().id()))
+            .unwrap_or(false);
+        if !same_client {
+            return;
+        }
+
+        // Offset between the pointer and the window's top-left at grab start.
+        let rect = match self
+            .window_manager
+            .surface_geometry(&surface.wl_surface().clone())
+        {
+            Some(r) => r,
+            None => return,
+        };
+        let offset = smithay::utils::Point::from((
+            start_data.location.x as i32 - rect.loc.x,
+            start_data.location.y as i32 - rect.loc.y,
+        ));
+
+        let grab =
+            crate::grabs::MoveSurfaceGrab::new(start_data, surface.wl_surface().clone(), offset);
+        pointer.set_grab(self, grab, serial, smithay::input::pointer::Focus::Clear);
+    }
+
+    /// A client requested an interactive resize (`xdg_toplevel.resize`).
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let pointer = self.pointer.clone();
+        if !pointer.has_grab(serial) {
+            return;
+        }
+        let start_data = pointer.grab_start_data().unwrap();
+
+        let same_client = start_data
+            .focus
+            .as_ref()
+            .map(|(s, _)| s.same_client_as(&surface.wl_surface().id()))
+            .unwrap_or(false);
+        if !same_client {
+            return;
+        }
+
+        let rect = match self
+            .window_manager
+            .surface_geometry(&surface.wl_surface().clone())
+        {
+            Some(r) => r,
+            None => return,
+        };
+
+        let grab = crate::grabs::ResizeSurfaceGrab::new(
+            start_data,
+            surface.wl_surface().clone(),
+            edges,
+            rect,
+        );
+        pointer.set_grab(self, grab, serial, smithay::input::pointer::Focus::Clear);
     }
 }
 

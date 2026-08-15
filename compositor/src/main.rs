@@ -22,6 +22,7 @@
 //! all (no GPU, no display). It is driven by the integration tests and by CI,
 //! which therefore do not depend on a host X/Wayland session or GL drivers.
 
+mod grabs;
 mod state;
 mod window;
 
@@ -160,6 +161,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
                     serial += 1;
                 }
                 InputEvent::PointerMotionAbsolute { event } => {
+                    use smithay::backend::input::Event;
                     // Real hit-testing: find the topmost window under the
                     // pointer and give keyboard focus to it, raising it in the
                     // z-order (Phase 1, replacing the Phase 0 "focus the first
@@ -170,7 +172,36 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
                     if let Some(ref surf) = focus {
                         state.window_manager.set_focus(surf);
                     }
-                    keyboard.set_focus(&mut state, focus, serial.into());
+                    keyboard.set_focus(&mut state, focus.clone(), serial.into());
+                    serial += 1;
+
+                    // Route the motion to the pointer handle too, so active
+                    // move/resize grabs receive it and update geometry.
+                    let motion = smithay::input::pointer::MotionEvent {
+                        location: pos,
+                        serial: serial.into(),
+                        time: event.time_msec(),
+                    };
+                    state
+                        .pointer
+                        .clone()
+                        .motion(&mut state, focus.map(|s| (s, pos)), &motion);
+                }
+                InputEvent::PointerButton { event } => {
+                    use smithay::{
+                        backend::input::{Event, PointerButtonEvent},
+                        input::pointer::ButtonEvent,
+                        utils::Serial,
+                    };
+                    let button = event.button_code();
+                    let btn_serial = Serial::from(serial);
+                    let btn_event = ButtonEvent {
+                        serial: btn_serial,
+                        time: event.time_msec(),
+                        button,
+                        state: event.state(),
+                    };
+                    state.pointer.clone().button(&mut state, &btn_event);
                     serial += 1;
                 }
                 _ => {}
