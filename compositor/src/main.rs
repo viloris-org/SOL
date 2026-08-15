@@ -23,6 +23,7 @@
 //! which therefore do not depend on a host X/Wayland session or GL drivers.
 
 mod state;
+mod window;
 
 use std::{sync::Arc, time::Instant};
 
@@ -82,7 +83,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
     use ::winit::platform::pump_events::PumpStatus;
     use smithay::{
         backend::{
-            input::{InputEvent, KeyboardKeyEvent},
+            input::{AbsolutePositionEvent, InputEvent, KeyboardKeyEvent},
             renderer::{
                 Color32F, Frame, Renderer,
                 element::{
@@ -94,7 +95,6 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
             },
             winit::{self, WinitEvent},
         },
-        input::keyboard::FilterResult,
         utils::{Rectangle, Transform},
     };
 
@@ -109,6 +109,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
     let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
 
     let keyboard = state.seat.add_keyboard(Default::default(), 200, 200)?;
+    let mut serial: u32 = 0;
     let start_time = Instant::now();
 
     spawn_client(&spawn);
@@ -118,25 +119,59 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
             WinitEvent::Resized { .. } => {}
             WinitEvent::Input(event) => match event {
                 InputEvent::Keyboard { event } => {
-                    keyboard.input::<(), _>(
+                    use smithay::{
+                        backend::input::{Event, KeyState},
+                        input::keyboard::{FilterResult, Keysym, keysyms},
+                        utils::Serial,
+                    };
+                    let kbd_serial = Serial::from(serial);
+                    let kbd_time = event.time_msec();
+                    let kbd_key = event.key_code();
+                    let kbd_state = event.state();
+
+                    // Intercept Alt+Tab (and Alt+Shift+Tab) to cycle keyboard
+                    // focus between windows (Phase 1 window management) instead
+                    // of forwarding the key to the focused client.
+                    let tab = Keysym::from(keysyms::KEY_Tab);
+                    let shift_tab = Keysym::from(keysyms::KEY_ISO_Left_Tab);
+                    let action = keyboard.input::<(), _>(
                         &mut state,
-                        event.key_code(),
-                        event.state(),
-                        0.into(),
-                        0,
-                        |_, _, _| FilterResult::Forward,
+                        kbd_key,
+                        kbd_state,
+                        kbd_serial,
+                        kbd_time,
+                        |_, modifiers, handle| {
+                            let sym = handle.modified_sym();
+                            let tab_cycle = (sym == tab || sym == shift_tab) && modifiers.alt;
+                            if tab_cycle && kbd_state == KeyState::Pressed {
+                                FilterResult::Intercept(())
+                            } else {
+                                FilterResult::Forward
+                            }
+                        },
                     );
+
+                    if action.is_some() {
+                        // Alt+Tab: raise & focus the next window; deliver the
+                        // updated keyboard focus to that surface.
+                        let surface = state.window_manager.cycle_focus();
+                        keyboard.set_focus(&mut state, surface, kbd_serial);
+                    }
+                    serial += 1;
                 }
-                InputEvent::PointerMotionAbsolute { .. } => {
-                    // Give keyboard input somewhere to go: focus the first
-                    // toplevel on any pointer motion. Real focus handling is
-                    // Phase 1 window management.
-                    let focus = state
-                        .xdg_shell_state
-                        .toplevel_surfaces()
-                        .first()
-                        .map(|s| s.wl_surface().clone());
-                    keyboard.set_focus(&mut state, focus, 0.into());
+                InputEvent::PointerMotionAbsolute { event } => {
+                    // Real hit-testing: find the topmost window under the
+                    // pointer and give keyboard focus to it, raising it in the
+                    // z-order (Phase 1, replacing the Phase 0 "focus the first
+                    // toplevel" placeholder).
+                    let physical_size = backend.window_size();
+                    let pos = event.position_transformed(physical_size.to_logical(1));
+                    let focus = state.window_manager.surface_under(pos);
+                    if let Some(ref surf) = focus {
+                        state.window_manager.set_focus(surf);
+                    }
+                    keyboard.set_focus(&mut state, focus, serial.into());
+                    serial += 1;
                 }
                 _ => {}
             },
@@ -153,8 +188,10 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
 
         // Collect the toplevel surfaces first so the borrow of `state` used
         // for rendering ends before we hand `state` to `dispatch_clients`.
+        // The window manager is the single source of truth for open windows
+        // (Phase 1), superseding `xdg_shell_state.toplevel_surfaces()`.
         let toplevel_surfaces: Vec<smithay::wayland::shell::xdg::ToplevelSurface> =
-            state.xdg_shell_state.toplevel_surfaces().to_vec();
+            state.window_manager.toplevel_surfaces().cloned().collect();
 
         // Render and dispatch inside a scope so the framebuffer/renderer
         // borrows of `backend` are released before `backend.submit` below.
@@ -267,8 +304,10 @@ pub fn run_headless(spawn: Option<String>) -> Result<(), Box<dyn std::error::Err
     loop {
         // Collect the toplevel surfaces first so the borrow of `state` used
         // for rendering ends before we hand `state` to `dispatch_clients`.
+        // The window manager is the single source of truth for open windows
+        // (Phase 1), superseding `xdg_shell_state.toplevel_surfaces()`.
         let toplevel_surfaces: Vec<smithay::wayland::shell::xdg::ToplevelSurface> =
-            state.xdg_shell_state.toplevel_surfaces().to_vec();
+            state.window_manager.toplevel_surfaces().cloned().collect();
 
         // Send frame callbacks so committed clients can keep presenting.
         for surface in &toplevel_surfaces {

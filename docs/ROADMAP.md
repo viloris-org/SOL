@@ -79,14 +79,14 @@ later implementation.
 
 **Window management & scene (WM & Scene)**
 
-- [ ] Real hit-testing and pointer focus (replace the current "motion focuses
+- [x] Real hit-testing and pointer focus (replaces the Phase 0 "motion focuses
       the first toplevel" placeholder in `main.rs`)
-- [ ] Window model: window state / position / size / geometry based on
-      `ToplevelSurface`
+- [x] Window model: window state / position / size / geometry based on
+      `ToplevelSurface` (`compositor/src/window.rs`, `WindowManager`)
 - [ ] Move / resize (`xdg_toplevel` move/resize interactions)
 - [ ] Tiling / snapping foundation: Floating + Snap (PRD §12); Tiling optional
       (§41 #11 undecided)
-- [ ] Keyboard focus switching (Alt+Tab to start); correct
+- [x] Keyboard focus switching (Alt+Tab to start); correct
       `Activated`/`Unactivated` delivery
 
 **Workspace & Output**

@@ -27,13 +27,16 @@ use smithay::{
             },
         },
         shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+            Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler,
+            XdgShellState,
         },
         shm::{ShmHandler, ShmState},
     },
 };
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
 use wayland_server::protocol::wl_surface::WlSurface;
+
+use crate::window;
 
 /// Client-level state attached to each connected Wayland client.
 #[derive(Default)]
@@ -49,6 +52,8 @@ pub struct SolState {
     pub seat_state: SeatState<SolState>,
     pub data_device_state: DataDeviceState,
     pub seat: Seat<SolState>,
+    /// Phase 1 window management: layout, hit-testing and focus.
+    pub window_manager: window::WindowManager,
 }
 
 impl SolState {
@@ -65,6 +70,7 @@ impl SolState {
             seat_state,
             data_device_state: DataDeviceState::new::<SolState>(display),
             seat,
+            window_manager: window::WindowManager::default(),
         }
     }
 }
@@ -102,10 +108,24 @@ impl XdgShellHandler for SolState {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        // Track the window and set it as the focused, activated toplevel.
+        self.window_manager.new_toplevel(surface.clone());
         surface.with_pending_state(|state| {
             state.states.set(xdg_toplevel::State::Activated);
         });
         surface.send_configure();
+    }
+
+    /// A client acknowledged a configure serial; sync the window's size with
+    /// what the client actually committed to.
+    fn ack_configure(&mut self, surface: WlSurface, configure: Configure) {
+        let size = match configure {
+            Configure::Toplevel(config) => config.state.size,
+            Configure::Popup(_) => None,
+        };
+        if let Some(size) = size {
+            self.window_manager.update_size(&surface, size);
+        }
     }
 
     fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {}
