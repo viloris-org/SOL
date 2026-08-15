@@ -100,7 +100,9 @@ later implementation.
       globals alive for future per-monitor modes — do not defer to the end, §33)
 - [x] Clear-screen / HiDPI basics (`scale` pass-through from `wl_output`;
       fractional scaling verified in Phase 5)
-- [ ] Basic display-hotplug handling (§33)
+- [x] Basic display-hotplug handling (§33): `add_output` / `remove_output`
+      register/retire a `wl_output` global on connect/disconnect; the
+      architecture supports per-monitor modes without a rewrite
 
 **Shell integration & IPC**
 
