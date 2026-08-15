@@ -85,15 +85,16 @@ later implementation.
       `ToplevelSurface` (`compositor/src/window.rs`, `WindowManager`)
 - [x] Move / resize (`xdg_toplevel` move/resize interactions) — interactive
       pointer grabs in `compositor/src/grabs.rs`
-- [ ] Tiling / snapping foundation: Floating + Snap (PRD §12); Tiling optional
+- [x] Tiling / snapping foundation: Floating + Snap (PRD §12); Tiling optional
       (§41 #11 undecided)
 - [x] Keyboard focus switching (Alt+Tab to start); correct
       `Activated`/`Unactivated` delivery
 
 **Workspace & Output**
 
-- [ ] Workspace model (PRD §13): surface groups + switching; reserve a
-      progress interface for touchpad interactive transitions (§4.4)
+- [x] Workspace model (PRD §13): surface groups + switching; reserves a
+      `WorkspaceTransition` progress interface for touchpad interactive
+      transitions (§4.4)
 - [ ] Output management / basic multi-monitor (enumerate and map multiple
       outputs; do not defer to the end, §33)
 - [ ] Clear-screen / HiDPI basics (`scale` pass-through; fractional scaling
