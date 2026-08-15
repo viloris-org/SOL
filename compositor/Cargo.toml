@@ -17,6 +17,9 @@ xkbcommon = "0.8"
 xcursor = "0.3"
 wayland-server = "0.31"
 wayland-protocols = "0.32"
+# WLR layer-shell protocol (used by the shell top bar / dock) via Smithay's
+# wlr-layer-shell integration (PRD §11 / Phase 1 M1).
+wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["server"] }
 winit = { version = "0.30", default-features = false, features = ["wayland", "x11", "rwh_06"] }
 
 [features]

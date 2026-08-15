@@ -13,7 +13,8 @@
 use std::os::unix::io::OwnedFd;
 
 use smithay::{
-    delegate_compositor, delegate_data_device, delegate_seat, delegate_shm, delegate_xdg_shell,
+    delegate_compositor, delegate_data_device, delegate_layer_shell, delegate_seat, delegate_shm,
+    delegate_xdg_shell,
     input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
     reexports::wayland_server::{Client, DisplayHandle, Resource, protocol::wl_seat},
     utils::Serial,
@@ -27,15 +28,21 @@ use smithay::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
             },
         },
-        shell::xdg::{
-            Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler,
-            XdgShellState,
+        shell::{
+            wlr_layer::{
+                Layer, LayerSurface as WlrLayerSurface, LayerSurfaceConfigure,
+                WlrLayerShellHandler, WlrLayerShellState,
+            },
+            xdg::{
+                Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler,
+                XdgShellState,
+            },
         },
         shm::{ShmHandler, ShmState},
     },
 };
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
-use wayland_server::protocol::wl_surface::WlSurface;
+use wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 
 use crate::window;
 
@@ -52,6 +59,7 @@ pub struct SolState {
     pub shm_state: ShmState,
     pub seat_state: SeatState<SolState>,
     pub data_device_state: DataDeviceState,
+    pub layer_shell_state: WlrLayerShellState,
     pub seat: Seat<SolState>,
     /// Pointer device handle used by the interactive move/resize grabs.
     pub pointer: smithay::input::pointer::PointerHandle<SolState>,
@@ -73,6 +81,7 @@ impl SolState {
             shm_state,
             seat_state,
             data_device_state: DataDeviceState::new::<SolState>(display),
+            layer_shell_state: WlrLayerShellState::new::<SolState>(display),
             seat,
             pointer,
             window_manager: window::WindowManager::default(),
@@ -236,6 +245,35 @@ impl ServerDndGrabHandler for SolState {
     fn send(&mut self, _mime_type: String, _fd: OwnedFd, _seat: Seat<Self>) {}
 }
 
+impl WlrLayerShellHandler for SolState {
+    fn shell_state(&mut self) -> &mut WlrLayerShellState {
+        &mut self.layer_shell_state
+    }
+
+    fn new_layer_surface(
+        &mut self,
+        surface: WlrLayerSurface,
+        _output: Option<WlOutput>,
+        _layer: Layer,
+        namespace: String,
+    ) {
+        // Track the layer surface and send an initial configure so the client
+        // knows its size. The shell provides its own geometry via the
+        // layer-shell protocol; we just need to acknowledge it exists.
+        tracing::debug!(%namespace, "new layer surface");
+
+        // Default to a reasonable size if the client hasn't set one yet.
+        surface.with_pending_state(|state| {
+            state.size = Some(smithay::utils::Size::new(0, 0));
+        });
+        surface.send_configure();
+    }
+
+    fn ack_configure(&mut self, _surface: WlSurface, _configure: LayerSurfaceConfigure) {
+        // Acked; nothing to do — the shell manages its own surface content.
+    }
+}
+
 impl SeatHandler for SolState {
     type KeyboardFocus = WlSurface;
     type PointerFocus = WlSurface;
@@ -255,3 +293,4 @@ delegate_shm!(SolState);
 delegate_xdg_shell!(SolState);
 delegate_seat!(SolState);
 delegate_data_device!(SolState);
+delegate_layer_shell!(SolState);
