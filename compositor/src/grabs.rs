@@ -60,9 +60,30 @@ impl PointerGrab<SolState> for MoveSurfaceGrab {
             pointer.x as i32 - self.offset.x,
             pointer.y as i32 - self.offset.y,
         ));
-        state
-            .window_manager
-            .move_window(&self.surface, new_top_left);
+
+        // Drag-to-snap (PRD §12 Floating + Snap): when the pointer reaches an
+        // edge of the work area, snap the window to that layout. This is
+        // interruptible — the user can keep dragging or drop to commit.
+        let area = state.window_manager.work_area();
+        const SNAP_THRESHOLD: i32 = 12;
+        const TOP_MAXIMIZE_THRESHOLD: i32 = 8;
+        use crate::window::SnapEdge;
+        let wm = &mut state.window_manager;
+        if new_top_left.x <= area.loc.x + SNAP_THRESHOLD {
+            wm.snap(&self.surface, SnapEdge::Left);
+        } else if new_top_left.x
+            + wm.surface_geometry(&self.surface)
+                .map(|r| r.size.w)
+                .unwrap_or(0)
+            >= area.loc.x + area.size.w - SNAP_THRESHOLD
+        {
+            wm.snap(&self.surface, SnapEdge::Right);
+        } else if new_top_left.y <= area.loc.y + TOP_MAXIMIZE_THRESHOLD {
+            wm.snap(&self.surface, SnapEdge::Maximized);
+        } else {
+            // Not near an edge: follow the pointer freely.
+            wm.move_window(&self.surface, new_top_left);
+        }
 
         // During an interactive move we don't want the pointer to grab focus on
         // the moved window's interactive widgets; forward a neutral None focus.

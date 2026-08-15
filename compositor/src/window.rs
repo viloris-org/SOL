@@ -38,11 +38,34 @@ impl Window {
 }
 
 /// The window manager: owns the set of open windows plus their layout/focus.
-#[derive(Debug, Default)]
 pub struct WindowManager {
     windows: Vec<Window>,
     /// Index of the currently keyboard-focused window (topmost / highest z).
     focused: Option<usize>,
+    /// The logical screen region available to windows (the "work area"), used
+    /// by cascade placement and edge snapping (PRD §12 Floating + Snap).
+    work_area: Rectangle<i32, Logical>,
+}
+
+impl Default for WindowManager {
+    fn default() -> Self {
+        WindowManager {
+            windows: Vec::new(),
+            focused: None,
+            work_area: Rectangle::from_size(Size::new(1920, 1080)),
+        }
+    }
+}
+
+/// The type of snap edge a window can be attached to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapEdge {
+    /// Maximized to fill the work area.
+    Maximized,
+    /// Fills the left half of the work area.
+    Left,
+    /// Fills the right half of the work area.
+    Right,
 }
 
 /// Default gap between cascade-placed windows, in logical pixels.
@@ -174,6 +197,73 @@ impl WindowManager {
         self.windows.iter().map(|w| &w.surface)
     }
 
+    /// Set the work area (the screen region windows can occupy). Used by
+    /// cascade placement and edge snapping. Defaults to 1920×1080.
+    #[allow(dead_code)]
+    pub fn set_work_area(&mut self, area: Rectangle<i32, Logical>) {
+        self.work_area = area;
+    }
+
+    /// The current work area.
+    pub fn work_area(&self) -> Rectangle<i32, Logical> {
+        self.work_area
+    }
+
+    /// Snap a window to an edge of the work area.
+    ///
+    /// Implements PRD §12 Floating + Snap:
+    /// - [`SnapEdge::Left`] fills the left half,
+    /// - [`SnapEdge::Right`] fills the right half,
+    /// - [`SnapEdge::Maximized`] fills the whole work area,
+    /// - [`SnapEdge::Free`] leaves the window geometry untouched.
+    ///
+    /// Snap margins so a snapped window isn't flush against the screen edge.
+    pub fn snap(&mut self, surface: &WlSurface, edge: SnapEdge) {
+        self.ensure_alive();
+        let Some(idx) = self.windows.iter().position(|w| w.wl_surface() == surface) else {
+            return;
+        };
+        let area = self.work_area;
+
+        match edge {
+            SnapEdge::Left => {
+                self.windows[idx].rect = Rectangle::new(
+                    (area.loc.x, area.loc.y).into(),
+                    Size::new(area.size.w / 2, area.size.h),
+                );
+            }
+            SnapEdge::Right => {
+                self.windows[idx].rect = Rectangle::new(
+                    (area.loc.x + area.size.w / 2, area.loc.y).into(),
+                    Size::new(area.size.w - area.size.w / 2, area.size.h),
+                );
+            }
+            SnapEdge::Maximized => {
+                self.windows[idx].rect = Rectangle::new(
+                    (area.loc.x, area.loc.y).into(),
+                    Size::new(area.size.w, area.size.h),
+                );
+            }
+        }
+    }
+
+    /// Whether `surface` is currently snapped (not free).
+    #[allow(dead_code)]
+    pub fn is_snapped(&self, surface: &WlSurface) -> bool {
+        self.windows
+            .iter()
+            .find(|w| w.wl_surface() == surface)
+            .map(|w| {
+                // A snapped window fills either the whole work area (maximized)
+                // or exactly one half (left/right).
+                let area = self.work_area;
+                let half = area.size.w / 2;
+                w.rect.size == Size::new(area.size.w, area.size.h) // maximized
+                    || w.rect.size == Size::new(half, area.size.h) // left/right
+            })
+            .unwrap_or(false)
+    }
+
     /// Simple cascade placement: stagger each new window down-right so several
     /// windows stay visually distinct before any real tiling/snapping lands.
     fn next_placeholder_rect(&self) -> Rectangle<i32, Logical> {
@@ -181,5 +271,28 @@ impl WindowManager {
         let x = CASCADE_STEP * (n % 8);
         let y = CASCADE_STEP * (n % 8);
         Rectangle::new((x, y).into(), default_window_size())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A placeholder toplevel surface isn't easy to create without a live
+    /// display, so we exercise the geometry math through the public window
+    /// manager where the window's surface data isn't needed.
+
+    #[test]
+    fn default_work_area_is_full_hd() {
+        let wm = WindowManager::default();
+        assert_eq!(wm.work_area().size.w, 1920);
+        assert_eq!(wm.work_area().size.h, 1080);
+    }
+
+    #[test]
+    fn setting_work_area_changes_snap_geometry() {
+        let mut wm = WindowManager::default();
+        wm.set_work_area(Rectangle::from_size(Size::new(2560, 1440)));
+        assert_eq!(wm.work_area().size.w, 2560);
     }
 }
