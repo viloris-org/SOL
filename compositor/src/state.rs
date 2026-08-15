@@ -14,7 +14,7 @@ use std::os::unix::io::OwnedFd;
 
 use smithay::{
     delegate_compositor, delegate_data_device, delegate_input_method_manager, delegate_layer_shell,
-    delegate_seat, delegate_shm, delegate_text_input_manager, delegate_xdg_shell,
+    delegate_output, delegate_seat, delegate_shm, delegate_text_input_manager, delegate_xdg_shell,
     input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
     reexports::wayland_server::{Client, DisplayHandle, Resource, protocol::wl_seat},
     utils::Serial,
@@ -23,6 +23,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorHandler, CompositorState},
         input_method::InputMethodHandler,
         input_method::InputMethodManagerState,
+        output::OutputHandler,
         seat::WaylandFocus,
         selection::{
             SelectionHandler,
@@ -47,7 +48,7 @@ use smithay::{
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
 use wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 
-use crate::window;
+use crate::{outputs::Outputs, window};
 
 /// Client-level state attached to each connected Wayland client.
 #[derive(Default)]
@@ -71,6 +72,10 @@ pub struct SolState {
     pub text_input_state: TextInputManagerState,
     #[allow(dead_code)]
     pub input_method_state: InputMethodManagerState,
+    /// Phase 1 outputs: `wl_output` / `zxdg_output` globals + the primary
+    /// output. The window manager's work area is derived from this.
+    #[allow(dead_code)]
+    pub outputs: Outputs,
     pub seat: Seat<SolState>,
     /// Pointer device handle used by the interactive move/resize grabs.
     pub pointer: smithay::input::pointer::PointerHandle<SolState>,
@@ -86,6 +91,15 @@ impl SolState {
         let mut seat = seat_state.new_wl_seat(display, "sol");
         let pointer = seat.add_pointer();
 
+        // Build the output set before the window manager so the work area can
+        // be seeded from the primary output's size.
+        let outputs = Outputs::new::<SolState>(display);
+        let (w, h) = outputs.primary_size();
+        let mut window_manager = window::WindowManager::default();
+        window_manager.set_work_area(smithay::utils::Rectangle::from_size(
+            smithay::utils::Size::new(w, h),
+        ));
+
         SolState {
             compositor_state,
             xdg_shell_state: XdgShellState::new::<SolState>(display),
@@ -95,9 +109,10 @@ impl SolState {
             layer_shell_state: WlrLayerShellState::new::<SolState>(display),
             text_input_state: TextInputManagerState::new::<SolState>(display),
             input_method_state: InputMethodManagerState::new::<SolState, _>(display, |_| true),
+            outputs,
             seat,
             pointer,
-            window_manager: window::WindowManager::default(),
+            window_manager,
         }
     }
 }
@@ -247,6 +262,8 @@ impl SelectionHandler for SolState {
     type SelectionUserData = ();
 }
 
+impl OutputHandler for SolState {}
+
 impl DataDeviceHandler for SolState {
     fn data_device_state(&self) -> &DataDeviceState {
         &self.data_device_state
@@ -331,3 +348,4 @@ delegate_data_device!(SolState);
 delegate_layer_shell!(SolState);
 delegate_text_input_manager!(SolState);
 delegate_input_method_manager!(SolState);
+delegate_output!(SolState);

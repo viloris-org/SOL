@@ -23,10 +23,20 @@
 //! which therefore do not depend on a host X/Wayland session or GL drivers.
 
 mod grabs;
+mod outputs;
 mod state;
 mod window;
 
 use std::{sync::Arc, time::Instant};
+
+/// The clear-screen (wallpaper / window-clear) fill colour.
+///
+/// Matches `sol_design::DEFAULT_BACKGROUND` (0.11, 0.10, 0.13). Kept as a lone
+/// constant here because the compositor does not link `sol-design` (it is a
+/// client/SDK crate); the value is the canonical token, defined once in
+/// `sdk/sol-design` and mirrored here. PRD §19: no bare hex in component code.
+const CLEAR_BACKGROUND: smithay::backend::renderer::Color32F =
+    smithay::backend::renderer::Color32F::new(0.11, 0.10, 0.13, 1.0);
 
 use smithay::reexports::wayland_server::{
     Display, ListeningSocket,
@@ -86,7 +96,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
         backend::{
             input::{AbsolutePositionEvent, InputEvent, KeyboardKeyEvent},
             renderer::{
-                Color32F, Frame, Renderer,
+                Frame, Renderer,
                 element::{
                     Kind,
                     surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
@@ -228,6 +238,10 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
         // borrows of `backend` are released before `backend.submit` below.
         {
             let (renderer, mut framebuffer) = backend.bind()?;
+            // HiDPI basics (PRD §33, do-not-defer): render at the primary
+            // output's integer scale so a 2× output yields crisp 2× pixels.
+            // Fractional scaling is verified in Phase 5.
+            let scale = state.outputs.primary_scale().integer_scale().max(1) as f64;
             let elements = toplevel_surfaces
                 .iter()
                 .flat_map(|surface| {
@@ -235,7 +249,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
                         renderer,
                         surface.wl_surface(),
                         (0, 0),
-                        1.0,
+                        scale,
                         1.0,
                         Kind::Unspecified,
                     )
@@ -244,8 +258,11 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
 
             {
                 let mut frame = renderer.render(&mut framebuffer, size, Transform::Flipped180)?;
-                frame.clear(Color32F::new(0.11, 0.10, 0.13, 1.0), &[damage])?;
-                draw_render_elements(&mut frame, 1.0, &elements, &[damage])?;
+                // Clear the screen to the SOL design-token background
+                // (sol_design::DEFAULT_BACKGROUND, 0.11/0.10/0.13);
+                // keep the compositor visually consistent with first-party UX.
+                frame.clear(CLEAR_BACKGROUND, &[damage])?;
+                draw_render_elements(&mut frame, scale, &elements, &[damage])?;
                 let _ = frame.finish()?;
             }
         }
