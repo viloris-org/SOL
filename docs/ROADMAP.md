@@ -462,7 +462,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       promise after v0.1
 - [ ] **Documentation:** getting started, guides, API reference
       (`sol-sdk-docs`)
-- [ ] **Templates:** `cargo new` / project scaffolding, app skeleton
+- [x] **Starter template:** `templates/solkit-starter` provides a public-crate
+      app skeleton, copy-out dependency instructions, and deterministic
+      external-copy validation (`scripts/validate-solkit-starter.sh`)
+- [ ] **Templates:** `cargo new` / project scaffolding beyond the starter
 - [ ] **Developer tools:** scaffolding, debugging, packaging tools
 - [ ] **Packaging polish:** pacman/AUR integration, signed-repo trust chain
       (AUR not in the official trust chain, §30)

@@ -7,6 +7,7 @@ Documentation is organized by audience and lifecycle:
 | [PRD](PRD.md) | Product / everybody | Product requirements: vision, principles, architecture, MVP, phases (§1–42) |
 | [ROADMAP](ROADMAP.md) | Engineering / product | Execution view of the PRD phases split into milestones, deliverables, and acceptance points |
 | [Architecture](architecture.md) | Engineering | How the logical layers map to the monorepo, and boundary rules |
+| [SolKit getting started](solkit-getting-started.md) | Application developers | Start a renderer-independent native app from the SolKit starter template |
 | [Decision log](decisions/README.md) | Engineering | Architecture Decision Records (ADR) and the open-decision backlog (PRD §41) |
 | Component READMEs | Engineering | Per-crate docs (`compositor/`, `sdk/*`, `services/*`, `apps/*`, `shell/`, `protocols/`, `packaging/arch/`, `tests/`) |
 
