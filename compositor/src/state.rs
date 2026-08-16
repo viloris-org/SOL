@@ -15,9 +15,9 @@ use std::os::unix::io::OwnedFd;
 use smithay::{
     delegate_compositor, delegate_data_device, delegate_input_method_manager, delegate_layer_shell,
     delegate_output, delegate_seat, delegate_shm, delegate_text_input_manager, delegate_xdg_shell,
-    input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
+    input::{Seat, SeatHandler, SeatState, keyboard::KeyboardHandle, pointer::CursorImageStatus},
     reexports::wayland_server::{Client, DisplayHandle, Resource, protocol::wl_seat},
-    utils::Serial,
+    utils::{SERIAL_COUNTER, Serial},
     wayland::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState},
@@ -29,6 +29,7 @@ use smithay::{
             SelectionHandler,
             data_device::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+                set_data_device_focus,
             },
         },
         shell::{
@@ -61,6 +62,7 @@ pub struct ClientState {
 
 /// Top-level compositor state shared across backends.
 pub struct SolState {
+    display_handle: DisplayHandle,
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
@@ -78,7 +80,11 @@ pub struct SolState {
     /// Phase 1 outputs: `wl_output` / `zxdg_output` globals + the primary
     /// output. The window manager's work area is derived from this.
     pub outputs: Outputs,
+    /// Seat object retained to keep the advertised `wl_seat` global alive.
+    #[allow(dead_code)]
     pub seat: Seat<SolState>,
+    /// Keyboard handle shared by headless, development, and hardware backends.
+    pub keyboard: KeyboardHandle<SolState>,
     /// Pointer device handle used by the interactive move/resize grabs.
     pub pointer: smithay::input::pointer::PointerHandle<SolState>,
     /// Phase 1 window management: layout, hit-testing and focus.
@@ -99,6 +105,9 @@ impl SolState {
         let shm_state = ShmState::new::<SolState>(display, vec![]);
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(display, "sol");
+        let keyboard = seat
+            .add_keyboard(Default::default(), 200, 200)
+            .expect("default keyboard configuration should initialize");
         let pointer = seat.add_pointer();
 
         // Build the output set before the window manager so the work area can
@@ -116,6 +125,7 @@ impl SolState {
         ));
 
         SolState {
+            display_handle: display.clone(),
             compositor_state,
             xdg_shell_state: XdgShellState::new::<SolState>(display),
             shm_state,
@@ -126,6 +136,7 @@ impl SolState {
             input_method_state: InputMethodManagerState::new::<SolState, _>(display, |_| true),
             outputs,
             seat,
+            keyboard,
             pointer,
             window_manager,
         }
@@ -185,11 +196,15 @@ impl XdgShellHandler for SolState {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // Track the window and set it as the focused, activated toplevel.
+        let wl_surface = surface.wl_surface().clone();
         self.window_manager.new_toplevel(surface.clone());
         surface.with_pending_state(|state| {
             state.states.set(xdg_toplevel::State::Activated);
         });
         surface.send_configure();
+        self.keyboard
+            .clone()
+            .set_focus(self, Some(wl_surface), SERIAL_COUNTER.next_serial());
     }
 
     /// A client acknowledged a configure serial; sync the window's size with
@@ -369,7 +384,10 @@ impl SeatHandler for SolState {
         &mut self.seat_state
     }
 
-    fn focus_changed(&mut self, _seat: &Seat<SolState>, _focused: Option<&WlSurface>) {}
+    fn focus_changed(&mut self, seat: &Seat<SolState>, focused: Option<&WlSurface>) {
+        let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
+        set_data_device_focus(&self.display_handle, seat, client);
+    }
     fn cursor_image(&mut self, _seat: &Seat<SolState>, _image: CursorImageStatus) {}
 }
 

@@ -11,8 +11,10 @@ compositor that:
   default),
 - serves standard Wayland clients (`wl_compositor`, `wl_shm`, `xdg_shell`,
   seat, data-device),
+- follows keyboard focus for data-device selection offers,
 - renders client surfaces with the GL renderer and drives frame callbacks,
-- is integration-tested with a real client round-trip.
+- is integration-tested with real toplevel, layer-shell, and clipboard
+  protocol round-trips.
 
 Window management (move/resize/focus, workspaces), the layer-shell top bar,
 XWayland, and the real DRM/udev session are **Phase 1** work. This crate
@@ -44,8 +46,10 @@ WAYLAND_DISPLAY=wayland-sol weston-terminal
 cargo test -p sol-compositor --test sol_session
 ```
 
-The test boots the compositor, waits for its socket, runs the example client,
-and asserts the toplevel configure round-trip succeeds.
+The tests boot the compositor headlessly, wait for its socket, and assert the
+toplevel configure, Shell layer-surface, and UTF-8 data-device clipboard
+round-trips succeed. They do not touch the user's live clipboard or prove
+drag-and-drop behavior.
 
 ## Environment variables
 
@@ -61,6 +65,8 @@ and asserts the toplevel configure round-trip succeeds.
 - `src/main.rs` — the `winit` backend event loop: render toplevel surfaces,
   dispatch/flush client events, publish frame callbacks, accept new clients.
 - `examples/test-client.rs` — the reference Wayland client used by the test.
+- `examples/clipboard-client.rs` — isolated data-source/data-offer transfer
+  fixture.
 - `tests/sol_session.rs` — the end-to-end session test.
 
 The `udev` Cargo feature toggles the DRM/GBM/libinput/libseat backends for the
@@ -74,6 +80,8 @@ dev environment's `libdisplay-info` (0.3.0) is too new for the upgraded
 |---|---|---|
 | `default` = `winit` + `egl` | `smithay/backend_winit`, `backend_egl`, `renderer_gl`, `wayland_frontend` | Dev/CI: window on the current session |
 | `udev` | `smithay/backend_drm`, `backend_gbm`, `backend_libinput`, `backend_udev`, `backend_session_libseat` | Real hardware TTY session (Phase 1) |
-| `headless` | — | Reserved for socket-first CI (no window) |
+
+Headless operation is selected at runtime with `--headless`; it is not a Cargo
+feature.
 
 [Smithay]: https://github.com/Smithay/smithay

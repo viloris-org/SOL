@@ -95,19 +95,16 @@ fn wait_for_socket(session: &Session, timeout: Duration) -> bool {
 }
 
 fn build_bin(spec: &str) -> PathBuf {
-    // `cargo build` both binaries first so we can execute them directly.
-    // The workspace layout means a single `--all` build covers all crates.
-    let status = Command::new(env!("CARGO"))
-        .args([
-            "build",
-            "--quiet",
-            "-p",
-            "sol-compositor",
-            "-p",
-            "sol-shell",
-        ])
-        .status()
-        .expect("cargo build");
+    // Build the exact executable requested so examples are available even in
+    // a clean target directory.
+    let mut command = Command::new(env!("CARGO"));
+    command.args(["build", "--quiet"]);
+    if let Some((_, rest)) = spec.split_once("--example ") {
+        command.args(["-p", "sol-compositor", "--example", rest.trim()]);
+    } else {
+        command.args(["-p", "sol-compositor", "-p", "sol-shell"]);
+    }
+    let status = command.status().expect("cargo build");
     assert!(status.success(), "cargo build failed for {spec}");
 
     // Workspace target dir sits at the workspace root (../../target from the
@@ -201,5 +198,38 @@ fn shell_top_bar_round_trip_against_compositor() {
     assert!(
         stdout.contains("round-trip OK") || stderr.contains("round-trip OK"),
         "sol-shell did not report a successful layer-surface round-trip"
+    );
+}
+
+/// Prove the standard Wayland data-device clipboard path in an isolated
+/// compositor session. This does not touch the user's live desktop clipboard.
+#[test]
+#[serial]
+fn clipboard_selection_round_trip_against_compositor() {
+    let session = Session::start();
+    assert!(
+        wait_for_socket(&session, Duration::from_secs(10)),
+        "compositor socket never appeared"
+    );
+
+    let client_bin = build_bin("sol-compositor --example clipboard-client");
+    let output = Command::new(client_bin)
+        .env("WAYLAND_DISPLAY", &session.socket)
+        .env("XDG_RUNTIME_DIR", &session.runtime_dir)
+        .output()
+        .expect("run clipboard-client");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!("clipboard stdout: {stdout}");
+    eprintln!("clipboard stderr: {stderr}");
+    assert!(
+        output.status.success(),
+        "clipboard-client failed with {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("clipboard selection round-trip completed")
+            || stderr.contains("clipboard selection round-trip completed"),
+        "clipboard-client did not report a successful selection transfer"
     );
 }

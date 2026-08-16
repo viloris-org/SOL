@@ -218,7 +218,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
 
     let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
 
-    let keyboard = state.seat.add_keyboard(Default::default(), 200, 200)?;
+    let keyboard = state.keyboard.clone();
     let mut serial: u32 = 0;
     let start_time = Instant::now();
 

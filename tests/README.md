@@ -16,6 +16,7 @@ round-trip.
 |---|---|---|
 | Compositor session round-trip | `compositor/tests/sol_session.rs` | starts compositor, runs `test-client`, asserts toplevel ack |
 | Reference Wayland client | `compositor/examples/test-client.rs` | used by the session test and manual checks |
+| Wayland clipboard round-trip | `compositor/examples/clipboard-client.rs` | isolated UTF-8 data-source/data-offer transfer; no live desktop clipboard |
 | Design-token consistency | `sdk/sol-design/tests/tokens.rs` | monotonic spacing, color alpha range, motion durations |
 | Future shell + compositor IPC | `tests/` | lands with Phase 1 typed IPC |
 
@@ -26,8 +27,8 @@ cargo test --workspace          # all component + integration tests
 cargo test -p sol-compositor --test sol_session
 ```
 
-> The compositor session test skips itself when no display is available
-> (`WAYLAND_DISPLAY` / `DISPLAY` unset) — e.g. a bare CI runner with no WM.
+> The compositor session suite runs the compositor with `--headless`, so it
+> does not require a host display, GPU, or window manager.
 
 ## Roadmap
 

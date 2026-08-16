@@ -489,6 +489,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         Files validates typed `DropRequest` copy/move operations against local
         fixtures. Native Wayland data-device transport and desktop smoke
         validation remain required.
+  - [x] **Native Wayland clipboard transport foundation:** compositor keyboard
+        focus now drives Smithay data-device focus, and an isolated headless
+        client publishes a UTF-8 `wl_data_source`, receives the resulting
+        `wl_data_offer`, requests it over a file descriptor, and verifies the
+        exact bytes. Cross-application desktop-session clipboard behavior,
+        persistence, and native drag/drop transport remain open.
 - [x] **Portal authorization foundation:** `sol-portal` maps typed document
       open and screen-capture requests through the caller-attributed
       `SystemActionApi`; default-deny and explicit authorization are fixture
