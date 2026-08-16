@@ -265,8 +265,7 @@ impl WindowManager {
     /// Implements PRD §12 Floating + Snap:
     /// - [`SnapEdge::Left`] fills the left half,
     /// - [`SnapEdge::Right`] fills the right half,
-    /// - [`SnapEdge::Maximized`] fills the whole work area,
-    /// - [`SnapEdge::Free`] leaves the window geometry untouched.
+    /// - [`SnapEdge::Maximized`] fills the whole work area.
     ///
     /// Snap margins so a snapped window isn't flush against the screen edge.
     pub fn snap(&mut self, surface: &WlSurface, edge: SnapEdge) {

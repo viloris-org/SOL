@@ -7,7 +7,7 @@
 //! resize) until the initiating button is released.
 //!
 //! Modelled on the Smithay examples' shell grabs, but kept minimal for the SOL
-//! window model (no SSD, no scene graph — just a [`WindowManager`] rect update).
+//! window model (no SSD, no scene graph — just a window-manager rect update).
 
 use smithay::{
     input::pointer::{
