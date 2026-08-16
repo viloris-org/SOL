@@ -4,8 +4,10 @@
 //! file operations). A future SolUI native surface consumes this model; it is
 //! deliberately not tied to Slint or another concrete renderer.
 
+mod preview;
 mod surface;
 
+pub use preview::{FilePreview, PreviewKind, local_preview};
 pub use surface::{
     FilesContextAction, FilesContextMenuProjection, FilesSidebarLocation, FilesSidebarProjection,
     FilesSurface, FilesSurfaceError, FilesSurfaceEvent, FilesSurfaceOutcome,
@@ -471,6 +473,21 @@ impl<T: TrashStore> FilesApp<T> {
     #[must_use]
     pub fn active_tab(&self) -> &DirectoryTab {
         &self.tabs[self.active_tab]
+    }
+
+    /// Return a bounded local preview for the keyboard-selected entry.
+    pub fn selected_preview(&self) -> FilesResult<Option<FilePreview>> {
+        self.active_tab()
+            .cursor
+            .as_ref()
+            .and_then(|path| {
+                self.active_tab()
+                    .entries
+                    .iter()
+                    .find(|entry| entry.path == *path)
+            })
+            .map(local_preview)
+            .transpose()
     }
 
     fn active_tab_mut(&mut self) -> &mut DirectoryTab {

@@ -5,7 +5,7 @@
 //! platform adapter can render [`FilesSurfaceProjection`] without importing a
 //! concrete renderer or duplicating file-operation behavior.
 
-use super::{FileEntry, FileKind, FilesApp, FilesError, TrashItem, TrashStore};
+use super::{FileEntry, FileKind, FilePreview, FilesApp, FilesError, TrashItem, TrashStore};
 use sol_ui::{
     AccessibilityNode, Button, InteractionTree, SemanticControl, StackItem, Tab, TabBar, TextField,
     Toolbar, ToolbarItem, VStack,
@@ -148,6 +148,8 @@ pub struct FilesSurfaceProjection {
     pub search: TextField,
     /// Search-filtered entries to render in the active directory layout.
     pub entries: Vec<FileEntry>,
+    /// Bounded preview data for the selected entry, when available locally.
+    pub preview: Option<FilePreview>,
     /// Context menu for the selected entry, if one is open and still visible.
     pub context_menu: Option<FilesContextMenuProjection>,
 }
@@ -223,6 +225,7 @@ impl FilesSurface {
             sidebar,
             search,
             entries: files.search(&self.search_query),
+            preview: files.selected_preview().ok().flatten(),
             context_menu: self.context_menu(files),
         }
     }
@@ -495,6 +498,10 @@ mod tests {
             vec![FilesContextAction::Open, FilesContextAction::MoveToTrash]
         );
         assert_eq!(context.layout.children.len(), 2);
+        assert_eq!(
+            projection.preview.as_ref().map(|preview| preview.kind),
+            Some(super::super::PreviewKind::Directory)
+        );
 
         let tree = surface.accessibility_tree(&files);
         assert!(
