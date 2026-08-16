@@ -604,6 +604,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 ### Milestone M6 deliverables
 
 - [ ] **Public SolKit:** public API polish and versioning
+  - [x] **Pre-release public boundary validation:**
+        `scripts/validate-solkit-public-api.sh` checks version alignment,
+        unpublished package metadata, library targets, and dependency direction
+        for the five Public-tier crates. Registry publication and external
+        consumer compatibility remain release-gate work.
 - [x] **SDK stability policy (§41 #8):** ADR-0017 defines post-v0.1 Public
       source-API semver gates, rejects a Rust ABI promise, and makes no claim
       that the current unpublished crates are stable.

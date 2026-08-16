@@ -64,3 +64,10 @@ The generated documentation is the authoritative detail for method arguments,
 error variants, and feature flags. Current crates are local workspace crates;
 registry publication and external-consumer compatibility tests remain open
 Phase 6 work.
+
+## Validate the public boundary
+
+Run `scripts/validate-solkit-public-api.sh` before changing a public crate. It
+checks the five Public-tier packages remain version-aligned, unpublished until
+the release gate, library targets, and free of dependencies on compositor,
+shell, session, or service implementation crates.
