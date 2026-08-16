@@ -15,6 +15,7 @@
 
 mod client;
 pub mod launcher;
+pub mod overview;
 
 use std::{
     fs::File,

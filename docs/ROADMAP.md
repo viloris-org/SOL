@@ -333,6 +333,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       SolUI keyboard/accessibility navigation. Real compositor activation and
       close adapters remain unimplemented and explicitly report unavailable.
 - [ ] **Overview / Workspace:** workspace overview, visual switching
+  - [x] **Renderer-neutral overview core:** typed workspace/window snapshots,
+        accessibility and keyboard model, switch/move-window intents, and a
+        compositor-bridge contract with repeatable fixtures.
+  - [ ] **Native overview surface:** compositor IPC adapter, real window
+        thumbnails/layout, and presentation on a layer-shell surface.
 - [ ] **Top Bar:** clock, status area (network / volume / battery / bluetooth)
 - [x] **Notification service foundation:** typed `NotificationApi` +
       `sol-notificationd` lifecycle, replacement, action, query, and storage
@@ -345,6 +350,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       deterministic explainable ranking, and permission-gated typed launch
       execution. File/document/clipboard/command/calculator providers and the
       `Super+Space` desktop shortcut remain explicit follow-up adapters.
+  - [x] **Gesture progress core:** interruptible/cancellable progress, velocity
+        handoff, semantic workspace settling, and reduced-motion fixtures.
+  - [ ] **Real input integration:** libinput gesture adapter, compositor IPC
+        dispatch, and hardware/touchpad latency validation.
 - [x] **Command / Action API (§21):** typed action + permission layer shared by
       search / automation / accessibility. **API contract accepted in
       ADR-0013:** caller-attributed action catalog, default-deny grants, trusted

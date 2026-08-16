@@ -3889,6 +3889,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ctrlc",
+ "sol-animation",
  "sol-app",
  "sol-design",
  "sol-graphics",
