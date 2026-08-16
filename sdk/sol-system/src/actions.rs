@@ -495,7 +495,9 @@ impl FilePermissionStore {
         fs::rename(&temporary, &self.path)
             .map_err(|error| ActionError::store(format!("replace permission store: {error}")))?;
         restrict_permissions(&self.path)
-            .map_err(|error| ActionError::store(format!("restrict permission store: {error}")))
+            .map_err(|error| ActionError::store(format!("restrict permission store: {error}")))?;
+        sync_directory(parent)
+            .map_err(|error| ActionError::store(format!("sync permission directory: {error}")))
     }
 }
 
