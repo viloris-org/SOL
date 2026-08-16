@@ -170,7 +170,7 @@ fn parse_adapter(
         .unwrap_or_else(|| address.clone());
     validate_name(&name, "adapter name")?;
     let powered = required_bool(properties, "Powered")?;
-    let discovering = optional_bool(properties, "Discovering")?.unwrap_or(false);
+    let discovering = required_bool(properties, "Discovering")?;
     if !path.starts_with(BLUEZ_ROOT) {
         return Err(BluezError(format!(
             "BlueZ adapter path is outside {BLUEZ_ROOT}: {path}"
@@ -202,7 +202,7 @@ fn parse_device(
     validate_name(&name, "device name")?;
     let connected = required_bool(properties, "Connected")?;
     let paired = required_bool(properties, "Paired")?;
-    let trusted = optional_bool(properties, "Trusted")?.unwrap_or(false);
+    let trusted = required_bool(properties, "Trusted")?;
     let battery_percent = battery
         .map(|properties| {
             let value = required_u8(properties, "Percentage")?;
@@ -298,19 +298,6 @@ fn required_bool(properties: &HashMap<String, OwnedValue>, key: &str) -> Result<
         .ok_or_else(|| BluezError(format!("BlueZ object is missing {key}")))?;
     bool::try_from(value.clone())
         .map_err(|_| BluezError(format!("BlueZ property {key} must be a boolean")))
-}
-
-fn optional_bool(
-    properties: &HashMap<String, OwnedValue>,
-    key: &str,
-) -> Result<Option<bool>, BluezError> {
-    properties
-        .get(key)
-        .map(|value| {
-            bool::try_from(value.clone())
-                .map_err(|_| BluezError(format!("BlueZ property {key} must be a boolean")))
-        })
-        .transpose()
 }
 
 fn required_u8(properties: &HashMap<String, OwnedValue>, key: &str) -> Result<u8, BluezError> {
@@ -431,12 +418,30 @@ mod tests {
         assert!(map_managed_objects(objects).is_err());
 
         let mut objects = fixture();
+        let adapter = objects
+            .get_mut(&object_path("/org/bluez/hci0"))
+            .unwrap()
+            .get_mut(ADAPTER_INTERFACE)
+            .unwrap();
+        adapter.remove("Discovering");
+        assert!(map_managed_objects(objects).is_err());
+
+        let mut objects = fixture();
         let device = objects
             .get_mut(&object_path("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"))
             .unwrap()
             .get_mut(DEVICE_INTERFACE)
             .unwrap();
         device.insert("Address".into(), string_value("not-an-address"));
+        assert!(map_managed_objects(objects).is_err());
+
+        let mut objects = fixture();
+        let device = objects
+            .get_mut(&object_path("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"))
+            .unwrap()
+            .get_mut(DEVICE_INTERFACE)
+            .unwrap();
+        device.remove("Trusted");
         assert!(map_managed_objects(objects).is_err());
     }
 
