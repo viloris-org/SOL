@@ -471,6 +471,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] Application compatibility matrix (GTK / Qt / SDL / Flutter / Electron —
       Wayland-native, §4.2)
 - [ ] **IME complete (§21.1):** stable end-to-end flow for mainstream languages
+  - [x] **First-party frontend and fcitx5 transport foundation:** `sol-ime`
+        owns typed preedit/candidate state, keyboard selection, and a live
+        `org.fcitx.Fcitx.InputContext1` adapter with deterministic engine
+        fixtures. Real compositor text-input-v3/input-method-v2 wiring,
+        fcitx5 availability, and mainstream-language desktop validation remain
+        required.
 
 **Security & diagnostics**
 
