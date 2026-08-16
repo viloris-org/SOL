@@ -258,6 +258,11 @@ real-hardware DRM/GBM smoke validation remains a hardware follow-up.
 - [ ] **Accessibility-platform closure:** verify a real accessibility bridge
       with assistive technology. The native smoke does not prove GPU pacing,
       input latency, multi-output behavior, or AT-SPI/screen-reader transport.
+  - [x] **AT-SPI bridge foundation:** optional AccessKit Unix integration maps
+        SolUI roles, labels, values, focus, state, and actions onto a real
+        isolated AT-SPI bus; an AT-SPI client traverses and verifies the exported
+        application tree. A screen-reader desktop session remains required for
+        final closure.
 
 **M2 remains in progress until the real-platform closure item is evidenced.**
 The example proves the framework API workflow; it must not be mistaken for a

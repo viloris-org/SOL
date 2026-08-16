@@ -28,6 +28,9 @@ mod command_palette;
 mod runtime;
 mod semantic;
 
+#[cfg(feature = "atspi")]
+mod atspi;
+
 #[cfg(feature = "native")]
 mod slint_backend;
 
@@ -43,6 +46,9 @@ pub use semantic::{
     AccessibilityNode, AccessibilityState, InteractionTree, Key, KeyboardOutcome, SemanticControl,
     SemanticId, SemanticRole, TokenizedComponent, VisualTokenContract,
 };
+
+#[cfg(feature = "atspi")]
+pub use atspi::{AtspiAction, AtspiBridge};
 
 #[cfg(feature = "native")]
 pub use slint_backend::NativeRenderer;
