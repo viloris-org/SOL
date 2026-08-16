@@ -170,13 +170,13 @@ backend remain future work; winit-first keeps CI green.
 
 - [ ] **Decision #1 (ADR-0004 validation):** complete the Slint/SolUI spike
       and settle the SolUI rendering architecture (retained vs declarative,
-      Slint-backed or not)
+      Slint backend integration pending network access for crate download)
 - [x] Semantic component system: `Button`, `TextField`, `Toolbar`, `Tab`, `TabBar`, `HStack`, `VStack`
        (PRD §18); apps write intent, not visuals
 - [x] Layout engine (`HStack` / `VStack` semantic layout, PRD §18) — Implemented
-- [ ] `sol-design` full token convergence: typography / spacing / radius /
-      material / motion / shadows / color (PRD §19, §19.1)
-- [x] Consistency testing: golden-snapshot asserts component-tree output: golden-snapshot asserts component-tree output
+- [x] `sol-design` full token convergence: typography, spacing, radius,
+      material, motion, shadows, color (PRD §19, §19.1)
+- [x] Consistency testing: golden-snapshot asserts component-tree output
       contains only token values (tests in sol-design) (§19.1)
 
 **SolAnimation**
@@ -184,7 +184,7 @@ backend remain future work; winit-first keeps CI green.
 - [x] Unified animation engine (sol-animation): MotionSpec, AnimationDriver, InterruptibleAnimation (PRD §14): easing / spring / interactive
       progress / velocity / interruption / reversal
 - [x] Semantic motion tiers: `Motion::None/Fast/Panel/Window/Workspace`
-- [ ] One set of animation semantics shared by compositor and UI
+- [x] One set of animation semantics shared by compositor and UI: MotionSpec, Motion tiers via sol-animation/sol-design
 
 **SolApp & lifecycle**
 
