@@ -183,17 +183,17 @@ backend remain future work; winit-first keeps CI green.
 
 - [x] Unified animation engine (sol-animation): MotionSpec, AnimationDriver, InterruptibleAnimation (PRD §14): easing / spring / interactive
       progress / velocity / interruption / reversal
-- [x] Semantic motion tiers: `Motion::Control/Panel/Window/Workspace` via sol-design tokens: `Motion::Control/Panel/Window/Workspace`
+- [x] Semantic motion tiers: `Motion::None/Fast/Panel/Window/Workspace`
 - [ ] One set of animation semantics shared by compositor and UI
 
 **SolApp & lifecycle**
 
-- [x] Application lifecycle: App, AppWindow, AppState, Command architecture / window lifecycle / session restoration
-      (PRD §20)
-- [ ] Command architecture (PRD §21): `file.open` / `edit.copy` … auto-exposed
+- [x] Application lifecycle (PRD §20): App, AppWindow, AppState
+- [x] Command architecture (PRD §21): `file.open` / `edit.copy` … auto-exposed
       to menus / shortcuts / command palette
-- [x] SolGraphics abstraction: Renderbuffer, Surface, Brush, Paint, GraphicsContext, SolSystem, SolAccessibility scaffold
-      (§35 — accessibility enters the architecture early)
+
+- [x] sol-graphics abstraction (§35): Renderbuffer, Surface, Brush, Paint, GraphicsContext
+      (accessibility enters the architecture early)
 
 **Keyboard / accessibility / theme**
 
