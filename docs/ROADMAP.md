@@ -276,8 +276,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       palette, keyboard/accessibility tree, and settingsd round-trip; layered
       UI → Settings API → system services. Display and input pages explicitly
       report unavailable until their typed service APIs exist.
-- [ ] **Terminal (PRD §27):** GPU-accelerated rendering, tabs, Unicode,
-      true color, clipboard, search, configurable shell
+- [x] **Terminal (PRD §27) core:** direct-exec PTY/process lifecycle, ANSI/VT
+      grid with Unicode and true color, bounded scrollback/search, tabs,
+      selection/clipboard and keyboard/resize contracts, renderer-neutral
+      SolUI/graphics projection, and command palette navigation. Native
+      Wayland/GPU rendering, PTY read-loop wiring, and system clipboard smoke
+      validation remain platform-adapter follow-ups.
 - [ ] **Files (PRD §25):** sidebar / tabs / search / drag & drop / preview /
       removable storage / network locations / context actions / trash /
       keyboard navigation — the **dogfooding baseline (§19.1)**

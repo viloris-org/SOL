@@ -7,3 +7,8 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+portable-pty = "0.8"
+sol-app = { path = "../../sdk/sol-app" }
+sol-design = { path = "../../sdk/sol-design" }
+sol-graphics = { path = "../../sdk/sol-graphics" }
+sol-ui = { path = "../../sdk/sol-ui" }
