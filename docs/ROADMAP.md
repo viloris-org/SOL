@@ -531,8 +531,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         optional full workspace check without modifying the target project.
 - [ ] **Packaging polish:** pacman/AUR integration, signed-repo trust chain
       (AUR not in the official trust chain, §30)
-- [ ] **Store backend (§41 #15, optional):** hide package implementation
-      details behind pacman/AUR
+- [x] **Store backend (§41 #15, optional):** ADR-0018 settles pacman/AUR as
+      the package backend; a future store may wrap it but cannot create a
+      second package or trust path.
 - [x] **SDK permission tiers (§23):** ADR-0017 formalizes Public, Restricted,
       and Private contracts and their dependency direction.
 - [x] **Monorepo review (§39):** ADR-0017 retains the monorepo until a public

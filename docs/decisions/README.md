@@ -32,6 +32,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 13 | System overlays and layer-shell popup contract | Accepted (headless contract) | Phase 4 | [0015-layer-shell-overlays-popup-contract.md](0015-layer-shell-overlays-popup-contract.md) |
 | 14 | Privacy-bounded diagnostics foundation | Accepted (Phase 5 foundation) | Phase 5 | [0016-diagnostics-foundation.md](0016-diagnostics-foundation.md) |
 | 15 | SolKit stability policy, SDK tiers, and monorepo review | Accepted (Phase 6 policy) | Phase 6 | [0017](0017-solkit-stability-tiers.md) |
+| 16 | Package backend for SOL applications | Accepted (Phase 6 decision) | Phase 6 | [0018](0018-package-backend.md) |
 
 ## Open decisions (PRD §41 — to settle during prototyping)
 
@@ -49,7 +50,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 12 | Application sandbox default policy | Phase 5/6 | Evaluate SOL sandbox or reuse portals; MVP does not require |
 | 13 | SOL Stable vs Arch rolling sync strategy | Phase 5+ | Not an MVP blocker |
 | 14 | Installer | Phase 6 | Not an MVP blocker |
-| 15 | Store backend | Phase 4+ | Hide package implementation details behind pacman/AUR |
+| 15 | Store backend | **Accepted (Phase 6)** | [ADR-0018](0018-package-backend.md): pacman/AUR remains the backend; a future store may only wrap it |
 | 16 | Search index architecture | **Accepted (Phase 4 foundation)** | [ADR-0014](0014-local-search-index.md): explicit local application catalog; no filesystem/document/clipboard/network indexing; typed launch results only |
 | 17 | System Action API | **Accepted (Phase 4 API contract)** | [ADR-0013](0013-system-action-permission-layer.md): typed caller-attributed actions, default-deny grants, consent boundary, and audit; system adapters remain deferred |
 | 18 | Crash reporting / diagnostics | **Accepted (Phase 5 foundation)** | [ADR-0016](0016-diagnostics-foundation.md): typed source attribution, deterministic redaction, bounded local stores; collection, upload, consent, and live crash capture remain deferred |
