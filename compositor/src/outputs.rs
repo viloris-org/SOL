@@ -43,6 +43,9 @@ pub struct OutputConfiguration {
     pub size: (i32, i32),
     /// Logical top-left position in the desktop layout.
     pub location: (i32, i32),
+    /// Fractional scale factor advertised to clients and renderers.
+    /// Stored as thousandths so topology snapshots remain comparable.
+    scale_milli: u32,
 }
 
 impl OutputConfiguration {
@@ -53,9 +56,41 @@ impl OutputConfiguration {
             name: name.into(),
             size,
             location,
+            scale_milli: 1_000,
+        }
+    }
+
+    /// Set a validated fractional scale factor.
+    pub fn try_with_scale(mut self, scale: f64) -> Result<Self, OutputConfigurationError> {
+        if !scale.is_finite() || !(0.5..=8.0).contains(&scale) {
+            return Err(OutputConfigurationError::InvalidScale(scale));
+        }
+        self.scale_milli = (scale * 1_000.0).round() as u32;
+        Ok(self)
+    }
+
+    /// Return the configured fractional scale factor.
+    #[must_use]
+    pub fn scale_factor(&self) -> f64 {
+        f64::from(self.scale_milli) / 1_000.0
+    }
+}
+
+/// Invalid output configuration data rejected before it reaches Smithay.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OutputConfigurationError {
+    InvalidScale(f64),
+}
+
+impl std::fmt::Display for OutputConfigurationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidScale(scale) => write!(formatter, "invalid output scale: {scale}"),
         }
     }
 }
+
+impl std::error::Error for OutputConfigurationError {}
 
 /// A single compositor output and its manager state.
 pub struct Outputs {
@@ -147,7 +182,7 @@ impl Outputs {
         output.change_current_state(
             Some(mode),
             Some(Transform::Normal),
-            Some(Scale::Integer(1)),
+            Some(Scale::Fractional(configuration.scale_factor())),
             Some(Point::from(configuration.location)),
         );
         output.set_preferred(mode);
@@ -187,7 +222,7 @@ impl Outputs {
                         refresh: 60_000,
                     }),
                     Some(Transform::Normal),
-                    Some(Scale::Integer(1)),
+                    Some(Scale::Fractional(configuration.scale_factor())),
                     Some(Point::from(configuration.location)),
                 );
                 active.push(output.clone());
@@ -290,5 +325,27 @@ impl Outputs {
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.outputs.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OutputConfiguration, OutputConfigurationError};
+
+    #[test]
+    fn fractional_scale_is_validated_and_retained_as_milli_units() {
+        let output = OutputConfiguration::new("display", (2560, 1440), (0, 0))
+            .try_with_scale(1.25)
+            .expect("1.25 is a supported fractional scale");
+        assert!((output.scale_factor() - 1.25).abs() < f64::EPSILON);
+        assert!(matches!(
+            OutputConfiguration::new("display", (1, 1), (0, 0)).try_with_scale(0.0),
+            Err(OutputConfigurationError::InvalidScale(0.0))
+        ));
+        assert!(
+            OutputConfiguration::new("display", (1, 1), (0, 0))
+                .try_with_scale(f64::NAN)
+                .is_err()
+        );
     }
 }

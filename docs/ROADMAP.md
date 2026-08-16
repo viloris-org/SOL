@@ -471,6 +471,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Multi-monitor:** hotplug, independent configuration, per-monitor
       workspaces
 - [ ] **Fractional scaling:** crisp rendering at non-integer scales
+  - [x] **Fractional-scale protocol and renderer boundary:** compositor output
+        configuration validates scales from 0.5x to 8x, advertises
+        `wp_fractional_scale_v1`, updates each surface's preferred scale, and
+        renders using the fractional value. A headless 1.25x Wayland client
+        round-trip verifies the 150/120 protocol value; physical GPU/display
+        sharpness validation remains required.
 - [ ] **NVIDIA:** driver path, private GBM / VRAM parameters
 - [ ] **Touchpad / gestures:** mature gesture stack
 - [ ] **Display hotplug:** complete
@@ -708,6 +714,9 @@ SOL Applications → Third-party Applications
   deterministic state validation and an optional system-bus smoke test. The
   Quick Settings network write path remains intentionally unavailable until a
   permission-gated typed action/service API exists.
+- **2026-08-16** — The compositor now advertises `wp_fractional_scale_v1`,
+  validates per-output fractional scales, and renders at the configured value.
+  A headless 1.25x client round-trip verifies the protocol preference.
 - **2026-08-16** — Shell gained a read-only BlueZ ObjectManager adapter with
   deterministic adapter/device validation and an optional system-bus smoke
   test. Pairing, connection, and discovery writes remain intentionally open.

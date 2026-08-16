@@ -33,6 +33,10 @@ struct Session {
 
 impl Session {
     fn start() -> Session {
+        Self::start_with_scale(None)
+    }
+
+    fn start_with_scale(scale: Option<&str>) -> Session {
         // Build both binaries first (fail-fast in a clean tree).
         let compositor_bin = build_bin("sol-compositor");
         let _client_bin = build_bin("sol-compositor --example test-client");
@@ -43,13 +47,18 @@ impl Session {
         let runtime_dir = std::env::temp_dir().join(format!("sol-session-{socket}"));
         std::fs::create_dir_all(&runtime_dir).expect("create isolated Wayland runtime directory");
 
-        let compositor = Command::new(compositor_bin)
+        let mut compositor_command = Command::new(compositor_bin);
+        compositor_command
             .env("SOL_WAYLAND_SOCKET", &socket)
             .env("XDG_RUNTIME_DIR", &runtime_dir)
             // Run the compositor in headless mode: no winit window, no GL.
             // This is the CI path — the protocol loop runs without any GPU /
             // display, so the test is deterministic on any runner.
-            .arg("--headless")
+            .arg("--headless");
+        if let Some(scale) = scale {
+            compositor_command.env("SOL_OUTPUT_SCALE", scale);
+        }
+        let compositor = compositor_command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -160,6 +169,33 @@ fn client_round_trip_against_compositor() {
     assert!(
         stderr.contains("success") || stdout.contains("success"),
         "test-client did not report a successful round-trip"
+    );
+}
+
+#[test]
+#[serial]
+fn fractional_scale_round_trip_against_compositor() {
+    let session = Session::start_with_scale(Some("1.25"));
+    assert!(
+        wait_for_socket(&session, Duration::from_secs(10)),
+        "compositor socket never appeared"
+    );
+
+    let client_bin = build_bin("sol-compositor --example fractional-scale-client");
+    let output = Command::new(client_bin)
+        .env("WAYLAND_DISPLAY", &session.socket)
+        .env("XDG_RUNTIME_DIR", &session.runtime_dir)
+        .output()
+        .expect("run fractional-scale-client");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "fractional-scale-client failed with {:?}: {stderr}",
+        output.status
+    );
+    assert!(
+        stderr.contains("preferred=150"),
+        "fractional-scale-client did not observe 1.25x (150/120): {stderr}"
     );
 }
 

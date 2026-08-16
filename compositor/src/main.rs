@@ -29,6 +29,8 @@ mod state;
 mod udev_output;
 mod window;
 
+use outputs::OutputConfiguration;
+
 use std::{sync::Arc, time::Instant};
 
 /// The clear-screen (wallpaper / window-clear) fill colour.
@@ -210,7 +212,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
 
     let mut display: Display<SolState> = Display::new()?;
     let mut dh = display.handle();
-    let mut state = SolState::new(&dh);
+    let mut state = SolState::with_output_configurations(&dh, Some(&[configured_output()?]));
 
     let socket_name = std::env::var("SOL_WAYLAND_SOCKET").unwrap_or_else(|_| "wayland-sol".into());
     let listener = ListeningSocket::bind(&socket_name)?;
@@ -340,7 +342,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
             // HiDPI basics (PRD §33, do-not-defer): render at the primary
             // output's integer scale so a 2× output yields crisp 2× pixels.
             // Fractional scaling is verified in Phase 5.
-            let scale = state.outputs.primary_scale().integer_scale().max(1) as f64;
+            let scale = state.outputs.primary_scale().fractional_scale();
             let elements = toplevel_surfaces
                 .iter()
                 .flat_map(|surface| {
@@ -438,7 +440,7 @@ impl ClientData for ClientState {
 pub fn run_headless(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut display: Display<SolState> = Display::new()?;
     let mut dh = display.handle();
-    let mut state = SolState::new(&dh);
+    let mut state = SolState::with_output_configurations(&dh, Some(&[configured_output()?]));
 
     let socket_name = std::env::var("SOL_WAYLAND_SOCKET").unwrap_or_else(|_| "wayland-sol".into());
     let listener = ListeningSocket::bind(&socket_name)?;
@@ -470,5 +472,17 @@ pub fn run_headless(spawn: Option<String>) -> Result<(), Box<dyn std::error::Err
 
         // Busy-free pacing so headless CI doesn't spin a core at 100%.
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn configured_output() -> Result<OutputConfiguration, Box<dyn std::error::Error>> {
+    let scale = std::env::var("SOL_OUTPUT_SCALE")
+        .ok()
+        .map(|value| value.parse::<f64>())
+        .transpose()?;
+    let configuration = OutputConfiguration::new("output-0", (1920, 1080), (0, 0));
+    match scale {
+        Some(scale) => Ok(configuration.try_with_scale(scale)?),
+        None => Ok(configuration),
     }
 }

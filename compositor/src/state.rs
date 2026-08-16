@@ -13,14 +13,16 @@
 use std::os::unix::io::OwnedFd;
 
 use smithay::{
-    delegate_compositor, delegate_data_device, delegate_input_method_manager, delegate_layer_shell,
-    delegate_output, delegate_seat, delegate_shm, delegate_text_input_manager, delegate_xdg_shell,
+    delegate_compositor, delegate_data_device, delegate_fractional_scale,
+    delegate_input_method_manager, delegate_layer_shell, delegate_output, delegate_seat,
+    delegate_shm, delegate_text_input_manager, delegate_xdg_shell,
     input::{Seat, SeatHandler, SeatState, keyboard::KeyboardHandle, pointer::CursorImageStatus},
     reexports::wayland_server::{Client, DisplayHandle, Resource, protocol::wl_seat},
     utils::{SERIAL_COUNTER, Serial},
     wayland::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState},
+        fractional_scale::{self, FractionalScaleHandler, FractionalScaleManagerState},
         input_method::InputMethodHandler,
         input_method::InputMethodManagerState,
         output::OutputHandler,
@@ -64,6 +66,9 @@ pub struct ClientState {
 pub struct SolState {
     display_handle: DisplayHandle,
     pub compositor_state: CompositorState,
+    /// Fractional output scale protocol global and per-surface preferences.
+    #[allow(dead_code)]
+    pub fractional_scale_state: FractionalScaleManagerState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<SolState>,
@@ -127,6 +132,7 @@ impl SolState {
         SolState {
             display_handle: display.clone(),
             compositor_state,
+            fractional_scale_state: FractionalScaleManagerState::new::<SolState>(display),
             xdg_shell_state: XdgShellState::new::<SolState>(display),
             shm_state,
             seat_state,
@@ -180,6 +186,23 @@ impl CompositorHandler for SolState {
 
     fn commit(&mut self, surface: &WlSurface) {
         smithay::backend::renderer::utils::on_commit_buffer_handler::<Self>(surface);
+        let scale = self.outputs.primary_scale().fractional_scale();
+        smithay::wayland::compositor::with_states(surface, |states| {
+            fractional_scale::with_fractional_scale(states, |fractional| {
+                fractional.set_preferred_scale(scale);
+            });
+        });
+    }
+}
+
+impl FractionalScaleHandler for SolState {
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        let scale = self.outputs.primary_scale().fractional_scale();
+        smithay::wayland::compositor::with_states(&surface, |states| {
+            fractional_scale::with_fractional_scale(states, |fractional| {
+                fractional.set_preferred_scale(scale);
+            });
+        });
     }
 }
 
@@ -393,6 +416,7 @@ impl SeatHandler for SolState {
 
 // Delegate the Wayland protocol handling to the types stored in `SolState`.
 delegate_compositor!(SolState);
+delegate_fractional_scale!(SolState);
 delegate_shm!(SolState);
 delegate_xdg_shell!(SolState);
 delegate_seat!(SolState);
