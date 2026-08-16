@@ -395,6 +395,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [ ] **Remaining system adapters:** typed network, Bluetooth, and
         audio-device services; unavailable states remain intentional until
         those APIs exist.
+    - [x] **Read-only PipeWire output inventory:** structured `pactl` JSON maps
+          validated output IDs, descriptions, running/idle/suspended state,
+          default membership, active ports, and port availability into a typed
+          Shell contract. Deterministic rejection fixtures and a live host
+          query cover the installed USB output without changing audio state.
+          Device switching and all writes remain open.
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress
   - [x] **Renderer-neutral workspace gesture model:** the overview controller
@@ -465,9 +471,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         unknown device state, and has a live host-service validation script.
   - [x] **PipeWire audio status adapter:** the Shell top-bar provider consumes
         structured `pactl` JSON from PipeWire's Pulse compatibility service,
-        validates the declared default sink and channel volumes, and is checked
-        against the live user service. Device switching, authorized writes,
-        and BlueZ integration remain open.
+        validates the declared default sink and channel volumes, and exposes a
+        read-only typed output/port inventory checked against the live user
+        service. Device switching, authorized writes, and BlueZ integration
+        remain open.
 
 **Desktop core capabilities**
 

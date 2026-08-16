@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validate the Shell audio provider against the user's live PipeWire service.
+# Validate Shell audio status and device inventory against live PipeWire.
 set -euo pipefail
 
 command -v pactl >/dev/null 2>&1 || {
