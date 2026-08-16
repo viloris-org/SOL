@@ -19,9 +19,13 @@
 //! PRD §19.1: "Consistency First" — components use tokens, not hand-written
 //! values. This ensures visual consistency across Shell and first-party apps.
 
-use sol_design::{color::Color, motion::Motion, radius::Radius, spacing::Spacing};
+use sol_design::{
+    color::Color, metrics::ControlMetric, motion::Motion, radius::Radius, spacing::Spacing,
+    typography::FontStyle,
+};
 
 mod runtime;
+mod semantic;
 
 #[cfg(feature = "native")]
 mod slint_backend;
@@ -29,6 +33,10 @@ mod slint_backend;
 pub use runtime::{
     ButtonController, ButtonFrame, FixtureSurfaceHost, LogicalSize, RecordingRenderer, Renderer,
     SurfaceHost, present_button,
+};
+pub use semantic::{
+    AccessibilityNode, AccessibilityState, InteractionTree, Key, KeyboardOutcome, SemanticControl,
+    SemanticId, SemanticRole, TokenizedComponent, VisualTokenContract,
 };
 
 #[cfg(feature = "native")]
@@ -50,8 +58,8 @@ pub use slint_backend::NativeRenderer;
 /// ```
 #[derive(Debug)]
 pub struct Button {
-    /// The button's intrinsic size (adjusted by layout).
-    pub size: (f32, f32),
+    /// The named geometry role, resolved by sol-design.
+    pub metric: ControlMetric,
     /// Whether the button is enabled.
     pub enabled: bool,
     /// Whether the button is pressed/hovered for visual feedback.
@@ -77,7 +85,7 @@ pub enum ButtonState {
 impl Default for Button {
     fn default() -> Self {
         Self {
-            size: (100.0, 32.0),
+            metric: ControlMetric::Button,
             enabled: true,
             state: ButtonState::Normal,
             label: "",
@@ -129,6 +137,16 @@ impl Button {
     /// Get the corner radius for the button.
     pub fn corner_radius(&self) -> Radius {
         Radius::Sm
+    }
+
+    /// Get the design-controlled geometry role.
+    pub fn metric(&self) -> ControlMetric {
+        self.metric
+    }
+
+    /// Get the named text style used by this control.
+    pub fn text_style(&self) -> FontStyle {
+        FontStyle::Label
     }
 
     /// Get the horizontal padding inside the button.
@@ -273,6 +291,8 @@ pub struct TextField {
     pub placeholder: &'static str,
     /// Whether the field is editable.
     pub editable: bool,
+    /// The named geometry role, resolved by sol-design.
+    pub metric: ControlMetric,
 }
 
 impl Default for TextField {
@@ -281,6 +301,7 @@ impl Default for TextField {
             text: String::new(),
             placeholder: "",
             editable: true,
+            metric: ControlMetric::TextField,
         }
     }
 }
@@ -321,6 +342,16 @@ impl TextField {
     /// Get the corner radius.
     pub fn corner_radius(&self) -> Radius {
         Radius::Sm
+    }
+
+    /// Get the design-controlled geometry role.
+    pub fn metric(&self) -> ControlMetric {
+        self.metric
+    }
+
+    /// Get the named text style used by this control.
+    pub fn text_style(&self) -> FontStyle {
+        FontStyle::Body
     }
 }
 
@@ -420,9 +451,9 @@ impl Toolbar {
         self.background
     }
 
-    /// Get the height of the toolbar.
-    pub fn height(&self) -> f32 {
-        40.0
+    /// Get the design-controlled geometry role.
+    pub fn metric(&self) -> ControlMetric {
+        ControlMetric::Toolbar
     }
 
     /// Get the item spacing.
@@ -511,9 +542,9 @@ impl TabBar {
         self
     }
 
-    /// Get the tab height.
-    pub fn tab_height(&self) -> f32 {
-        32.0
+    /// Get the design-controlled geometry role.
+    pub fn metric(&self) -> ControlMetric {
+        ControlMetric::Tab
     }
 }
 

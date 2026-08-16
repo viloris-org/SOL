@@ -5,7 +5,12 @@
 //! construct nor receive a renderer-specific object.
 
 use sol_animation::InterruptibleAnimation;
-use sol_design::{color::Rgba, motion::Motion};
+use sol_design::{
+    accessibility::TokenMode,
+    color::Rgba,
+    motion::{Motion, MotionSpec},
+    typography::FontStyle,
+};
 
 use crate::Button;
 
@@ -56,8 +61,12 @@ pub struct ButtonFrame {
     pub label: String,
     /// Semantic fill resolved through `sol-design`.
     pub background: Rgba,
+    /// Semantic foreground resolved through `sol-design`.
+    pub foreground: Rgba,
     /// Semantic corner radius resolved through `sol-design`.
     pub corner_radius: f32,
+    /// Token-resolved label font size for the active text-scale preference.
+    pub font_size: f32,
     /// External animation progress supplied by SolAnimation.
     pub progress: f32,
 }
@@ -111,12 +120,24 @@ impl ButtonController {
         self.animation.velocity
     }
 
+    /// Resolve this component's semantic motion under accessibility preferences.
+    pub fn motion_spec(&self, mode: TokenMode) -> MotionSpec {
+        mode.motion_spec(self.motion())
+    }
+
     /// Resolve retained state into a renderer-neutral frame.
     pub fn frame(&self) -> ButtonFrame {
+        self.frame_for(TokenMode::default())
+    }
+
+    /// Resolve retained state using the active theme and accessibility tokens.
+    pub fn frame_for(&self, mode: TokenMode) -> ButtonFrame {
         ButtonFrame {
             label: self.button.label.to_owned(),
-            background: self.button.background().rgba(),
+            background: mode.color(self.button.background()),
+            foreground: mode.color(sol_design::color::Color::TextPrimary),
             corner_radius: self.button.corner_radius().px(),
+            font_size: mode.typography(FontStyle::Label).pixels,
             progress: self.progress,
         }
     }
@@ -209,7 +230,10 @@ mod tests {
         assert_eq!(host.requested_frames, 1);
         assert_eq!(renderer.frames.len(), 1);
         assert_eq!(renderer.frames[0].label, "Open");
-        assert_eq!(renderer.frames[0].background, Color::Accent.rgba());
+        assert_eq!(
+            renderer.frames[0].background,
+            TokenMode::light().color(Color::Accent)
+        );
         assert_eq!(renderer.frames[0].corner_radius, Radius::Sm.px());
     }
 
@@ -227,5 +251,20 @@ mod tests {
 
         assert_eq!(controller.frame().progress, 0.37);
         assert_eq!(controller.velocity(), 420.0);
+    }
+
+    #[test]
+    fn accessibility_mode_changes_theme_text_scale_and_motion_at_token_boundary() {
+        let controller = ButtonController::new(Button::new());
+        let mode = TokenMode::dark()
+            .high_contrast()
+            .reduced_motion()
+            .with_text_scale(sol_design::accessibility::TextScale::Large);
+
+        let frame = controller.frame_for(mode);
+
+        assert_eq!(frame.background, mode.color(Color::Elevated));
+        assert!(frame.font_size > TokenMode::light().typography(FontStyle::Label).pixels);
+        assert_eq!(controller.motion_spec(mode).duration_ms, 0);
     }
 }

@@ -52,7 +52,7 @@ state. Immediate-mode drawing and a public Slint model are rejected.
 | Consistency First | Satisfied at the adapter boundary: components resolve `sol-design` tokens before projection. |
 | Design Tokens | SolKit owns token resolution; Slint only executes the resolved values. |
 | Interactive Motion | Validated at adapter boundary: `ButtonController` uses `sol-animation::InterruptibleAnimation` and externally overwrites Slint progress while preserving velocity. |
-| Accessibility | Architecture retained; backend integration is still unvalidated. SolUI must own semantics before mapping them to a platform bridge. |
+| Accessibility | SolUI now supplies a retained renderer-neutral role/state tree plus uniform keyboard focus/editing; a real Wayland screen-reader/AT-SPI bridge remains unvalidated. |
 | Wayland First | Standard-window adapter compiles for Wayland/winit. Shell layer surfaces remain owned by `sol-shell`, not Slint. |
 
 ## Phase 2 spike and evidence
@@ -76,7 +76,7 @@ The repeatable implementation lives in `sdk/sol-ui`:
 | External animation takeover | **Validated in a headless fixture** | `slint_adapter_receives_tokens_and_external_gesture_progress` changes private Slint progress through `sol-animation`. Spring integration and frame-time measurements remain future work. |
 | Layer-shell anchor / exclusive zone / configure / frame | **Validated at host boundary** | `cargo test -p sol-compositor --test sol_session` runs `sol-shell --once` through the real layer-shell round-trip. The Slint adapter deliberately is not a layer-shell client; Phase 4 will host SolUI through `SurfaceHost`. Popups and input regions are not yet covered. |
 | Fractional scale / HiDPI / multi-monitor | **Contract fixture only** | `LogicalSize::physical_pixels(1.25)` is deterministic and `SurfaceHost` carries scale, but no physical multi-output test is available in this headless environment. |
-| Accessibility | **Not yet validated** | A Wayland accessibility bridge and keyboard/focus semantics still need implementation. |
+| Accessibility | **Semantic core validated; platform bridge not yet validated** | `InteractionTree` covers focus traversal, activation, tab selection, text editing, and renderer-neutral accessibility state. A Wayland screen-reader/AT-SPI bridge still needs a real assistive-technology session. |
 | GPU path, pacing, input latency | **Not yet validated** | The spike uses Slint's software renderer for reproducible headless tests. GPU renderer selection, damage/frame pacing, and PRD §34 measurements require a real Wayland/GPU session. |
 | License / distribution | **Not yet cleared for distribution** | Slint 1.13.1 advertises GPL-3.0-only, royalty-free, and software license alternatives. A distribution license choice/review is required before shipping SOL binaries. |
 | Slint containment | **Validated by API boundary** | `slint` is an optional private adapter dependency; public `sol-ui` APIs exchange only SOL types. |

@@ -9,7 +9,9 @@ slint::slint! {
     export component NativeButton inherits Window {
         in property <string> label;
         in property <color> fill;
+        in property <color> text-fill;
         in property <length> corner-radius;
+        in property <length> font-size;
         in property <float> progress;
 
         Rectangle {
@@ -18,7 +20,8 @@ slint::slint! {
             opacity: root.progress;
             Text {
                 text: root.label;
-                color: #ffffff;
+                color: root.text-fill;
+                font-size: root.font-size;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -51,21 +54,32 @@ impl NativeRenderer {
     pub fn label(&self) -> String {
         self.button.get_label().to_string()
     }
+
+    /// Return the token-resolved label size for test inspection.
+    pub fn font_size(&self) -> f32 {
+        self.button.get_font_size()
+    }
 }
 
 impl Renderer for NativeRenderer {
     fn render_button(&mut self, frame: &ButtonFrame) {
         let rgba = frame.background;
         self.button.set_label(frame.label.clone().into());
-        self.button.set_fill(slint::Color::from_argb_u8(
-            (rgba.3 * 255.0) as u8,
-            (rgba.0 * 255.0) as u8,
-            (rgba.1 * 255.0) as u8,
-            (rgba.2 * 255.0) as u8,
-        ));
+        self.button.set_fill(to_slint_color(rgba));
+        self.button.set_text_fill(to_slint_color(frame.foreground));
         self.button.set_corner_radius(frame.corner_radius);
+        self.button.set_font_size(frame.font_size);
         self.button.set_progress(frame.progress);
     }
+}
+
+fn to_slint_color(rgba: sol_design::color::Rgba) -> slint::Color {
+    slint::Color::from_argb_u8(
+        (rgba.3 * 255.0) as u8,
+        (rgba.0 * 255.0) as u8,
+        (rgba.1 * 255.0) as u8,
+        (rgba.2 * 255.0) as u8,
+    )
 }
 
 #[cfg(test)]
@@ -118,6 +132,7 @@ mod tests {
 
         assert_eq!(renderer.label(), "Launch");
         assert_eq!(renderer.progress(), 0.64);
+        assert!(renderer.font_size() > 0.0);
         WINDOW.with(|window| window.set_size(PhysicalSize::new(320, 48)));
     }
 }

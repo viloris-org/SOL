@@ -207,10 +207,22 @@ backend remain future work; winit-first keeps CI green.
 
 **Keyboard / accessibility / theme**
 
-- [ ] Standard keyboard interaction & focus management implemented uniformly
-      by `sol-ui` (§19.1 behavior consistency)
-- [ ] Accessibility semantic tree, reduced motion, high contrast (§35)
-- [ ] Theme switching touches only `sol-design` (§19.1 single source of truth)
+- [x] Standard keyboard interaction & focus management implemented uniformly
+      by `sol-ui` (§19.1 behavior consistency): ordered traversal skips
+      disabled controls; Enter/Space activate; arrows select tabs; editable
+      fields handle text insertion and backspace.
+- [x] Accessibility semantic tree, reduced motion, high contrast (§35):
+      renderer-neutral role/state tree and token-mode contract cover focus,
+      selection, editability, reduced motion, high contrast, and named text
+      scaling in repeatable tests.
+- [x] Theme switching touches only `sol-design` (§19.1 single source of
+      truth): components retain token roles while `TokenMode` resolves theme
+      and accessibility variants.
+
+> **Platform limit:** the SolUI semantic tree is ready to map into an
+> accessibility bridge, but real Wayland screen-reader/AT-SPI transport and
+> input-method interaction remain integration work; no system assistive-tech
+> claim is made by the headless tests.
 
 **Settings boundary**
 

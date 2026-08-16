@@ -37,8 +37,10 @@ App code never programs against `.slint` or Slint APIs directly.
 
 **Phase 2 architecture spike complete.** `native` compiles the Wayland/winit
 Slint adapter; the default feature set keeps deterministic semantic tests
-headless and renderer-independent. Keyboard/focus behavior and accessibility
-work remain in progress.
+headless and renderer-independent. SolUI now owns keyboard focus traversal,
+standard activation/selection/text-editing behavior, and a renderer-neutral
+accessibility semantic tree. Real Wayland screen-reader/AT-SPI transport
+remains integration work.
 
 ## Consistency iron rules (PRD §19.1)
 
