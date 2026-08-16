@@ -514,6 +514,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       that the current unpublished crates are stable.
 - [ ] **Documentation:** getting started, guides, API reference
       (`sol-sdk-docs`)
+  - [x] **Current SDK API map:** `docs/solkit-getting-started.md` and
+        `docs/solkit-api.md` document the copy-out workflow, public/restricted
+        crate boundaries, and the locked rustdoc generation command. Published
+        versioned API reference and migration guides remain open.
 - [x] **Starter template:** `templates/solkit-starter` provides a public-crate
       app skeleton, copy-out dependency instructions, and deterministic
       external-copy validation (`scripts/validate-solkit-starter.sh`)
