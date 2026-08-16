@@ -9,7 +9,13 @@ use crate::{AppId, NotificationActionId, NotificationId, OutputVolume};
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const PERMISSION_STORE_VERSION: u32 = 1;
 
 /// A stable action family understood by the system-action catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -45,6 +51,33 @@ pub enum SystemCapability {
     ScreenCapture,
     /// Open a document through a desktop portal.
     OpenDocuments,
+}
+
+impl SystemCapability {
+    /// Return the stable on-disk spelling for a capability grant.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LaunchApplications => "launch-applications",
+            Self::Search => "search",
+            Self::ChangeQuickSettings => "change-quick-settings",
+            Self::InvokeNotificationActions => "invoke-notification-actions",
+            Self::ScreenCapture => "screen-capture",
+            Self::OpenDocuments => "open-documents",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "launch-applications" => Some(Self::LaunchApplications),
+            "search" => Some(Self::Search),
+            "change-quick-settings" => Some(Self::ChangeQuickSettings),
+            "invoke-notification-actions" => Some(Self::InvokeNotificationActions),
+            "screen-capture" => Some(Self::ScreenCapture),
+            "open-documents" => Some(Self::OpenDocuments),
+            _ => None,
+        }
+    }
 }
 
 /// A typed system intent.  This catalog contains no arbitrary command or shell string.
@@ -199,6 +232,23 @@ pub enum PermissionGrant {
     Allow,
     /// Explicitly deny this capability for the caller.
     Deny,
+}
+
+impl PermissionGrant {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "allow" => Some(Self::Allow),
+            "deny" => Some(Self::Deny),
+            _ => None,
+        }
+    }
 }
 
 /// A reason an action was not authorized.
@@ -388,6 +438,205 @@ impl PermissionStore for MemoryPermissionStore {
             .map_err(|error| ActionError::store(format!("permission lock poisoned: {error}")))?
             .remove(key)
             .is_some())
+    }
+}
+
+/// A daemon-owned, atomically replaced store for caller-scoped permission grants.
+///
+/// Each instance serializes its own read-modify-write operations. Production
+/// setup should give one settings/security daemon ownership of a store path;
+/// cross-process coordination and trusted consent UI remain separate work.
+#[derive(Debug)]
+pub struct FilePermissionStore {
+    path: PathBuf,
+    guard: Mutex<()>,
+}
+
+impl FilePermissionStore {
+    /// Create a permission store backed by a private file at `path`.
+    #[must_use]
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            guard: Mutex::new(()),
+        }
+    }
+
+    /// Return the daemon-owned file path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn load(&self) -> ActionResult<BTreeMap<PermissionKey, PermissionGrant>> {
+        let contents = match fs::read_to_string(&self.path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+            Err(error) => {
+                return Err(ActionError::store(format!(
+                    "read permission store: {error}"
+                )));
+            }
+        };
+        parse_permission_store(&contents)
+    }
+
+    fn save(&self, grants: &BTreeMap<PermissionKey, PermissionGrant>) -> ActionResult<()> {
+        let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent)
+            .map_err(|error| ActionError::store(format!("create permission directory: {error}")))?;
+        let temporary = permission_temporary_path(&self.path)?;
+        let result = write_permission_store(&temporary, grants);
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        fs::rename(&temporary, &self.path)
+            .map_err(|error| ActionError::store(format!("replace permission store: {error}")))?;
+        restrict_permissions(&self.path)
+            .map_err(|error| ActionError::store(format!("restrict permission store: {error}")))
+    }
+}
+
+impl PermissionStore for FilePermissionStore {
+    fn get(&self, key: &PermissionKey) -> ActionResult<Option<PermissionGrant>> {
+        let _guard = self.guard.lock().map_err(|error| {
+            ActionError::store(format!("permission file lock poisoned: {error}"))
+        })?;
+        Ok(self.load()?.get(key).copied())
+    }
+
+    fn set(&self, key: PermissionKey, grant: PermissionGrant) -> ActionResult<()> {
+        let _guard = self.guard.lock().map_err(|error| {
+            ActionError::store(format!("permission file lock poisoned: {error}"))
+        })?;
+        let mut grants = self.load()?;
+        grants.insert(key, grant);
+        self.save(&grants)
+    }
+
+    fn revoke(&self, key: &PermissionKey) -> ActionResult<bool> {
+        let _guard = self.guard.lock().map_err(|error| {
+            ActionError::store(format!("permission file lock poisoned: {error}"))
+        })?;
+        let mut grants = self.load()?;
+        let removed = grants.remove(key).is_some();
+        if removed {
+            self.save(&grants)?;
+        }
+        Ok(removed)
+    }
+}
+
+fn parse_permission_store(
+    contents: &str,
+) -> ActionResult<BTreeMap<PermissionKey, PermissionGrant>> {
+    let mut version = None;
+    let mut grants = BTreeMap::new();
+    for line in contents.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("version=") {
+            version = Some(
+                value
+                    .parse::<u32>()
+                    .map_err(|_| ActionError::store("invalid permission store version"))?,
+            );
+            continue;
+        }
+        let mut fields = line.split('\t');
+        let app_id = fields
+            .next()
+            .ok_or_else(|| ActionError::store("invalid permission store record"))?;
+        let capability = fields
+            .next()
+            .and_then(SystemCapability::parse)
+            .ok_or_else(|| ActionError::store("invalid permission capability"))?;
+        let grant = fields
+            .next()
+            .and_then(PermissionGrant::parse)
+            .ok_or_else(|| ActionError::store("invalid permission grant"))?;
+        if fields.next().is_some() {
+            return Err(ActionError::store("invalid permission store record"));
+        }
+        let caller = AppId::parse(app_id)
+            .map_err(|_| ActionError::store("invalid permission application ID"))?;
+        let key = PermissionKey::new(caller, capability);
+        if grants.insert(key, grant).is_some() {
+            return Err(ActionError::store("duplicate permission store record"));
+        }
+    }
+    match version {
+        Some(PERMISSION_STORE_VERSION) => Ok(grants),
+        Some(version) => Err(ActionError::store(format!(
+            "unsupported permission store version {version}"
+        ))),
+        None => Err(ActionError::store("permission store has no version")),
+    }
+}
+
+fn permission_temporary_path(path: &Path) -> ActionResult<PathBuf> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| ActionError::store("permission store path requires a UTF-8 file name"))?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ActionError::store(format!("permission store clock failure: {error}")))?
+        .as_nanos();
+    Ok(path.with_file_name(format!(".{name}.tmp-{}-{nonce}", std::process::id())))
+}
+
+fn write_permission_store(
+    path: &Path,
+    grants: &BTreeMap<PermissionKey, PermissionGrant>,
+) -> ActionResult<()> {
+    let mut file = create_private_file(path).map_err(|error| {
+        ActionError::store(format!("create permission temporary file: {error}"))
+    })?;
+    writeln!(
+        file,
+        "# SOL permission grants; format version {PERMISSION_STORE_VERSION}"
+    )
+    .map_err(|error| ActionError::store(format!("write permission store: {error}")))?;
+    writeln!(file, "version={PERMISSION_STORE_VERSION}")
+        .map_err(|error| ActionError::store(format!("write permission store: {error}")))?;
+    for (key, grant) in grants {
+        writeln!(
+            file,
+            "{}\t{}\t{}",
+            key.caller,
+            key.capability.as_str(),
+            grant.as_str()
+        )
+        .map_err(|error| ActionError::store(format!("write permission store: {error}")))?;
+    }
+    file.sync_all()
+        .map_err(|error| ActionError::store(format!("sync permission store: {error}")))
+}
+
+fn create_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn restrict_permissions(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
     }
 }
 
@@ -975,5 +1224,39 @@ mod tests {
             SystemActionCatalog::capability(&SystemAction::SetOutputMuted { muted: true }),
             SystemCapability::ChangeQuickSettings
         );
+    }
+
+    #[test]
+    fn file_permission_store_round_trips_and_revokes_caller_scoped_grants() {
+        let path = temporary_permission_store_path();
+        let key = PermissionKey::new(app_id(), SystemCapability::ScreenCapture);
+        let store = FilePermissionStore::new(&path);
+        assert_eq!(store.get(&key).unwrap(), None);
+        store.set(key.clone(), PermissionGrant::Allow).unwrap();
+        assert_eq!(store.get(&key).unwrap(), Some(PermissionGrant::Allow));
+
+        let reloaded = FilePermissionStore::new(&path);
+        assert_eq!(reloaded.get(&key).unwrap(), Some(PermissionGrant::Allow));
+        assert!(reloaded.revoke(&key).unwrap());
+        assert_eq!(reloaded.get(&key).unwrap(), None);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn temporary_permission_store_path() -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "sol-permission-store-test-{}-{nonce}.conf",
+            std::process::id()
+        ))
     }
 }

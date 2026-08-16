@@ -55,7 +55,9 @@ deterministic fixtures, not a production authority store.
 This ADR does not implement any system operation or UI. The following still
 need real, environment-specific adapters and integration tests:
 
-- durable permission/audit persistence and policy administration;
+- `FilePermissionStore` now persists caller/capability allow/deny grants with
+  private atomic replacement; durable audit persistence and policy
+  administration remain deferred;
 - polkit integration and XDG Desktop Portal request/response plumbing;
 - concrete shell launcher, search index, Quick Settings, notification, and
   document/capture service adapters;

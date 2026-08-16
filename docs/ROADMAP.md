@@ -446,9 +446,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Live crash reporting:** authenticated service transport, real crash
       capture, consent UX, encrypted export/upload policy, and field validation
       remain required before treating diagnostics as a production reporter.
-- [ ] Permission model (§31): sensitive capabilities explicitly authorized
-      (screen recording / camera / microphone / location / secrets / system
-      settings)
+- [x] **Permission grant persistence foundation:** `FilePermissionStore`
+      persists caller/capability allow or deny grants through the typed action
+      boundary with atomic private files and repeatable revocation tests.
+- [ ] **Production permission model (§31):** trusted consent UI, durable audit
+      records, polkit/portal policy, and explicit authorization for recording,
+      camera, microphone, location, secrets, and system settings remain.
 
 ### M5 success criterion
 

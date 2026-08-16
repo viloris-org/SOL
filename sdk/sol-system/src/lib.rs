@@ -10,10 +10,10 @@ mod actions;
 pub use actions::{
     ActionAuditRecord, ActionAuditStore, ActionAuthorization, ActionDenial, ActionError,
     ActionKind, ActionRequestId, ActionResult, ActionSource, ConsentDecision, ConsentId,
-    DefaultDenyPolicy, MemoryActionAuditStore, MemoryPermissionStore, PermissionDecision,
-    PermissionGrant, PermissionKey, PermissionPolicy, PermissionStore, PolicyDecision,
-    SystemAction, SystemActionApi, SystemActionCatalog, SystemActionRequest, SystemActionResult,
-    SystemActionService, SystemCapability, UserConsentRequest,
+    DefaultDenyPolicy, FilePermissionStore, MemoryActionAuditStore, MemoryPermissionStore,
+    PermissionDecision, PermissionGrant, PermissionKey, PermissionPolicy, PermissionStore,
+    PolicyDecision, SystemAction, SystemActionApi, SystemActionCatalog, SystemActionRequest,
+    SystemActionResult, SystemActionService, SystemCapability, UserConsentRequest,
 };
 
 use std::collections::HashSet;
