@@ -526,6 +526,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       by `scripts/test-new-solkit-project.sh`
 - [ ] **Templates:** `cargo new` / project scaffolding beyond the starter
 - [ ] **Developer tools:** scaffolding, debugging, packaging tools
+  - [x] **SDK environment doctor:** `scripts/solkit-doctor.sh` validates the
+        toolchain, a locked Cargo manifest, starter copy-out behavior, and an
+        optional full workspace check without modifying the target project.
 - [ ] **Packaging polish:** pacman/AUR integration, signed-repo trust chain
       (AUR not in the official trust chain, §30)
 - [ ] **Store backend (§41 #15, optional):** hide package implementation
