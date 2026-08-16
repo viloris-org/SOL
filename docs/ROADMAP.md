@@ -451,6 +451,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       display-manager, libseat/DRM, VT, and desktop-session validation remain
       required before calling this a field-validated session path.
 - [ ] Clipboard, drag & drop fully polished
+  - [x] **Renderer-neutral clipboard and drag foundation:** Terminal exposes a
+        typed `ClipboardAdapter` with a deterministic memory fixture, and
+        Files validates typed `DropRequest` copy/move operations against local
+        fixtures. Native Wayland data-device transport and desktop smoke
+        validation remain required.
 - [x] **Portal authorization foundation:** `sol-portal` maps typed document
       open and screen-capture requests through the caller-attributed
       `SystemActionApi`; default-deny and explicit authorization are fixture
