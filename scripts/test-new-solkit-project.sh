@@ -16,6 +16,7 @@ trap cleanup EXIT HUP INT TERM
 "$scaffold" "$project_dir" "notes-app" "com.example.notes"
 
 grep -F 'name = "notes-app"' "$project_dir/Cargo.toml"
+grep -F 'name = "notes-app"' "$project_dir/Cargo.lock"
 grep -F "path = \"$repo_root/sdk/sol-app\"" "$project_dir/Cargo.toml"
 grep -F 'pub const APP_ID: &str = "com.example.notes";' "$project_dir/src/lib.rs"
 grep -F 'let report = notes_app::run()?;' "$project_dir/src/main.rs"

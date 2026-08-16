@@ -106,6 +106,7 @@ sed -i \
     -e "s|name = \"solkit-starter\"|name = \"$package_name\"|" \
     -e "s|../../sdk|$repo_root/sdk|g" \
     "$project_dir/Cargo.toml"
+sed -i "s|name = \"solkit-starter\"|name = \"$package_name\"|" "$project_dir/Cargo.lock"
 sed -i "s|org.example.starter|$app_id|" "$project_dir/src/lib.rs"
 sed -i "s|solkit_starter|$crate_name|g" "$project_dir/src/main.rs"
 
