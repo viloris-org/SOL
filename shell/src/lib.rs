@@ -6,6 +6,7 @@
 
 pub mod consent;
 pub mod launcher;
+pub mod networkmanager;
 pub mod notification_center;
 pub mod overlay;
 pub mod overview;
