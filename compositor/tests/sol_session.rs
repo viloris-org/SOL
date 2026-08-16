@@ -28,6 +28,7 @@ const SOCKET: &str = "wayland-sol";
 struct Session {
     compositor: Child,
     socket: String,
+    runtime_dir: PathBuf,
 }
 
 impl Session {
@@ -39,9 +40,12 @@ impl Session {
         // Use a unique socket per test process to avoid clashing with any real
         // `wayland-sol` left running by hand.
         let socket = format!("{}-{}", SOCKET, std::process::id());
+        let runtime_dir = std::env::temp_dir().join(format!("sol-session-{socket}"));
+        std::fs::create_dir_all(&runtime_dir).expect("create isolated Wayland runtime directory");
 
         let compositor = Command::new(compositor_bin)
             .env("SOL_WAYLAND_SOCKET", &socket)
+            .env("XDG_RUNTIME_DIR", &runtime_dir)
             // Run the compositor in headless mode: no winit window, no GL.
             // This is the CI path — the protocol loop runs without any GPU /
             // display, so the test is deterministic on any runner.
@@ -51,7 +55,11 @@ impl Session {
             .spawn()
             .expect("spawn sol-compositor");
 
-        Session { compositor, socket }
+        Session {
+            compositor,
+            socket,
+            runtime_dir,
+        }
     }
 }
 
@@ -60,20 +68,22 @@ impl Drop for Session {
         let _ = self.compositor.kill();
         let _ = self.compositor.wait();
         // Best-effort cleanup of the socket file.
-        let _ = std::fs::remove_file(socket_path(&self.socket));
+        let _ = std::fs::remove_file(self.socket_path());
+        let _ = std::fs::remove_file(self.socket_path().with_extension("lock"));
+        let _ = std::fs::remove_dir(&self.runtime_dir);
     }
 }
 
-/// Path to the compositor socket under $XDG_RUNTIME_DIR.
-fn socket_path(socket: &str) -> PathBuf {
-    let run = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(run).join(socket)
+impl Session {
+    fn socket_path(&self) -> PathBuf {
+        self.runtime_dir.join(&self.socket)
+    }
 }
 
 /// Wait for the compositor's socket to exist (it binds before its event loop
 /// starts accepting; polling on the file is a pragmatic readiness probe).
-fn wait_for_socket(socket: &str, timeout: Duration) -> bool {
-    let path = socket_path(socket);
+fn wait_for_socket(session: &Session, timeout: Duration) -> bool {
+    let path = session.socket_path();
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if path.exists() {
@@ -128,7 +138,7 @@ fn path_for_spec(tree: &PathBuf, spec: &str) -> PathBuf {
 fn client_round_trip_against_compositor() {
     let _session = Session::start();
     assert!(
-        wait_for_socket(&_session.socket, Duration::from_secs(10)),
+        wait_for_socket(&_session, Duration::from_secs(10)),
         "compositor socket never appeared"
     );
 
@@ -136,6 +146,7 @@ fn client_round_trip_against_compositor() {
     let client_bin = build_bin("sol-compositor --example test-client");
     let output = Command::new(client_bin)
         .env("WAYLAND_DISPLAY", &_session.socket)
+        .env("XDG_RUNTIME_DIR", &_session.runtime_dir)
         .output()
         .expect("run test-client");
 
@@ -166,13 +177,14 @@ fn client_round_trip_against_compositor() {
 fn shell_top_bar_round_trip_against_compositor() {
     let _session = Session::start();
     assert!(
-        wait_for_socket(&_session.socket, Duration::from_secs(10)),
+        wait_for_socket(&_session, Duration::from_secs(10)),
         "compositor socket never appeared"
     );
 
     let shell_bin = build_bin("sol-shell");
     let output = Command::new(shell_bin)
         .env("WAYLAND_DISPLAY", &_session.socket)
+        .env("XDG_RUNTIME_DIR", &_session.runtime_dir)
         .arg("--once")
         .output()
         .expect("run sol-shell --once");
