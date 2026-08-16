@@ -422,7 +422,8 @@ impl DiagnosticStore for FileDiagnosticStore {
         fs::rename(&temporary_path, &self.path)
             .map_err(|error| io_error("replace diagnostics", error))?;
         restrict_file_permissions(&self.path)
-            .map_err(|error| io_error("restrict diagnostics permissions", error))
+            .map_err(|error| io_error("restrict diagnostics permissions", error))?;
+        sync_directory(parent).map_err(|error| io_error("sync diagnostics directory", error))
     }
 }
 
@@ -551,6 +552,18 @@ fn restrict_file_permissions(path: &Path) -> io::Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(path)?.sync_all()
     }
     #[cfg(not(unix))]
     {
