@@ -1,0 +1,15 @@
+[package]
+name = "solkit-component"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Keep this library independently buildable while it lives beneath SOL's
+# workspace, and after it is copied into an external project directory.
+[workspace]
+
+[dependencies]
+# These paths work while the template is in this repository. See README.md
+# before copying the template into a separate project.
+sol-design = { path = "../../sdk/sol-design", version = "0.1.0" }
+sol-ui = { path = "../../sdk/sol-ui", version = "0.1.0" }

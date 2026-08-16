@@ -551,7 +551,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [x] **Project scaffolding:** `scripts/new-solkit-project.sh` creates a named
       external starter, validates its package and app identity, and is covered
       by `scripts/test-new-solkit-project.sh`
-- [ ] **Templates:** `cargo new` / project scaffolding beyond the starter
+- [x] **Templates:** `templates/solkit-component` adds a library-only,
+      Public-tier SolUI/sol-design component template with external-copy and
+      scaffolding validation; publication, stability, native rendering, and
+      packaging remain separate work.
 - [ ] **Developer tools:** scaffolding, debugging, packaging tools
   - [x] **SDK environment doctor:** `scripts/solkit-doctor.sh` validates the
         toolchain, a locked Cargo manifest, starter copy-out behavior, and an
