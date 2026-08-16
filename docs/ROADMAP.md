@@ -474,6 +474,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 **Stability & hardware (hard settlement, §33)**
 
 - [ ] **Suspend / Resume:** session restores correctly; surfaces/state intact
+  - [x] **Checkpoint and restoration core:** `sol-session` validates a
+        generation-tagged surface/workspace checkpoint, persists it through a
+        typed store, and enforces suspend/resume ordering with deterministic
+        tests. logind PrepareForSleep, DRM/libseat revoke, process quiescing,
+        and real desktop restore remain required.
 - [ ] **Multi-monitor:** hotplug, independent configuration, per-monitor
       workspaces
 - [ ] **Fractional scaling:** crisp rendering at non-integer scales

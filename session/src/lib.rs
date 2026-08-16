@@ -69,6 +69,159 @@ pub struct LaunchPlan {
     pub socket_path: PathBuf,
 }
 
+/// Session-level lifecycle used to preserve compositor-owned surface state
+/// across a suspend/resume boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionPhase {
+    Active,
+    Suspending,
+    Suspended,
+    Resuming,
+}
+
+/// Renderer-neutral checkpoint for one live surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceCheckpoint {
+    pub surface_id: u64,
+    pub application: String,
+    pub workspace: u32,
+    pub geometry: (i32, i32, u32, u32),
+}
+
+/// Complete checkpoint captured before the display session sleeps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionCheckpoint {
+    pub generation: u64,
+    pub surfaces: Vec<SurfaceCheckpoint>,
+}
+
+/// Durable boundary for a compositor/session restoration adapter.
+pub trait SessionCheckpointStore {
+    fn save(&mut self, checkpoint: &SessionCheckpoint) -> Result<(), String>;
+    fn load(&self) -> Result<Option<SessionCheckpoint>, String>;
+}
+
+/// In-memory store used by headless tests and embedders.
+#[derive(Debug, Default, Clone)]
+pub struct MemoryCheckpointStore {
+    checkpoint: Option<SessionCheckpoint>,
+}
+
+impl SessionCheckpointStore for MemoryCheckpointStore {
+    fn save(&mut self, checkpoint: &SessionCheckpoint) -> Result<(), String> {
+        self.checkpoint = Some(checkpoint.clone());
+        Ok(())
+    }
+
+    fn load(&self) -> Result<Option<SessionCheckpoint>, String> {
+        Ok(self.checkpoint.clone())
+    }
+}
+
+/// State machine coordinating checkpoint capture and restoration.
+pub struct SessionRestoreCoordinator<S> {
+    store: S,
+    phase: SessionPhase,
+}
+
+impl<S: SessionCheckpointStore> SessionRestoreCoordinator<S> {
+    #[must_use]
+    pub fn new(store: S) -> Self {
+        Self {
+            store,
+            phase: SessionPhase::Active,
+        }
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> SessionPhase {
+        self.phase
+    }
+
+    /// Capture validated surface state and persist it before suspend.
+    pub fn suspend(
+        &mut self,
+        checkpoint: SessionCheckpoint,
+    ) -> Result<(), SessionRestoreError> {
+        if self.phase != SessionPhase::Active {
+            return Err(SessionRestoreError::InvalidPhase(self.phase));
+        }
+        validate_checkpoint(&checkpoint)?;
+        self.phase = SessionPhase::Suspending;
+        if let Err(error) = self.store.save(&checkpoint) {
+            self.phase = SessionPhase::Active;
+            return Err(SessionRestoreError::Store(error));
+        }
+        self.phase = SessionPhase::Suspended;
+        Ok(())
+    }
+
+    /// Reload the last checkpoint and return it to a compositor restore adapter.
+    pub fn resume(&mut self) -> Result<SessionCheckpoint, SessionRestoreError> {
+        if self.phase != SessionPhase::Suspended {
+            return Err(SessionRestoreError::InvalidPhase(self.phase));
+        }
+        self.phase = SessionPhase::Resuming;
+        let checkpoint = match self.store.load() {
+            Ok(Some(checkpoint)) => checkpoint,
+            Ok(None) => {
+                self.phase = SessionPhase::Suspended;
+                return Err(SessionRestoreError::MissingCheckpoint);
+            }
+            Err(error) => {
+                self.phase = SessionPhase::Suspended;
+                return Err(SessionRestoreError::Store(error));
+            }
+        };
+        if let Err(error) = validate_checkpoint(&checkpoint) {
+            self.phase = SessionPhase::Suspended;
+            return Err(error);
+        }
+        self.phase = SessionPhase::Active;
+        Ok(checkpoint)
+    }
+}
+
+/// Validation or persistence failure in the restoration boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionRestoreError {
+    InvalidPhase(SessionPhase),
+    InvalidCheckpoint(&'static str),
+    DuplicateSurface(u64),
+    MissingCheckpoint,
+    Store(String),
+}
+
+fn validate_checkpoint(checkpoint: &SessionCheckpoint) -> Result<(), SessionRestoreError> {
+    if checkpoint.generation == 0 {
+        return Err(SessionRestoreError::InvalidCheckpoint(
+            "checkpoint generation must be non-zero",
+        ));
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for surface in &checkpoint.surfaces {
+        if surface.surface_id == 0 {
+            return Err(SessionRestoreError::InvalidCheckpoint(
+                "surface ID must be non-zero",
+            ));
+        }
+        if !ids.insert(surface.surface_id) {
+            return Err(SessionRestoreError::DuplicateSurface(surface.surface_id));
+        }
+        if surface.application.is_empty() || surface.application.len() > 256 {
+            return Err(SessionRestoreError::InvalidCheckpoint(
+                "surface application identity is invalid",
+            ));
+        }
+        if surface.geometry.2 == 0 || surface.geometry.3 == 0 {
+            return Err(SessionRestoreError::InvalidCheckpoint(
+                "surface geometry must have non-zero size",
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl LaunchPlan {
     #[must_use]
     pub fn new(environment: &SessionEnvironment, programs: &ProgramPaths) -> Self {
@@ -506,5 +659,61 @@ mod tests {
             assert!(validate_socket_name(invalid).is_err(), "{invalid:?}");
         }
         assert!(validate_socket_name("wayland-sol-1").is_ok());
+    }
+
+    #[test]
+    fn suspend_persists_and_resume_restores_surface_checkpoint() {
+        let mut coordinator = SessionRestoreCoordinator::new(MemoryCheckpointStore::default());
+        let checkpoint = SessionCheckpoint {
+            generation: 7,
+            surfaces: vec![SurfaceCheckpoint {
+                surface_id: 11,
+                application: "com.example.notes".to_owned(),
+                workspace: 2,
+                geometry: (40, 50, 800, 600),
+            }],
+        };
+        coordinator.suspend(checkpoint.clone()).unwrap();
+        assert_eq!(coordinator.phase(), SessionPhase::Suspended);
+        assert_eq!(coordinator.resume().unwrap(), checkpoint);
+        assert_eq!(coordinator.phase(), SessionPhase::Active);
+    }
+
+    #[test]
+    fn invalid_or_out_of_order_restore_operations_are_rejected() {
+        let mut coordinator = SessionRestoreCoordinator::new(MemoryCheckpointStore::default());
+        assert!(matches!(
+            coordinator.resume(),
+            Err(SessionRestoreError::InvalidPhase(SessionPhase::Active))
+        ));
+        let invalid = SessionCheckpoint {
+            generation: 0,
+            surfaces: Vec::new(),
+        };
+        assert!(matches!(
+            coordinator.suspend(invalid),
+            Err(SessionRestoreError::InvalidCheckpoint(_))
+        ));
+        let duplicate = SessionCheckpoint {
+            generation: 1,
+            surfaces: vec![
+                SurfaceCheckpoint {
+                    surface_id: 1,
+                    application: "com.example.one".to_owned(),
+                    workspace: 0,
+                    geometry: (0, 0, 1, 1),
+                },
+                SurfaceCheckpoint {
+                    surface_id: 1,
+                    application: "com.example.two".to_owned(),
+                    workspace: 0,
+                    geometry: (0, 0, 1, 1),
+                },
+            ],
+        };
+        assert_eq!(
+            coordinator.suspend(duplicate),
+            Err(SessionRestoreError::DuplicateSurface(1))
+        );
     }
 }
