@@ -355,8 +355,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [x] **Renderer-neutral center core:** typed `NotificationApi` adapter,
         application/urgency grouping, lifecycle dismissal/actions, keyboard,
         accessibility semantics, and repeatable service-adapter fixtures.
-  - [ ] **Native notification surface:** D-Bus proxy, layer-shell presentation,
-        user policy, and real application action callback delivery.
+  - [x] **Notification service adapter:** `org.sol.Notifications1` exposes
+        caller-attributed typed notification publish, replacement, query,
+        action-validation, and dismissal flows. The daemon and
+        `NotificationDbusProxy` round-trip under an isolated session bus.
+  - [ ] **Native notification surface:** layer-shell presentation, user policy,
+        standard freedesktop notification interoperability, and real
+        application action callback delivery.
 - [ ] **Quick Settings** (wired to `sol-settingsd`)
   - [x] **Renderer-neutral quick settings core:** typed volume/mute with
         `SystemActionApi` authorization, appearance/accessibility preferences,

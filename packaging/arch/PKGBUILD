@@ -95,7 +95,7 @@ package_sol-settingsd() {
 
 package_sol-notificationd() {
   pkgdesc='SOL notification service'
-  depends=('gcc-libs' 'glibc')
+  depends=('dbus' 'gcc-libs' 'glibc')
   _package_binary sol-notificationd
 }
 

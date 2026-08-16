@@ -3872,7 +3872,10 @@ dependencies = [
 name = "sol-notificationd"
 version = "0.1.0"
 dependencies = [
+ "ctrlc",
+ "serde",
  "sol-system",
+ "zbus",
 ]
 
 [[package]]

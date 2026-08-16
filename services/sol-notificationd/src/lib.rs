@@ -4,6 +4,8 @@
 //! replacement semantics.  Application and Shell callers depend only on the
 //! typed [`sol_system::NotificationApi`] contract.
 
+pub mod dbus;
+
 use sol_system::{
     NotificationActionId, NotificationActionInvocation, NotificationApi, NotificationDismissReason,
     NotificationError, NotificationId, NotificationLifecycle, NotificationQuery,
