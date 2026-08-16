@@ -381,6 +381,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         those APIs exist.
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress
+  - [x] **Renderer-neutral workspace gesture model:** the overview controller
+        handles interruptible progress, velocity-aware settling, cancellation,
+        adjacent-workspace bounds, and reduced-motion behavior with fixtures.
+        libinput gesture events, compositor dispatch, and hardware latency
+        validation remain required.
 - [x] **Search & Launcher (§28) foundation:** private local application catalog,
       deterministic explainable ranking, and permission-gated typed launch
       execution. File/document/clipboard/command/calculator providers and the
