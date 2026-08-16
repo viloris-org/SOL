@@ -3717,6 +3717,11 @@ version = "0.1.0"
 [[package]]
 name = "sol-files"
 version = "0.1.0"
+dependencies = [
+ "sol-app",
+ "sol-design",
+ "sol-ui",
+]
 
 [[package]]
 name = "sol-graphics"

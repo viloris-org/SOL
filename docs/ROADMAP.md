@@ -281,6 +281,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Files (PRD §25):** sidebar / tabs / search / drag & drop / preview /
       removable storage / network locations / context actions / trash /
       keyboard navigation — the **dogfooding baseline (§19.1)**
+  - [x] **Renderer-neutral Files core:** directory tabs, list/grid sorting,
+        multi-selection and keyboard navigation, address breadcrumbs, local
+        copy/move/rename, recoverable-trash and drag/drop contracts, typed
+        errors, command palette, and temp-fixture operation tests.
+  - [ ] **Native Files surface and integrations:** SolUI sidebar/search/context
+        UI, preview, removable and network locations, portal-backed trash, and
+        real desktop drag/drop transport.
 - [ ] Dogfooding loop (§24): framework gap found in an app → improve SolKit →
       all apps benefit
 - [ ] Command palette / keyboard navigation consistent across the three apps
