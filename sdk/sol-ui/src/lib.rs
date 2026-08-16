@@ -48,9 +48,10 @@ pub struct Button {
 }
 
 /// Visual state of a button for consistent feedback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ButtonState {
     /// Normal, ready for interaction.
+    #[default]
     Normal,
     /// Pointer is over the button.
     Hovered,
@@ -148,7 +149,7 @@ pub struct HStack {
 impl Default for HStack {
     fn default() -> Self {
         Self {
-            spacing: Spacing::Sm,
+            spacing: Spacing::default(),
             alignment: StackAlignment::Start,
             children: Vec::new(),
         }
@@ -156,9 +157,10 @@ impl Default for HStack {
 }
 
 /// Alignment options for stack layouts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StackAlignment {
     /// Start/cross-start edge.
+    #[default]
     Start,
     /// Center.
     Center,
@@ -217,7 +219,7 @@ pub struct VStack {
 impl Default for VStack {
     fn default() -> Self {
         Self {
-            spacing: Spacing::Sm,
+            spacing: Spacing::default(),
             alignment: StackAlignment::Start,
             children: Vec::new(),
         }
@@ -344,9 +346,9 @@ mod tests {
     }
 
     #[test]
-    fn hstack_default_spacing_is_sm() {
+    fn hstack_default_spacing_is_md() {
         let stack = HStack::new();
-        assert_eq!(stack.spacing, Spacing::Sm);
+        assert_eq!(stack.spacing, Spacing::Md);
     }
 
     #[test]
@@ -367,5 +369,179 @@ mod tests {
     fn textfield_default_is_editable() {
         let field = TextField::new();
         assert!(field.editable);
+    }
+}
+
+/// A toolbar component - horizontal container for actions.
+#[derive(Debug)]
+pub struct Toolbar {
+    /// Items in the toolbar.
+    pub items: Vec<ToolbarItem>,
+    /// The background color.
+    pub background: Color,
+}
+
+impl Default for Toolbar {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            background: Color::Elevated,
+        }
+    }
+}
+
+impl Toolbar {
+    /// Create a new toolbar.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an item to the toolbar.
+    pub fn item(mut self, item: ToolbarItem) -> Self {
+        self.items.push(item);
+        self
+    }
+
+    /// Get the toolbar background color.
+    pub fn background_color(&self) -> Color {
+        self.background
+    }
+
+    /// Get the height of the toolbar.
+    pub fn height(&self) -> f32 {
+        40.0
+    }
+
+    /// Get the item spacing.
+    pub fn item_spacing(&self) -> Spacing {
+        Spacing::Sm
+    }
+}
+
+/// An item in a toolbar.
+#[derive(Debug)]
+pub enum ToolbarItem {
+    /// A button.
+    Button(Button),
+    /// A separator.
+    Separator,
+    /// A label.
+    Label(&'static str),
+}
+
+/// A tab component.
+#[derive(Debug)]
+pub struct Tab {
+    /// The tab label.
+    pub label: &'static str,
+    /// Whether this tab is selected.
+    pub selected: bool,
+    /// Whether this tab is enabled.
+    pub enabled: bool,
+}
+
+impl Tab {
+    /// Create a new tab.
+    pub fn new(label: &'static str) -> Self {
+        Self {
+            label,
+            selected: false,
+            enabled: true,
+        }
+    }
+
+    /// Select this tab.
+    pub fn select(mut self) -> Self {
+        self.selected = true;
+        self
+    }
+
+    /// Disable this tab.
+    pub fn disabled(mut self) -> Self {
+        self.enabled = false;
+        self
+    }
+
+    /// Get the text color based on state.
+    pub fn text_color(&self) -> Color {
+        if !self.enabled {
+            Color::TextSecondary
+        } else if self.selected {
+            Color::Accent
+        } else {
+            Color::TextPrimary
+        }
+    }
+
+    /// Get the indicator color for selected tab.
+    pub fn indicator_color(&self) -> Color {
+        Color::Accent
+    }
+}
+
+/// A tab bar container.
+#[derive(Debug, Default)]
+pub struct TabBar {
+    /// The tabs in the bar.
+    pub tabs: Vec<Tab>,
+}
+
+impl TabBar {
+    /// Create a new tab bar.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a tab to the bar.
+    pub fn tab(mut self, tab: Tab) -> Self {
+        self.tabs.push(tab);
+        self
+    }
+
+    /// Get the tab height.
+    pub fn tab_height(&self) -> f32 {
+        32.0
+    }
+}
+
+#[cfg(test)]
+mod ui_component_tests {
+    use super::*;
+
+    #[test]
+    fn toolbar_default_background_is_elevated() {
+        let toolbar = Toolbar::new();
+        assert!(matches!(toolbar.background, Color::Elevated));
+    }
+
+    #[test]
+    fn toolbar_can_add_items() {
+        let toolbar = Toolbar::new()
+            .item(ToolbarItem::Button(Button::new()))
+            .item(ToolbarItem::Separator)
+            .item(ToolbarItem::Label("File"));
+        assert_eq!(toolbar.items.len(), 3);
+    }
+
+    #[test]
+    fn tab_selected_uses_accent_color() {
+        let tab = Tab::new("Tests").select();
+        assert!(tab.selected);
+        assert!(matches!(tab.text_color(), Color::Accent));
+    }
+
+    #[test]
+    fn tab_disabled_uses_secondary_color() {
+        let tab = Tab::new("Tests").disabled();
+        assert!(!tab.enabled);
+        assert!(matches!(tab.text_color(), Color::TextSecondary));
+    }
+
+    #[test]
+    fn tabbar_can_add_tabs() {
+        let tabbar = TabBar::new()
+            .tab(Tab::new("General"))
+            .tab(Tab::new("Tests"));
+        assert_eq!(tabbar.tabs.len(), 2);
     }
 }

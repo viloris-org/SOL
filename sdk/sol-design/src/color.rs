@@ -24,6 +24,7 @@ impl Rgba {
 /// Semantic surface colors. Components and apps use these by *role*, so a
 /// global theme switch (light / dark / high-contrast) re-resolves the same
 /// enum without touching component code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     /// Base window / surface fill.
     Surface,

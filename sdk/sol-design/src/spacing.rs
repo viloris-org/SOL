@@ -3,10 +3,11 @@
 //! Named scale used by layout components and padding helpers.
 //! Components must request `Spacing::Md` rather than a bare `12.0`.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Spacing {
     Xs,
     Sm,
+    #[default]
     Md,
     Lg,
     Xl,
