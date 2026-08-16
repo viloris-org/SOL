@@ -195,6 +195,8 @@ backend remain future work; winit-first keeps CI green.
 - [x] Application lifecycle (PRD §20): App, AppWindow, AppState
 - [x] Command architecture (PRD §21): `file.open` / `edit.copy` … auto-exposed
       to menus / shortcuts / command palette
+- [x] **Decision #7:** application identity and lifecycle contracts
+      (validated reverse-DNS `AppId`; checked process lifecycle; ADR-0012)
 
 - [x] sol-graphics abstraction (§35): Renderbuffer, Surface, Brush, Paint, GraphicsContext
       (accessibility enters the architecture early)
@@ -222,7 +224,7 @@ backend remain future work; winit-first keeps CI green.
 > **Decision gate (PRD §41):** this Phase settles #1 SolUI rendering
 > architecture, #2 retained/declarative, #6 settings storage architecture
 > (settled: ADR-0011),
-> #7 application identity format.
+> #7 application identity format (settled: ADR-0012).
 
 ---
 

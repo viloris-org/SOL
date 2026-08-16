@@ -26,6 +26,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 7 | IME: first-party sol-ime frontend + fcitx5 engine | Accepted | Phase 1 | [0007-ime-frontend-fcitx5-engine.md](0007-ime-frontend-fcitx5-engine.md) |
 | 8 | Distribution (pacman/AUR) + XWayland dropped | Accepted | Phase 1+ | [0008-distribution-xwayland-scope.md](0008-distribution-xwayland-scope.md) |
 | 9 | Settings storage and stable minimum API boundary | Accepted | Phase 2 | [0011-settings-storage-api.md](0011-settings-storage-api.md) |
+| 10 | Application identity and lifecycle contracts | Accepted | Phase 2 | [0012-application-identity-lifecycle.md](0012-application-identity-lifecycle.md) |
 
 ## Open decisions (PRD §41 — to settle during prototyping)
 
@@ -35,7 +36,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 4 | Long-term role of Vulkan / wgpu | Phase 1+ | Do not rewrite the renderer prematurely |
 | 5 | Compositor ↔ Shell IPC transport / wire format | Phase 1 | Structural split resolved in 0006; choose transport (D-Bus / Wayland protocol / shm ring) |
 | 6 | Settings storage architecture | **Accepted (Phase 2)** | [ADR-0011](0011-settings-storage-api.md): typed API; daemon-owned storage boundary |
-| 7 | Application identity format | Phase 2/3 | Needed for launcher, commands, notifications, store |
+| 7 | Application identity format | **Accepted (Phase 2)** | [ADR-0012](0012-application-identity-lifecycle.md): validated reverse-DNS `AppId`; lifecycle boundary |
 | 8 | SolKit ABI/API stability strategy | Phase 6 | No stability promise in v0.1 |
 | 9 | Server-side vs client-side decorations | Phase 1 | Wayland-first policy; affects GTK/Qt/Electron behavior |
 | 10 | Global menu | Phase 4 | Optional; do not let it drive initial shell IPC |

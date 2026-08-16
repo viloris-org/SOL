@@ -18,35 +18,23 @@
 //! other apps. They are automatically exposed to menus, shortcuts, and
 //! the command palette.
 
+mod identity;
+mod lifecycle;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Application state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppState {
-    /// Application is starting up.
-    Starting,
-    /// Application is running and visible.
-    Running,
-    /// Application is suspended (not focused).
-    Suspended,
-    /// Application is stopped.
-    Stopped,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self::Stopped
-    }
-}
+pub use identity::{APP_ID_MAX_LENGTH, AppId, AppIdError, AppIdentity, AppIdentityError};
+pub use lifecycle::{
+    AppLifecycle, AppState, LifecycleError, LifecycleOperation, LifecycleTransition,
+};
 
 /// An application instance.
 #[derive(Debug)]
 pub struct App {
     /// The app's identity.
     pub id: AppId,
-    /// Current state.
-    pub state: AppState,
+    lifecycle: AppLifecycle,
     /// The app's window(s).
     pub windows: Vec<AppWindow>,
 }
@@ -56,53 +44,40 @@ impl App {
     pub fn new(id: AppId) -> Self {
         Self {
             id,
-            state: AppState::Starting,
+            lifecycle: AppLifecycle::new(),
             windows: Vec::new(),
         }
     }
 
-    /// Start the app.
-    pub fn start(&mut self) {
-        self.state = AppState::Running;
+    /// Return the current lifecycle state.
+    #[must_use]
+    pub const fn state(&self) -> AppState {
+        self.lifecycle.state()
     }
 
-    /// Suspend the app (lose focus).
-    pub fn suspend(&mut self) {
-        self.state = AppState::Suspended;
+    /// Finish application startup.
+    pub fn start(&mut self) -> Result<LifecycleTransition, LifecycleError> {
+        self.lifecycle.start()
     }
 
-    /// Resume the app (gain focus).
-    pub fn resume(&mut self) {
-        self.state = AppState::Running;
+    /// Suspend the app after it loses activity in the current session.
+    pub fn suspend(&mut self) -> Result<LifecycleTransition, LifecycleError> {
+        self.lifecycle.suspend()
     }
 
-    /// Stop the app.
-    pub fn stop(&mut self) {
-        self.state = AppState::Stopped;
+    /// Resume a suspended app when it becomes active again.
+    pub fn resume(&mut self) -> Result<LifecycleTransition, LifecycleError> {
+        self.lifecycle.resume()
+    }
+
+    /// Stop this application process. A stopped instance cannot be restarted.
+    pub fn stop(&mut self) -> Result<LifecycleTransition, LifecycleError> {
+        self.lifecycle.stop()
     }
 
     /// Add a window to the app.
     pub fn add_window(&mut self, window: AppWindow) {
         self.windows.push(window);
-    }
-}
-
-/// Application identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AppId {
-    /// The app's reverse-DNS style identifier.
-    pub id: String,
-    /// Version of the app.
-    pub version: String,
-}
-
-impl AppId {
-    /// Create a new app ID.
-    pub fn new(id: impl Into<String>, version: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            version: version.into(),
-        }
     }
 }
 
@@ -308,11 +283,12 @@ mod tests {
 
     #[test]
     fn app_can_start_and_stop() {
-        let mut app = App::new(AppId::new("test.app", "1.0"));
-        app.start();
-        assert!(matches!(app.state, AppState::Running));
-        app.stop();
-        assert!(matches!(app.state, AppState::Stopped));
+        let id = AppId::parse("org.example.test").expect("test ID should parse");
+        let mut app = App::new(id);
+        app.start().expect("app should start");
+        assert!(matches!(app.state(), AppState::Running));
+        app.stop().expect("app should stop");
+        assert!(matches!(app.state(), AppState::Stopped));
     }
 
     #[test]
