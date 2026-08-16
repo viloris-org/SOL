@@ -433,8 +433,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 
 **Security & diagnostics**
 
-- [ ] Diagnostics / crash-reporting architecture (§41 #18; must not require
-      arbitrary shell access)
+- [x] **Privacy-bounded diagnostics foundation:** `sol-diagnostics` records
+      typed source/severity/code events with deterministic summary redaction,
+      bounded retention, and private local storage; ADR-0016 prohibits shell
+      access and opaque payloads at this boundary.
+- [ ] **Live crash reporting:** authenticated service transport, real crash
+      capture, consent UX, encrypted export/upload policy, and field validation
+      remain required before treating diagnostics as a production reporter.
 - [ ] Permission model (§31): sensitive capabilities explicitly authorized
       (screen recording / camera / microphone / location / secrets / system
       settings)

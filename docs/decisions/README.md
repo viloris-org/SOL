@@ -30,6 +30,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 11 | Typed System Action and permission layer | Accepted (API contract) | Phase 4 | [0013-system-action-permission-layer.md](0013-system-action-permission-layer.md) |
 | 12 | Local, privacy-preserving search index | Accepted (foundation) | Phase 4 | [0014-local-search-index.md](0014-local-search-index.md) |
 | 13 | System overlays and layer-shell popup contract | Accepted (headless contract) | Phase 4 | [0015-layer-shell-overlays-popup-contract.md](0015-layer-shell-overlays-popup-contract.md) |
+| 14 | Privacy-bounded diagnostics foundation | Accepted (Phase 5 foundation) | Phase 5 | [0016-diagnostics-foundation.md](0016-diagnostics-foundation.md) |
 
 ## Open decisions (PRD §41 — to settle during prototyping)
 
@@ -50,7 +51,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 15 | Store backend | Phase 4+ | Hide package implementation details behind pacman/AUR |
 | 16 | Search index architecture | **Accepted (Phase 4 foundation)** | [ADR-0014](0014-local-search-index.md): explicit local application catalog; no filesystem/document/clipboard/network indexing; typed launch results only |
 | 17 | System Action API | **Accepted (Phase 4 API contract)** | [ADR-0013](0013-system-action-permission-layer.md): typed caller-attributed actions, default-deny grants, consent boundary, and audit; system adapters remain deferred |
-| 18 | Crash reporting / diagnostics | Phase 5 | Must not require arbitrary shell access |
+| 18 | Crash reporting / diagnostics | **Accepted (Phase 5 foundation)** | [ADR-0016](0016-diagnostics-foundation.md): typed source attribution, deterministic redaction, bounded local stores; collection, upload, consent, and live crash capture remain deferred |
 | 19 | IME engine/frontend integration boundary | Phase 1 | fcitx5 addon coverage; sol-ime frontend owns candidate-window UI; engine upgrade strategy; when a custom engine is ever considered |
 
 ## Related reading

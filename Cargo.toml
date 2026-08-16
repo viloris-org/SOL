@@ -13,6 +13,7 @@ members = [
     "services/sol-notificationd",
     "services/sol-portal",
     "services/sol-ime",
+    "services/sol-diagnostics",
     "apps/sol-files",
     "apps/sol-terminal",
     "apps/sol-settings",

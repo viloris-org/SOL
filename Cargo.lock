@@ -3837,6 +3837,13 @@ name = "sol-design"
 version = "0.1.0"
 
 [[package]]
+name = "sol-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "sol-app",
+]
+
+[[package]]
 name = "sol-files"
 version = "0.1.0"
 dependencies = [

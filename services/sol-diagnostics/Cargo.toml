@@ -1,0 +1,10 @@
+[package]
+name = "sol-diagnostics"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+sol-app = { path = "../../sdk/sol-app" }
