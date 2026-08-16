@@ -4,6 +4,7 @@
 //! remain independently testable so service adapters can be validated without
 //! duplicating shell policy in transport-specific code.
 
+pub mod consent;
 pub mod launcher;
 pub mod notification_center;
 pub mod overlay;

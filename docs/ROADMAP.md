@@ -512,6 +512,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Production permission model (§31):** trusted consent UI, polkit/portal
       policy, and explicit authorization for recording, camera, microphone,
       location, secrets, and system settings remain.
+  - [x] **Trusted consent surface foundation:** a renderer-neutral Shell prompt
+        presents the exact caller, source, capability, typed action, and policy
+        rationale; SolUI keyboard/accessibility choices resolve allow-once,
+        allow-always, or deny only through `SystemActionApi`, with persistence
+        and audit fixtures. Native trusted presentation, cross-process policy,
+        and the remaining protected capabilities remain open.
 
 ### M5 success criterion
 
