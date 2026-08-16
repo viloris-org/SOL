@@ -23,8 +23,10 @@ fcitx5-ime / fcitx5-chinese-addons（pinyin and other mainstream engines）
   current Smithay 0.7 compositor implementation advertises `text-input v3` +
   `input-method v2` and will evaluate the newer staging protocols when Smithay
   supports them.
-- The engine integration targets the `fcitx5` framework (Chinese pinyin via
-  `fcitx5-chinese-addons`, etc.); its transport wiring remains pending.
+- The engine integration uses fcitx5's public session-bus
+  `org.fcitx.Fcitx.InputMethod1` / `InputContext1` contract. It forwards key
+  presses and translates `UpdateFormattedPreedit`, `UpdateClientSideUI`, and
+  `CommitString` signals into the frontend model.
 
 ## Mainstream languages first
 
@@ -33,8 +35,10 @@ Japanese / Korean as needed (fcitx5 supports these already).
 
 ## Status
 
-**Phase 1 frontend scaffold.** The candidate-window/preedit data model and
-fcitx5 engine seam are present; the client protocol wiring, candidate-window
-UI rendering, and fcitx5 transport remain follow-on work (see
+**Phase 1 transport complete.** `Fcitx5DbusTransport` is the real session-bus
+adapter, while `Fcitx5Transport` lets unit tests use a deterministic fake.
+The fake covers Chinese pinyin `shan → 山/闪/善 → 山`; an ignored smoke test
+can be run against a live fcitx5 session. Candidate-window UI rendering and
+the full Wayland input-method client surface remain follow-on work (see
 [ROADMAP Phase 1 — IME](../../docs/ROADMAP.md)). The integration boundary is
 tracked in decision item #19.

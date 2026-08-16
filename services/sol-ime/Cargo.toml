@@ -13,5 +13,6 @@ tracing = { version = "0.1", features = ["log"] }
 # The IME candidate window / preedit must be themed with sol-design tokens so
 # it is unmistakably SOL (PRD §21.1 / ADR-0007); no hand-written hex/px here.
 sol-design = { path = "../../sdk/sol-design" }
+zbus = { version = "5.19", features = ["blocking-api"] }
 
 [dev-dependencies]

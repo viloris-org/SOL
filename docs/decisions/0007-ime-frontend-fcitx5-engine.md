@@ -43,9 +43,9 @@ fcitx5-ime / fcitx5-chinese-addons (pinyin and other mainstream language engines
 
 ## Consequences
 
-- `sol-ime` provides the Phase 1 candidate-window/preedit data model and
-  fcitx5 engine seam. Candidate-window rendering and fcitx5 transport wiring
-  remain follow-on work.
+- `sol-ime` provides the Phase 1 candidate-window/preedit data model and a
+  session-bus fcitx5 transport. Candidate-window rendering and full Wayland
+  input-method client-surface delivery remain follow-on work.
 - PRD §7 `sol-core` package list includes `sol-ime`; PRD §40 IME row; §36 MVP
   includes IME; §38 Phase 1 adds the current Smithay `text-input v3` +
   `input-method v2` integration while keeping v4/v3 as the protocol target.

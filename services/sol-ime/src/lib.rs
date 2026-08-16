@@ -18,6 +18,7 @@
 
 pub mod candidate;
 pub mod engine;
+pub mod fcitx5_dbus;
 pub mod preedit;
 
 use sol_design::color::Color;
@@ -39,6 +40,14 @@ pub struct SolIme {
 }
 
 impl SolIme {
+    /// Apply an engine result to the frontend and return text to commit to the
+    /// focused Wayland client, if the engine settled a composition.
+    pub fn apply_engine_result(&mut self, result: &engine::EngineResult) -> Option<String> {
+        self.preedit = result.preedit.clone();
+        self.candidates = result.candidates.clone();
+        result.committed_text.clone()
+    }
+
     /// Whether anything needs to be presented (preedit text or candidates).
     pub fn has_content(&self) -> bool {
         !self.preedit.text.is_empty() || !self.candidates.is_empty()

@@ -123,10 +123,11 @@ backend remain future work; winit-first keeps CI green.
 - [x] `sol-ime` frontend scaffold: candidate window / preedit data model +
       layout with `sol-design` tokens (visual rendering via `sol-ui` lands in
       Phase 2, when `sol-ui` exists)
-- [x] fcitx5 engine bridge seam (`EngineBridge` trait + stub `Fcitx5Bridge`);
-      the `NoopEngine` default keeps the workspace CI-green. The full
-      `fcitx5-ime` / `fcitx5-chinese-addons` transport (Chinese pinyin first)
-      remains post-M1 follow-on work.
+- [x] fcitx5 engine transport: `org.fcitx.Fcitx.InputMethod1` session-bus
+      input context forwards key events and translates preedit / candidate /
+      commit signals into the SOL frontend model. A deterministic pinyin fake
+      covers `shan → 山`; an ignored session-bus smoke test is available when
+      fcitx5 is running.
 
 ### M1 success criterion
 
@@ -134,7 +135,9 @@ backend remain future work; winit-first keeps CI green.
 > Judged by: windows can be created/moved/resized/focused, multiple
 > workspaces switchable, multi-monitor works, the shell top bar coexists with
 > the compositor over the settled IPC, and the IME protocol/frontend seam is
-> present. Stable Chinese pinyin delivery requires the post-M1 fcitx5 transport.
+> present. The fcitx5 transport is covered by a deterministic pinyin flow and
+> optional session-bus smoke; full compositor-to-surface delivery follows the
+> candidate-window UI work.
 
 ### M1 dependencies & risks
 
@@ -151,9 +154,10 @@ backend remain future work; winit-first keeps CI green.
   layer-shell protocol + shell top bar, D-Bus IPC decision, structural
   shell/compositor split, output management + HiDPI + display-hotplug,
   compositor text-input v3 + input-method v2, sol-ime frontend scaffold +
-  fcitx5 engine bridge seam.
-- **Not yet (post-M1 / Phase 1 follow-on):** fcitx5 transport wiring on the
-  Arch dev host, and real DRM/udev multi-monitor (ADR-0005).
+  fcitx5 D-Bus transport / pinyin fake harness.
+- **Not yet (post-M1 / Phase 1 follow-on):** real DRM/udev multi-monitor
+  (ADR-0005). IME candidate-window rendering and full compositor-surface
+  delivery remain later UI integration work.
 
 ---
 
@@ -432,3 +436,7 @@ SOL Applications → Third-party Applications
   protocol integration, D-Bus IPC decision, structural shell/compositor split,
   compositor text-input v3 + input-method v2 integration. Remaining items
   (fcitx5 transport wiring, DRM/udev multi-monitor) are post-M1 follow-on.
+- **2026-08-16** — `sol-ime` gained an fcitx5 session-bus transport and typed
+  engine/frontend event boundary. A fake pinyin round-trip covers preedit,
+  candidates, and commit without a daemon; the optional D-Bus smoke verifies
+  input-context setup and frontend UI signals on a running fcitx5 session.
