@@ -3875,6 +3875,13 @@ version = "0.1.0"
 [[package]]
 name = "sol-settings"
 version = "0.1.0"
+dependencies = [
+ "sol-app",
+ "sol-design",
+ "sol-settingsd",
+ "sol-system",
+ "sol-ui",
+]
 
 [[package]]
 name = "sol-settingsd"
