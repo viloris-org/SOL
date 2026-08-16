@@ -362,8 +362,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [x] **Top Bar foundation:** renderer-neutral clock/date, workspace, network,
       audio, power, and privacy/activity provider contracts; unavailable/stale/
       error state, keyboard/accessibility navigation, and permission-gated typed
-      intents. NetworkManager/PipeWire/UPower/compositor/portal adapters and
-      real desktop activation remain deferred.
+      intents. Read-only NetworkManager/PipeWire/UPower status adapters are
+      validated; compositor activation and write-capable system adapters remain
+      deferred.
 - [x] **Notification service foundation:** typed `NotificationApi` +
       `sol-notificationd` lifecycle, replacement, action, query, and storage
       boundary, including a Shell-consumed `NotificationDbusProxy` adapter
@@ -385,7 +386,7 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         session-bus checks cover both protocols and signals.
   - [ ] **Native notification surface:** layer-shell presentation, user policy,
         and real application action callback delivery.
-- [ ] **Quick Settings** (wired to `sol-settingsd`)
+- [x] **Quick Settings** (wired to `sol-settingsd`)
   - [x] **Renderer-neutral quick settings core:** typed volume/mute with
         `SystemActionApi` authorization, appearance/accessibility preferences,
         keyboard/accessibility semantics, and fixture-backed adapters.
