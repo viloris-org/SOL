@@ -17,7 +17,33 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use sol_app::{App, AppId};
 use sol_design::color::Color;
 use sol_graphics::Surface;
-use sol_ui::{AccessibilityNode, Button, InteractionTree, Key, KeyboardOutcome, SemanticControl};
+use sol_ui::{
+    AccessibilityNode, Button, CommandPalette, CommandPaletteOutcome, InteractionTree, Key,
+    KeyboardOutcome, PaletteCommand, SemanticControl,
+};
+
+const TERMINAL_COMMANDS: [PaletteCommand; 5] = [
+    PaletteCommand {
+        id: "terminal.new_tab",
+        title: "Open a new terminal tab",
+    },
+    PaletteCommand {
+        id: "terminal.close_tab",
+        title: "Close active terminal tab",
+    },
+    PaletteCommand {
+        id: "terminal.copy",
+        title: "Copy terminal selection",
+    },
+    PaletteCommand {
+        id: "terminal.paste",
+        title: "Paste into terminal",
+    },
+    PaletteCommand {
+        id: "terminal.search",
+        title: "Search terminal scrollback",
+    },
+];
 
 /// A terminal-core failure. The error deliberately does not expose an OS shell
 /// command line so callers cannot accidentally treat executable text as shell
@@ -751,6 +777,7 @@ pub struct TerminalApp<F: PtyFactory, C: ClipboardAdapter> {
     tabs: Vec<TerminalTab<F::Session>>,
     active_tab: Option<usize>,
     tree: InteractionTree,
+    palette: CommandPalette,
 }
 
 impl<F: PtyFactory, C: ClipboardAdapter> TerminalApp<F, C> {
@@ -787,6 +814,7 @@ impl<F: PtyFactory, C: ClipboardAdapter> TerminalApp<F, C> {
             tabs: Vec::new(),
             active_tab: None,
             tree,
+            palette: CommandPalette::new(&TERMINAL_COMMANDS),
         };
         terminal.new_tab(size)?;
         Ok(terminal)
@@ -794,23 +822,8 @@ impl<F: PtyFactory, C: ClipboardAdapter> TerminalApp<F, C> {
 
     /// Stable command-palette entries.
     #[must_use]
-    pub fn commands(query: &str) -> Vec<(&'static str, &'static str)> {
-        const COMMANDS: [(&str, &str); 5] = [
-            ("terminal.new_tab", "Open a new terminal tab"),
-            ("terminal.close_tab", "Close active terminal tab"),
-            ("terminal.copy", "Copy terminal selection"),
-            ("terminal.paste", "Paste into terminal"),
-            ("terminal.search", "Search terminal scrollback"),
-        ];
-        let query = query.to_ascii_lowercase();
-        COMMANDS
-            .into_iter()
-            .filter(|(id, title)| {
-                query.is_empty()
-                    || id.contains(&query)
-                    || title.to_ascii_lowercase().contains(&query)
-            })
-            .collect()
+    pub fn commands(query: &str) -> Vec<PaletteCommand> {
+        CommandPalette::filter(&TERMINAL_COMMANDS, query)
     }
 
     /// Execute a palette command. Search is intentionally UI-owned and returns
@@ -879,10 +892,28 @@ impl<F: PtyFactory, C: ClipboardAdapter> TerminalApp<F, C> {
     pub fn handle_navigation(&mut self, key: Key) -> KeyboardOutcome {
         self.tree.handle_key(key)
     }
+    /// Route the shared command-palette key contract and execute activated commands.
+    pub fn handle_command_palette_key(
+        &mut self,
+        key: Key,
+    ) -> Result<CommandPaletteOutcome, TerminalError> {
+        let outcome = self.palette.handle_key(key);
+        if let CommandPaletteOutcome::Execute(id) = outcome {
+            self.execute(id)?;
+            Ok(CommandPaletteOutcome::Execute(id))
+        } else {
+            Ok(outcome)
+        }
+    }
     /// Return the semantic accessibility tree for tab/clipboard commands.
     #[must_use]
     pub fn accessibility_tree(&self) -> AccessibilityNode {
         self.tree.accessibility_tree()
+    }
+    /// Return the dedicated accessibility projection for the transient palette.
+    #[must_use]
+    pub fn command_palette_accessibility_tree(&self) -> AccessibilityNode {
+        self.palette.accessibility_tree()
     }
 
     /// Resize both the active grid and the active PTY.
@@ -1139,6 +1170,30 @@ mod tests {
         assert_eq!(terminal.tab_count(), 1);
         terminal.shutdown().unwrap();
         assert_eq!(terminal.tab_count(), 0);
+    }
+
+    #[test]
+    fn shared_palette_executes_terminal_commands_and_supports_escape() {
+        let mut terminal = app();
+        terminal
+            .handle_command_palette_key(Key::CommandPalette)
+            .unwrap();
+        terminal.handle_command_palette_key(Key::Tab).unwrap();
+        assert_eq!(
+            terminal.handle_command_palette_key(Key::Enter).unwrap(),
+            CommandPaletteOutcome::Execute("terminal.new_tab")
+        );
+        assert_eq!(terminal.tab_count(), 2);
+        assert_eq!(
+            terminal.handle_command_palette_key(Key::Escape).unwrap(),
+            CommandPaletteOutcome::Closed
+        );
+        assert_eq!(
+            terminal
+                .handle_command_palette_key(Key::Character('x'))
+                .unwrap(),
+            CommandPaletteOutcome::Ignored
+        );
     }
 
     #[test]

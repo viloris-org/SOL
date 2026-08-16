@@ -292,9 +292,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [ ] **Native Files surface and integrations:** SolUI sidebar/search/context
         UI, preview, removable and network locations, portal-backed trash, and
         real desktop drag/drop transport.
-- [ ] Dogfooding loop (§24): framework gap found in an app → improve SolKit →
-      all apps benefit
-- [ ] Command palette / keyboard navigation consistent across the three apps
+- [x] Dogfooding loop (§24): first-party command-palette divergence found in
+      Settings / Terminal / Files → shared renderer-neutral SolUI palette
+      contract → all three apps now share it, with deterministic dogfood tests.
+- [x] Command palette / keyboard navigation consistent across the three apps:
+      `Ctrl+Shift+P`, query filtering, Tab / Shift+Tab traversal, Enter / Space
+      activation, Escape dismissal, empty results, and accessibility projection
+      are supplied by the same SolUI contract; each app retains typed execution.
 
 **Dogfooding iron rules (§19.1)**
 

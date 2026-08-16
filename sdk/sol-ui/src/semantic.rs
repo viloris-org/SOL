@@ -151,6 +151,8 @@ impl TokenizedComponent for TextField {
 /// Normalized keyboard input consumed by SolUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
+    /// Open the standard command palette (`Ctrl+Shift+P` on desktop keyboards).
+    CommandPalette,
     /// Advance focus to the next focusable semantic control.
     Tab,
     /// Move focus to the previous focusable semantic control.
@@ -167,6 +169,8 @@ pub enum Key {
     Character(char),
     /// Remove one Unicode scalar from the focused editable field.
     Backspace,
+    /// Dismiss the current transient surface without activating a control.
+    Escape,
 }
 
 /// Uniform outcome returned by keyboard dispatch.
@@ -360,6 +364,7 @@ impl InteractionTree {
     /// Dispatch one normalized keyboard key according to SolUI behavior.
     pub fn handle_key(&mut self, key: Key) -> KeyboardOutcome {
         match key {
+            Key::CommandPalette | Key::Escape => KeyboardOutcome::Ignored,
             Key::Tab => self.move_focus(false),
             Key::ShiftTab => self.move_focus(true),
             Key::Enter | Key::Space => self.activate_focused(),

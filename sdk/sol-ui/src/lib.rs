@@ -24,12 +24,17 @@ use sol_design::{
     typography::FontStyle,
 };
 
+mod command_palette;
 mod runtime;
 mod semantic;
 
 #[cfg(feature = "native")]
 mod slint_backend;
 
+pub use command_palette::{
+    COMMAND_PALETTE_SHORTCUT, CommandPalette, CommandPaletteOutcome, CommandPaletteState,
+    PaletteCommand,
+};
 pub use runtime::{
     ButtonController, ButtonFrame, FixtureSurfaceHost, LogicalSize, RecordingRenderer, Renderer,
     SurfaceHost, present_button,

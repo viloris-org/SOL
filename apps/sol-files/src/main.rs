@@ -6,7 +6,10 @@
 
 use sol_app::{App, AppId};
 use sol_design::{color::Color, motion::Motion, spacing::Spacing};
-use sol_ui::{AccessibilityNode, Button, InteractionTree, SemanticControl, TextField};
+use sol_ui::{
+    AccessibilityNode, Button, CommandPalette, CommandPaletteOutcome, InteractionTree, Key,
+    PaletteCommand, SemanticControl, TextField,
+};
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
@@ -227,14 +230,39 @@ pub struct DropResult {
     pub destination: PathBuf,
 }
 
-/// Stable command-palette item for Files actions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FilesCommand {
-    /// Stable command identifier.
-    pub id: &'static str,
-    /// User-visible title.
-    pub title: &'static str,
-}
+/// Shared command-palette metadata for Files actions.
+pub type FilesCommand = PaletteCommand;
+
+const FILES_COMMANDS: [PaletteCommand; 7] = [
+    PaletteCommand {
+        id: "view.list",
+        title: "Use list view",
+    },
+    PaletteCommand {
+        id: "view.grid",
+        title: "Use grid view",
+    },
+    PaletteCommand {
+        id: "sort.name",
+        title: "Sort by name",
+    },
+    PaletteCommand {
+        id: "sort.modified",
+        title: "Sort by modified time",
+    },
+    PaletteCommand {
+        id: "selection.all",
+        title: "Select all",
+    },
+    PaletteCommand {
+        id: "directory.refresh",
+        title: "Refresh folder",
+    },
+    PaletteCommand {
+        id: "tab.new",
+        title: "Open current folder in new tab",
+    },
+];
 
 /// Keyboard input interpreted by the directory model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -377,6 +405,7 @@ pub struct FilesApp<T: TrashStore> {
     active_tab: usize,
     trash: T,
     semantic_tree: InteractionTree,
+    palette: CommandPalette,
 }
 
 impl<T: TrashStore> FilesApp<T> {
@@ -414,6 +443,7 @@ impl<T: TrashStore> FilesApp<T> {
             active_tab: 0,
             trash,
             semantic_tree,
+            palette: CommandPalette::new(&FILES_COMMANDS),
         })
     }
 
@@ -737,45 +767,7 @@ impl<T: TrashStore> FilesApp<T> {
     /// Return command-palette entries matching `query`.
     #[must_use]
     pub fn commands(query: &str) -> Vec<FilesCommand> {
-        const COMMANDS: [FilesCommand; 7] = [
-            FilesCommand {
-                id: "view.list",
-                title: "Use list view",
-            },
-            FilesCommand {
-                id: "view.grid",
-                title: "Use grid view",
-            },
-            FilesCommand {
-                id: "sort.name",
-                title: "Sort by name",
-            },
-            FilesCommand {
-                id: "sort.modified",
-                title: "Sort by modified time",
-            },
-            FilesCommand {
-                id: "selection.all",
-                title: "Select all",
-            },
-            FilesCommand {
-                id: "directory.refresh",
-                title: "Refresh folder",
-            },
-            FilesCommand {
-                id: "tab.new",
-                title: "Open current folder in new tab",
-            },
-        ];
-        let query = query.to_ascii_lowercase();
-        COMMANDS
-            .into_iter()
-            .filter(|command| {
-                query.is_empty()
-                    || command.id.contains(&query)
-                    || command.title.to_ascii_lowercase().contains(&query)
-            })
-            .collect()
+        CommandPalette::filter(&FILES_COMMANDS, query)
     }
 
     /// Execute a command-palette action that has no renderer-specific behavior.
@@ -799,10 +791,27 @@ impl<T: TrashStore> FilesApp<T> {
         Ok(())
     }
 
+    /// Route the shared command-palette key contract and execute activated commands.
+    pub fn handle_command_palette_key(&mut self, key: Key) -> FilesResult<CommandPaletteOutcome> {
+        let outcome = self.palette.handle_key(key);
+        if let CommandPaletteOutcome::Execute(id) = outcome {
+            self.execute_command(id)?;
+            Ok(CommandPaletteOutcome::Execute(id))
+        } else {
+            Ok(outcome)
+        }
+    }
+
     /// Renderer-independent semantic projection for accessibility bridges.
     #[must_use]
     pub fn accessibility_tree(&self) -> AccessibilityNode {
         self.semantic_tree.accessibility_tree()
+    }
+
+    /// Return the dedicated accessibility projection for the transient palette.
+    #[must_use]
+    pub fn command_palette_accessibility_tree(&self) -> AccessibilityNode {
+        self.palette.accessibility_tree()
     }
 
     /// Token-only visual policy for the Files chrome.
@@ -1187,5 +1196,35 @@ mod tests {
             files.execute_command("missing"),
             Err(FilesError::UnknownCommand(_))
         ));
+    }
+
+    #[test]
+    fn shared_palette_executes_files_commands_and_projects_empty_state() {
+        let fixture = Fixture::new();
+        write(&fixture, "visible.txt", "data");
+        let mut files = app(&fixture);
+        files
+            .handle_command_palette_key(Key::CommandPalette)
+            .unwrap();
+        files.handle_command_palette_key(Key::Tab).unwrap();
+        files.handle_command_palette_key(Key::Tab).unwrap();
+        assert_eq!(
+            files.handle_command_palette_key(Key::Space).unwrap(),
+            CommandPaletteOutcome::Execute("view.grid")
+        );
+        assert_eq!(files.active_tab().layout, DirectoryLayout::Grid);
+        files.handle_command_palette_key(Key::ShiftTab).unwrap();
+        files.handle_command_palette_key(Key::ShiftTab).unwrap();
+        files
+            .handle_command_palette_key(Key::Character('z'))
+            .unwrap();
+        assert_eq!(
+            files.command_palette_accessibility_tree().children[1].label,
+            "No matching commands"
+        );
+        assert_eq!(
+            files.handle_command_palette_key(Key::Escape).unwrap(),
+            CommandPaletteOutcome::Closed
+        );
     }
 }

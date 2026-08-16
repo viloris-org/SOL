@@ -7,7 +7,41 @@ use sol_system::{
     ColorScheme, OutputVolume, SettingsApi, SettingsChange, SettingsError, SettingsSnapshot,
     TextScale,
 };
-use sol_ui::{Button, InteractionTree, Key, KeyboardOutcome, SemanticControl};
+use sol_ui::{
+    AccessibilityNode, Button, CommandPalette, CommandPaletteOutcome, InteractionTree, Key,
+    KeyboardOutcome, PaletteCommand, SemanticControl,
+};
+
+const SETTINGS_COMMANDS: [PaletteCommand; 7] = [
+    PaletteCommand {
+        id: "appearance.dark",
+        title: "Use dark appearance",
+    },
+    PaletteCommand {
+        id: "appearance.high_contrast",
+        title: "Toggle high contrast",
+    },
+    PaletteCommand {
+        id: "appearance.reduced_motion",
+        title: "Toggle reduced motion",
+    },
+    PaletteCommand {
+        id: "appearance.text_large",
+        title: "Use large text",
+    },
+    PaletteCommand {
+        id: "sound.mute",
+        title: "Toggle output mute",
+    },
+    PaletteCommand {
+        id: "page.displays",
+        title: "Open Displays",
+    },
+    PaletteCommand {
+        id: "page.keyboard",
+        title: "Open Keyboard",
+    },
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -28,11 +62,8 @@ impl Page {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandItem {
-    pub id: &'static str,
-    pub title: &'static str,
-}
+/// Shared command-palette metadata for Settings actions.
+pub type CommandItem = PaletteCommand;
 
 pub struct SettingsApp<A: SettingsApi> {
     api: A,
@@ -40,6 +71,7 @@ pub struct SettingsApp<A: SettingsApi> {
     snapshot: SettingsSnapshot,
     page: Page,
     tree: InteractionTree,
+    palette: CommandPalette,
 }
 
 impl<A: SettingsApi> SettingsApp<A> {
@@ -70,6 +102,7 @@ impl<A: SettingsApi> SettingsApp<A> {
             snapshot,
             page: Page::Appearance,
             tree,
+            palette: CommandPalette::new(&SETTINGS_COMMANDS),
         })
     }
     pub fn snapshot(&self) -> &SettingsSnapshot {
@@ -97,44 +130,7 @@ impl<A: SettingsApi> SettingsApp<A> {
         })
     }
     pub fn commands(query: &str) -> Vec<CommandItem> {
-        const ALL: [CommandItem; 7] = [
-            CommandItem {
-                id: "appearance.dark",
-                title: "Use dark appearance",
-            },
-            CommandItem {
-                id: "appearance.high_contrast",
-                title: "Toggle high contrast",
-            },
-            CommandItem {
-                id: "appearance.reduced_motion",
-                title: "Toggle reduced motion",
-            },
-            CommandItem {
-                id: "appearance.text_large",
-                title: "Use large text",
-            },
-            CommandItem {
-                id: "sound.mute",
-                title: "Toggle output mute",
-            },
-            CommandItem {
-                id: "page.displays",
-                title: "Open Displays",
-            },
-            CommandItem {
-                id: "page.keyboard",
-                title: "Open Keyboard",
-            },
-        ];
-        let query = query.to_ascii_lowercase();
-        ALL.into_iter()
-            .filter(|item| {
-                query.is_empty()
-                    || item.id.contains(&query)
-                    || item.title.to_ascii_lowercase().contains(&query)
-            })
-            .collect()
+        CommandPalette::filter(&SETTINGS_COMMANDS, query)
     }
     pub fn execute(&mut self, id: &str) -> Result<(), SettingsError> {
         match id {
@@ -179,8 +175,26 @@ impl<A: SettingsApi> SettingsApp<A> {
     pub fn handle_key(&mut self, key: Key) -> KeyboardOutcome {
         self.tree.handle_key(key)
     }
+    /// Route the shared command-palette key contract and execute activated commands.
+    pub fn handle_command_palette_key(
+        &mut self,
+        key: Key,
+    ) -> Result<CommandPaletteOutcome, SettingsError> {
+        let outcome = self.palette.handle_key(key);
+        if let CommandPaletteOutcome::Execute(id) = outcome {
+            self.execute(id)?;
+            Ok(CommandPaletteOutcome::Execute(id))
+        } else {
+            Ok(outcome)
+        }
+    }
     pub fn accessibility_tree(&self) -> sol_ui::AccessibilityNode {
         self.tree.accessibility_tree()
+    }
+    /// Return the dedicated accessibility projection for the transient palette.
+    #[must_use]
+    pub fn command_palette_accessibility_tree(&self) -> AccessibilityNode {
+        self.palette.accessibility_tree()
     }
     fn apply(&mut self, change: SettingsChange) -> Result<(), SettingsError> {
         self.snapshot = self.api.apply(change)?;
@@ -249,5 +263,29 @@ mod tests {
             KeyboardOutcome::FocusMoved(_)
         ));
         assert!(app.accessibility_tree().children[0].state.focused);
+    }
+    #[test]
+    fn shared_palette_executes_settings_commands_and_projects_empty_state() {
+        let mut app = app();
+        assert!(matches!(
+            app.handle_command_palette_key(Key::CommandPalette).unwrap(),
+            CommandPaletteOutcome::Opened
+        ));
+        app.handle_command_palette_key(Key::Tab).unwrap();
+        assert_eq!(
+            app.handle_command_palette_key(Key::Enter).unwrap(),
+            CommandPaletteOutcome::Execute("appearance.dark")
+        );
+        assert_eq!(app.token_mode().theme, Theme::Dark);
+        app.handle_command_palette_key(Key::ShiftTab).unwrap();
+        app.handle_command_palette_key(Key::Character('z')).unwrap();
+        assert_eq!(
+            app.command_palette_accessibility_tree().children[1].label,
+            "No matching commands"
+        );
+        assert_eq!(
+            app.handle_command_palette_key(Key::Escape).unwrap(),
+            CommandPaletteOutcome::Closed
+        );
     }
 }
