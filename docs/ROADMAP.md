@@ -486,6 +486,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       validation remain required.
 - [ ] Application compatibility matrix (GTK / Qt / SDL / Flutter / Electron —
       Wayland-native, §4.2)
+  - [x] **GTK 4 / Qt 6 / SDL 2 protocol smoke:** native toolkit probes compile
+        against the installed development stacks, force their Wayland backends,
+        create a window against the real headless `sol-compositor`, and exit
+        cleanly under `scripts/validate-wayland-compatibility.sh`. Flutter,
+        Electron, GPU rendering, input, and full desktop-session behavior remain
+        unvalidated.
 - [ ] **IME complete (§21.1):** stable end-to-end flow for mainstream languages
   - [x] **First-party frontend and fcitx5 transport foundation:** `sol-ime`
         owns typed preedit/candidate state, keyboard selection, and a live
