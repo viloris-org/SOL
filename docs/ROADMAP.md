@@ -347,6 +347,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       `sol-notificationd` lifecycle, replacement, action, query, and storage
       boundary (Shell/D-Bus adapters remain pending)
 - [ ] **Notification Center** (wired to `sol-notificationd`)
+  - [x] **Renderer-neutral center core:** typed `NotificationApi` adapter,
+        application/urgency grouping, lifecycle dismissal/actions, keyboard,
+        accessibility semantics, and repeatable service-adapter fixtures.
+  - [ ] **Native notification surface:** D-Bus proxy, layer-shell presentation,
+        user policy, and real application action callback delivery.
 - [ ] **Quick Settings** (wired to `sol-settingsd`)
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress

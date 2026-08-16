@@ -15,6 +15,7 @@
 
 mod client;
 pub mod launcher;
+pub mod notification_center;
 pub mod overview;
 pub mod topbar;
 
