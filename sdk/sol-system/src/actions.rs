@@ -16,6 +16,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const PERMISSION_STORE_VERSION: u32 = 1;
+const ACTION_AUDIT_STORE_VERSION: u32 = 1;
 
 /// A stable action family understood by the system-action catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -708,6 +709,432 @@ impl ActionAuditStore for MemoryActionAuditStore {
     }
 }
 
+/// A daemon-owned, atomically replaced store for typed authorization records.
+///
+/// Each instance serializes its own read-modify-write operations. Production
+/// setup should give one security daemon ownership of a store path; trusted
+/// consent UI, policy administration, and cross-process coordination remain
+/// separate work.
+#[derive(Debug)]
+pub struct FileActionAuditStore {
+    path: PathBuf,
+    guard: Mutex<()>,
+}
+
+impl FileActionAuditStore {
+    /// Create an authorization audit store backed by a private file at `path`.
+    #[must_use]
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            guard: Mutex::new(()),
+        }
+    }
+
+    /// Return the daemon-owned file path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn load(&self) -> ActionResult<Vec<ActionAuditRecord>> {
+        let contents = match fs::read_to_string(&self.path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(ActionError::audit(format!("read action audit: {error}"))),
+        };
+        parse_action_audit_store(&contents)
+    }
+
+    fn save(&self, records: &[ActionAuditRecord]) -> ActionResult<()> {
+        let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).map_err(|error| {
+            ActionError::audit(format!("create action audit directory: {error}"))
+        })?;
+        let temporary = action_audit_temporary_path(&self.path)?;
+        let result = write_action_audit_store(&temporary, records);
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        fs::rename(&temporary, &self.path)
+            .map_err(|error| ActionError::audit(format!("replace action audit: {error}")))?;
+        restrict_permissions(&self.path).map_err(|error| {
+            ActionError::audit(format!("restrict action audit permissions: {error}"))
+        })?;
+        sync_directory(parent)
+            .map_err(|error| ActionError::audit(format!("sync action audit directory: {error}")))
+    }
+}
+
+impl ActionAuditStore for FileActionAuditStore {
+    fn append(&self, record: ActionAuditRecord) -> ActionResult<()> {
+        validate_action_audit_record(&record)?;
+        let _guard = self.guard.lock().map_err(|error| {
+            ActionError::audit(format!("action audit file lock poisoned: {error}"))
+        })?;
+        let mut records = self.load()?;
+        if records
+            .last()
+            .is_some_and(|last| record.sequence <= last.sequence)
+        {
+            return Err(ActionError::audit(
+                "action audit sequence must be greater than the last stored sequence",
+            ));
+        }
+        records.push(record);
+        self.save(&records)
+    }
+
+    fn records(&self) -> ActionResult<Vec<ActionAuditRecord>> {
+        let _guard = self.guard.lock().map_err(|error| {
+            ActionError::audit(format!("action audit file lock poisoned: {error}"))
+        })?;
+        self.load()
+    }
+}
+
+fn parse_action_audit_store(contents: &str) -> ActionResult<Vec<ActionAuditRecord>> {
+    let mut version = None;
+    let mut records = Vec::new();
+    for raw_line in contents.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("version=") {
+            if version.is_some() {
+                return Err(ActionError::audit("duplicate action audit version"));
+            }
+            version = Some(
+                value
+                    .parse::<u32>()
+                    .map_err(|_| ActionError::audit("invalid action audit version"))?,
+            );
+        } else if let Some(value) = line.strip_prefix("record=") {
+            records.push(parse_action_audit_record(value)?);
+        } else {
+            return Err(ActionError::audit("invalid action audit record"));
+        }
+    }
+    match version {
+        Some(ACTION_AUDIT_STORE_VERSION) => {
+            let mut previous_sequence = 0;
+            for record in &records {
+                if record.sequence <= previous_sequence {
+                    return Err(ActionError::audit(
+                        "action audit sequences must be strictly increasing",
+                    ));
+                }
+                previous_sequence = record.sequence;
+            }
+            Ok(records)
+        }
+        Some(version) => Err(ActionError::audit(format!(
+            "unsupported action audit version {version}"
+        ))),
+        None => Err(ActionError::audit("action audit has no version")),
+    }
+}
+
+fn parse_action_audit_record(value: &str) -> ActionResult<ActionAuditRecord> {
+    let fields: Vec<_> = value.split('\t').collect();
+    if fields.len() != 10 {
+        return Err(ActionError::audit(
+            "invalid action audit record field count",
+        ));
+    }
+    let sequence = parse_audit_number(fields[0], "sequence")?;
+    let request_id = ActionRequestId(parse_audit_number(fields[1], "request ID")?);
+    let caller = AppId::parse(fields[2])
+        .map_err(|_| ActionError::audit("invalid action audit caller application ID"))?;
+    let source = parse_action_source(fields[3])?;
+    let capability = SystemCapability::parse(fields[4])
+        .ok_or_else(|| ActionError::audit("invalid action audit capability"))?;
+    let action = parse_audit_action(fields[5], fields[6], fields[7])?;
+    let decision = parse_audit_decision(fields[8], fields[9])?;
+    let record = ActionAuditRecord {
+        sequence,
+        request_id,
+        request: SystemActionRequest {
+            caller,
+            source,
+            action,
+        },
+        capability,
+        decision,
+    };
+    validate_action_audit_record(&record)?;
+    Ok(record)
+}
+
+fn write_action_audit_store(path: &Path, records: &[ActionAuditRecord]) -> ActionResult<()> {
+    let mut file = create_private_file(path).map_err(|error| {
+        ActionError::audit(format!("create action audit temporary file: {error}"))
+    })?;
+    writeln!(
+        file,
+        "# SOL authorization audit; format version {ACTION_AUDIT_STORE_VERSION}"
+    )
+    .map_err(|error| ActionError::audit(format!("write action audit: {error}")))?;
+    writeln!(file, "version={ACTION_AUDIT_STORE_VERSION}")
+        .map_err(|error| ActionError::audit(format!("write action audit: {error}")))?;
+    for record in records {
+        validate_action_audit_record(record)?;
+        let (action_kind, action_value, action_detail) =
+            encode_audit_action(&record.request.action);
+        let (decision, decision_detail) = encode_audit_decision(&record.decision);
+        writeln!(
+            file,
+            "record={}\t{}\t{}\t{}\t{}\t{action_kind}\t{action_value}\t{action_detail}\t{decision}\t{decision_detail}",
+            record.sequence,
+            record.request_id.get(),
+            record.request.caller,
+            action_source_name(record.request.source),
+            record.capability.as_str(),
+        )
+        .map_err(|error| ActionError::audit(format!("write action audit: {error}")))?;
+    }
+    file.sync_all()
+        .map_err(|error| ActionError::audit(format!("sync action audit: {error}")))
+}
+
+fn validate_action_audit_record(record: &ActionAuditRecord) -> ActionResult<()> {
+    if record.sequence == 0 || record.request_id.get() == 0 {
+        return Err(ActionError::audit(
+            "action audit sequence and request ID must be non-zero",
+        ));
+    }
+    record
+        .request
+        .action
+        .validate()
+        .map_err(|error| ActionError::audit(format!("invalid audited action: {error}")))?;
+    if SystemActionCatalog::capability(&record.request.action) != record.capability {
+        return Err(ActionError::audit(
+            "action audit capability does not match action",
+        ));
+    }
+    Ok(())
+}
+
+fn action_audit_temporary_path(path: &Path) -> ActionResult<PathBuf> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| ActionError::audit("action audit path requires a UTF-8 file name"))?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| ActionError::audit(format!("action audit clock failure: {error}")))?
+        .as_nanos();
+    Ok(path.with_file_name(format!(".{name}.tmp-{}-{nonce}", std::process::id())))
+}
+
+fn encode_audit_action(action: &SystemAction) -> (&'static str, String, String) {
+    let encode = |value: &str| encode_audit_string(value);
+    match action {
+        SystemAction::LaunchApplication { app_id } => {
+            ("launch-application", encode(app_id.as_str()), String::new())
+        }
+        SystemAction::Search { query } => ("search", encode(query), String::new()),
+        SystemAction::SetOutputVolume { volume } => (
+            "set-output-volume",
+            encode(&volume.percent().to_string()),
+            String::new(),
+        ),
+        SystemAction::SetOutputMuted { muted } => (
+            "set-output-muted",
+            encode(if *muted { "true" } else { "false" }),
+            String::new(),
+        ),
+        SystemAction::InvokeNotificationAction {
+            notification_id,
+            action_id,
+        } => (
+            "invoke-notification-action",
+            encode(&notification_id.get().to_string()),
+            encode(action_id.as_str()),
+        ),
+        SystemAction::RequestScreenCapture => {
+            ("request-screen-capture", String::new(), String::new())
+        }
+        SystemAction::OpenDocument { uri } => ("open-document", encode(uri), String::new()),
+    }
+}
+
+fn parse_audit_action(
+    kind: &str,
+    encoded_value: &str,
+    encoded_detail: &str,
+) -> ActionResult<SystemAction> {
+    let value = decode_audit_string(encoded_value)?;
+    let detail = decode_audit_string(encoded_detail)?;
+    let action = match kind {
+        "launch-application" if detail.is_empty() => SystemAction::LaunchApplication {
+            app_id: AppId::parse(value)
+                .map_err(|_| ActionError::audit("invalid audited launch application ID"))?,
+        },
+        "search" if detail.is_empty() => SystemAction::Search { query: value },
+        "set-output-volume" if detail.is_empty() => SystemAction::SetOutputVolume {
+            volume: OutputVolume::new(
+                value
+                    .parse()
+                    .map_err(|_| ActionError::audit("invalid audited output volume"))?,
+            )
+            .map_err(|_| ActionError::audit("invalid audited output volume"))?,
+        },
+        "set-output-muted" if detail.is_empty() => SystemAction::SetOutputMuted {
+            muted: match value.as_str() {
+                "true" => true,
+                "false" => false,
+                _ => return Err(ActionError::audit("invalid audited mute value")),
+            },
+        },
+        "invoke-notification-action" => SystemAction::InvokeNotificationAction {
+            notification_id: crate::NotificationId::from_raw(parse_nonzero_audit_number(
+                &value,
+                "notification ID",
+            )?),
+            action_id: NotificationActionId::new(detail)
+                .map_err(|_| ActionError::audit("invalid audited notification action ID"))?,
+        },
+        "request-screen-capture" if value.is_empty() && detail.is_empty() => {
+            SystemAction::RequestScreenCapture
+        }
+        "open-document" if detail.is_empty() => SystemAction::OpenDocument { uri: value },
+        _ => return Err(ActionError::audit("invalid audited action")),
+    };
+    action
+        .validate()
+        .map_err(|error| ActionError::audit(format!("invalid audited action: {error}")))?;
+    Ok(action)
+}
+
+fn encode_audit_decision(decision: &PermissionDecision) -> (&'static str, String) {
+    match decision {
+        PermissionDecision::Authorized => ("authorized", String::new()),
+        PermissionDecision::AwaitingUserConsent => ("awaiting-user-consent", String::new()),
+        PermissionDecision::Denied(ActionDenial::DefaultDeny) => ("default-deny", String::new()),
+        PermissionDecision::Denied(ActionDenial::StoredDeny) => ("stored-deny", String::new()),
+        PermissionDecision::Denied(ActionDenial::UserDenied) => ("user-denied", String::new()),
+        PermissionDecision::Denied(ActionDenial::Policy(reason)) => {
+            ("policy-deny", encode_audit_string(reason))
+        }
+    }
+}
+
+fn parse_audit_decision(kind: &str, encoded_detail: &str) -> ActionResult<PermissionDecision> {
+    let detail = decode_audit_string(encoded_detail)?;
+    match kind {
+        "authorized" if detail.is_empty() => Ok(PermissionDecision::Authorized),
+        "awaiting-user-consent" if detail.is_empty() => Ok(PermissionDecision::AwaitingUserConsent),
+        "default-deny" if detail.is_empty() => {
+            Ok(PermissionDecision::Denied(ActionDenial::DefaultDeny))
+        }
+        "stored-deny" if detail.is_empty() => {
+            Ok(PermissionDecision::Denied(ActionDenial::StoredDeny))
+        }
+        "user-denied" if detail.is_empty() => {
+            Ok(PermissionDecision::Denied(ActionDenial::UserDenied))
+        }
+        "policy-deny" => Ok(PermissionDecision::Denied(ActionDenial::Policy(detail))),
+        _ => Err(ActionError::audit("invalid action audit decision")),
+    }
+}
+
+fn action_source_name(source: ActionSource) -> &'static str {
+    match source {
+        ActionSource::ShellLauncher => "shell-launcher",
+        ActionSource::Search => "search",
+        ActionSource::QuickSettings => "quick-settings",
+        ActionSource::Notifications => "notifications",
+        ActionSource::Portal => "portal",
+        ActionSource::Accessibility => "accessibility",
+        ActionSource::Automation => "automation",
+        ActionSource::AiOrVoice => "ai-or-voice",
+    }
+}
+
+fn parse_action_source(value: &str) -> ActionResult<ActionSource> {
+    match value {
+        "shell-launcher" => Ok(ActionSource::ShellLauncher),
+        "search" => Ok(ActionSource::Search),
+        "quick-settings" => Ok(ActionSource::QuickSettings),
+        "notifications" => Ok(ActionSource::Notifications),
+        "portal" => Ok(ActionSource::Portal),
+        "accessibility" => Ok(ActionSource::Accessibility),
+        "automation" => Ok(ActionSource::Automation),
+        "ai-or-voice" => Ok(ActionSource::AiOrVoice),
+        _ => Err(ActionError::audit("invalid action audit source")),
+    }
+}
+
+fn parse_audit_number<T>(value: &str, label: &str) -> ActionResult<T>
+where
+    T: std::str::FromStr,
+{
+    value
+        .parse()
+        .map_err(|_| ActionError::audit(format!("invalid action audit {label}")))
+}
+
+fn parse_nonzero_audit_number(value: &str, label: &str) -> ActionResult<u64> {
+    let number = parse_audit_number(value, label)?;
+    if number == 0 {
+        return Err(ActionError::audit(format!("invalid action audit {label}")));
+    }
+    Ok(number)
+}
+
+fn encode_audit_string(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(value.len() * 2);
+    for byte in value.bytes() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+fn decode_audit_string(value: &str) -> ActionResult<String> {
+    if !value.len().is_multiple_of(2) {
+        return Err(ActionError::audit("invalid action audit string encoding"));
+    }
+    let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+    debug_assert!(remainder.is_empty());
+    let bytes: ActionResult<Vec<u8>> = pairs
+        .iter()
+        .map(|pair| {
+            let high = audit_hex_value(pair[0])?;
+            let low = audit_hex_value(pair[1])?;
+            Ok((high << 4) | low)
+        })
+        .collect();
+    String::from_utf8(bytes?)
+        .map_err(|_| ActionError::audit("invalid action audit string encoding"))
+}
+
+fn audit_hex_value(value: u8) -> ActionResult<u8> {
+    match value {
+        b'0'..=b'9' => Ok(value - b'0'),
+        b'a'..=b'f' => Ok(value - b'a' + 10),
+        _ => Err(ActionError::audit("invalid action audit string encoding")),
+    }
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(path)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 struct PendingConsent {
     request_id: ActionRequestId,
@@ -720,6 +1147,7 @@ struct ServiceState {
     next_request_id: u64,
     next_consent_id: u64,
     next_audit_sequence: u64,
+    audit_state_seeded: bool,
     pending: HashMap<ConsentId, PendingConsent>,
 }
 
@@ -875,7 +1303,11 @@ where
 
     fn next_request_id(&self) -> ActionResult<ActionRequestId> {
         let mut state = self.lock_state()?;
-        state.next_request_id += 1;
+        self.seed_audit_state(&mut state)?;
+        state.next_request_id = state
+            .next_request_id
+            .checked_add(1)
+            .ok_or_else(|| ActionError::audit("action request ID overflow"))?;
         Ok(ActionRequestId(state.next_request_id))
     }
 
@@ -935,10 +1367,7 @@ where
                 PermissionDecision::AwaitingUserConsent,
             ),
         };
-        let mut state = self.lock_state()?;
-        state.next_audit_sequence += 1;
-        let sequence = state.next_audit_sequence;
-        drop(state);
+        let sequence = self.next_audit_sequence()?;
         self.audit.append(ActionAuditRecord {
             sequence,
             request_id,
@@ -946,6 +1375,31 @@ where
             capability,
             decision,
         })
+    }
+
+    fn next_audit_sequence(&self) -> ActionResult<u64> {
+        let mut state = self.lock_state()?;
+        self.seed_audit_state(&mut state)?;
+        state.next_audit_sequence = state
+            .next_audit_sequence
+            .checked_add(1)
+            .ok_or_else(|| ActionError::audit("action audit sequence overflow"))?;
+        Ok(state.next_audit_sequence)
+    }
+
+    fn seed_audit_state(&self, state: &mut ServiceState) -> ActionResult<()> {
+        if state.audit_state_seeded {
+            return Ok(());
+        }
+        let records = self.audit.records()?;
+        state.next_audit_sequence = records.last().map_or(0, |record| record.sequence);
+        state.next_request_id = records
+            .iter()
+            .map(|record| record.request_id.get())
+            .max()
+            .unwrap_or(0);
+        state.audit_state_seeded = true;
+        Ok(())
     }
 
     fn lock_state(&self) -> ActionResult<std::sync::MutexGuard<'_, ServiceState>> {
@@ -1249,6 +1703,239 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    #[test]
+    fn file_action_audit_store_round_trips_typed_records_and_uses_private_permissions() {
+        let path = temporary_action_audit_store_path();
+        let record = ActionAuditRecord {
+            sequence: 7,
+            request_id: ActionRequestId(41),
+            request: SystemActionRequest {
+                caller: app_id(),
+                source: ActionSource::Portal,
+                action: SystemAction::OpenDocument {
+                    uri: "file:///tmp/private\tnotes\nreport.txt".to_owned(),
+                },
+            },
+            capability: SystemCapability::OpenDocuments,
+            decision: PermissionDecision::Denied(ActionDenial::Policy(
+                "document policy requires a trusted chooser".to_owned(),
+            )),
+        };
+        let store = FileActionAuditStore::new(&path);
+        store.append(record.clone()).unwrap();
+
+        let reloaded = FileActionAuditStore::new(&path);
+        assert_eq!(reloaded.records().unwrap(), vec![record]);
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(!contents.contains("file:///tmp/private\tnotes"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn file_action_audit_store_round_trips_every_source_action_and_decision() {
+        let path = temporary_action_audit_store_path();
+        let sources = [
+            ActionSource::ShellLauncher,
+            ActionSource::Search,
+            ActionSource::QuickSettings,
+            ActionSource::Notifications,
+            ActionSource::Portal,
+            ActionSource::Accessibility,
+            ActionSource::Automation,
+            ActionSource::AiOrVoice,
+        ];
+        let actions = [
+            SystemAction::LaunchApplication { app_id: app_id() },
+            SystemAction::Search {
+                query: "quarterly\treport\n2026".to_owned(),
+            },
+            SystemAction::SetOutputVolume {
+                volume: OutputVolume::new(73).unwrap(),
+            },
+            SystemAction::SetOutputMuted { muted: true },
+            SystemAction::InvokeNotificationAction {
+                notification_id: NotificationId::from_raw(9),
+                action_id: NotificationActionId::new("open\tmessage").unwrap(),
+            },
+            SystemAction::RequestScreenCapture,
+            SystemAction::OpenDocument {
+                uri: "file:///tmp/report\nfinal.txt".to_owned(),
+            },
+            SystemAction::RequestScreenCapture,
+        ];
+        let decisions = [
+            PermissionDecision::Authorized,
+            PermissionDecision::AwaitingUserConsent,
+            PermissionDecision::Denied(ActionDenial::DefaultDeny),
+            PermissionDecision::Denied(ActionDenial::StoredDeny),
+            PermissionDecision::Denied(ActionDenial::UserDenied),
+            PermissionDecision::Denied(ActionDenial::Policy("policy\treason\ntext".to_owned())),
+            PermissionDecision::Authorized,
+            PermissionDecision::AwaitingUserConsent,
+        ];
+        let expected: Vec<_> = sources
+            .into_iter()
+            .zip(actions)
+            .zip(decisions)
+            .enumerate()
+            .map(|(index, ((source, action), decision))| {
+                let sequence = u64::try_from(index + 1).unwrap();
+                ActionAuditRecord {
+                    sequence,
+                    request_id: ActionRequestId(sequence),
+                    capability: SystemActionCatalog::capability(&action),
+                    request: SystemActionRequest {
+                        caller: app_id(),
+                        source,
+                        action,
+                    },
+                    decision,
+                }
+            })
+            .collect();
+        let store = FileActionAuditStore::new(&path);
+        for record in expected.clone() {
+            store.append(record).unwrap();
+        }
+
+        assert_eq!(
+            FileActionAuditStore::new(&path).records().unwrap(),
+            expected
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn file_action_audit_store_rejects_corrupt_or_ambiguous_records() {
+        let path = temporary_action_audit_store_path();
+        std::fs::write(
+            &path,
+            concat!(
+                "version=1\n",
+                "record=1\t1\torg.sol.test-client\tsearch\tsearch\tsearch\tzz\t\tauthorized\t\n"
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            FileActionAuditStore::new(&path).records(),
+            Err(ActionError::Audit(_))
+        ));
+
+        std::fs::write(
+            &path,
+            concat!(
+                "version=1\n",
+                "record=1\t1\torg.sol.test-client\tsearch\tsearch\tsearch\t7175657279\t6578747261\tauthorized\t\n"
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            FileActionAuditStore::new(&path).records(),
+            Err(ActionError::Audit(_))
+        ));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn file_action_audit_store_rejects_non_increasing_sequences() {
+        let path = temporary_action_audit_store_path();
+        let request = launch_request();
+        let later = ActionAuditRecord {
+            sequence: 2,
+            request_id: ActionRequestId(2),
+            request: request.clone(),
+            capability: SystemCapability::LaunchApplications,
+            decision: PermissionDecision::Denied(ActionDenial::DefaultDeny),
+        };
+        let earlier = ActionAuditRecord {
+            sequence: 1,
+            request_id: ActionRequestId(1),
+            request,
+            capability: SystemCapability::LaunchApplications,
+            decision: PermissionDecision::Denied(ActionDenial::DefaultDeny),
+        };
+        write_action_audit_store(&path, &[later, earlier]).unwrap();
+
+        assert!(matches!(
+            FileActionAuditStore::new(&path).records(),
+            Err(ActionError::Audit(_))
+        ));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn file_action_audit_store_keeps_working_after_a_rejected_append_gap() {
+        let path = temporary_action_audit_store_path();
+        let request = launch_request();
+        let store = FileActionAuditStore::new(&path);
+        let record = |sequence| ActionAuditRecord {
+            sequence,
+            request_id: ActionRequestId(sequence),
+            request: request.clone(),
+            capability: SystemCapability::LaunchApplications,
+            decision: PermissionDecision::Denied(ActionDenial::DefaultDeny),
+        };
+        store.append(record(2)).unwrap();
+        assert!(matches!(
+            store.append(record(1)),
+            Err(ActionError::Audit(_))
+        ));
+        store.append(record(4)).unwrap();
+
+        assert_eq!(
+            store
+                .records()
+                .unwrap()
+                .iter()
+                .map(|record| record.sequence)
+                .collect::<Vec<_>>(),
+            [2, 4]
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn file_action_audit_store_seeds_service_ids_after_restart() {
+        let path = temporary_action_audit_store_path();
+        let first = SystemActionService::new(
+            DefaultDenyPolicy,
+            MemoryPermissionStore::default(),
+            FileActionAuditStore::new(&path),
+        );
+        first.request(launch_request()).unwrap();
+
+        let restarted = SystemActionService::new(
+            DefaultDenyPolicy,
+            MemoryPermissionStore::default(),
+            FileActionAuditStore::new(&path),
+        );
+        restarted.request(launch_request()).unwrap();
+
+        let records = restarted.audit_records().unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.sequence)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.request_id.get())
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
     fn temporary_permission_store_path() -> std::path::PathBuf {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1256,6 +1943,17 @@ mod tests {
             .as_nanos();
         std::env::temp_dir().join(format!(
             "sol-permission-store-test-{}-{nonce}.conf",
+            std::process::id()
+        ))
+    }
+
+    fn temporary_action_audit_store_path() -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "sol-action-audit-store-test-{}-{nonce}.conf",
             std::process::id()
         ))
     }

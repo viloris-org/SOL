@@ -479,9 +479,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [x] **Permission grant persistence foundation:** `FilePermissionStore`
       persists caller/capability allow or deny grants through the typed action
       boundary with atomic private files and repeatable revocation tests.
-- [ ] **Production permission model (§31):** trusted consent UI, durable audit
-      records, polkit/portal policy, and explicit authorization for recording,
-      camera, microphone, location, secrets, and system settings remain.
+- [x] **Authorization audit persistence foundation:** `FileActionAuditStore`
+      durably preserves typed authorization decisions in private atomically
+      replaced files with strict round-trip validation.
+- [ ] **Production permission model (§31):** trusted consent UI, polkit/portal
+      policy, and explicit authorization for recording, camera, microphone,
+      location, secrets, and system settings remain.
 
 ### M5 success criterion
 
