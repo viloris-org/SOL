@@ -7,7 +7,7 @@
 mod preview;
 mod surface;
 
-pub use preview::{FilePreview, PreviewKind, local_preview};
+pub use preview::{FilePreview, ImageThumbnail, PreviewKind, local_preview};
 pub use surface::{
     FilesContextAction, FilesContextMenuProjection, FilesSidebarLocation, FilesSidebarProjection,
     FilesSurface, FilesSurfaceError, FilesSurfaceEvent, FilesSurfaceOutcome,

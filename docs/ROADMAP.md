@@ -297,9 +297,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         projections, dynamic directory tabs, accessibility semantics, and
         bounded local text/image/binary/metadata preview data are covered by
         deterministic fixtures.
+  - [x] **Bounded image thumbnails:** local PNG/JPEG/GIF/WebP previews decode
+        into renderer-neutral RGBA thumbnails capped at 256 px with strict
+        dimension/allocation limits; malformed images fall back to binary.
   - [ ] **Desktop and platform integrations:** native Wayland/GPU rendering,
-        removable and network locations, portal-backed trash, image thumbnails,
-        and real desktop drag/drop transport.
+        removable and network locations, portal-backed trash, and real desktop
+        drag/drop transport.
 - [x] Dogfooding loop (§24): first-party command-palette divergence found in
       Settings / Terminal / Files → shared renderer-neutral SolUI palette
       contract → all three apps now share it, with deterministic dogfood tests.
