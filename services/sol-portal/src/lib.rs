@@ -6,6 +6,8 @@
 //! Desktop Portal D-Bus protocol. Those concrete adapters must consume a
 //! [`PortalAuthorization`] rather than bypassing this boundary.
 
+pub mod dbus;
+
 use sol_system::{
     ActionAuthorization, ActionError, ActionSource, AppId, SystemAction, SystemActionApi,
     SystemActionRequest, SystemActionResult, UserConsentRequest,

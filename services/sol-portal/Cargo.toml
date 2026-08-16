@@ -7,4 +7,7 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+ctrlc = { version = "3", features = ["termination"] }
+serde = "1"
 sol-system = { path = "../../sdk/sol-system" }
+zbus = { version = "5.19", features = ["blocking-api"] }

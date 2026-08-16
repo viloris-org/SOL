@@ -447,6 +447,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       open and screen-capture requests through the caller-attributed
       `SystemActionApi`; default-deny and explicit authorization are fixture
       tested without granting arbitrary portal work.
+  - [x] **Portal authorization D-Bus adapter:** `org.sol.Portal1` accepts only
+        validated caller identity and document-open/screen-capture intents,
+        returning decisions and correlation IDs without exporting executable
+        authorization tokens. An isolated daemon/proxy test proves default
+        deny and malformed-request rejection.
 - [ ] **Screen sharing / screen recording:** XDG portal D-Bus, file chooser
       UI, PipeWire/screencopy adapters, stream lifecycle, and desktop-session
       validation remain required.

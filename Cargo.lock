@@ -3882,7 +3882,10 @@ dependencies = [
 name = "sol-portal"
 version = "0.1.0"
 dependencies = [
+ "ctrlc",
+ "serde",
  "sol-system",
+ "zbus",
 ]
 
 [[package]]

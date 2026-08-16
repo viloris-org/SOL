@@ -101,7 +101,7 @@ package_sol-notificationd() {
 
 package_sol-portal() {
   pkgdesc='SOL portal authorization boundary'
-  depends=('gcc-libs' 'glibc')
+  depends=('dbus' 'gcc-libs' 'glibc')
   _package_binary sol-portal
 }
 
