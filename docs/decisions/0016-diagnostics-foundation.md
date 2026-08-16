@@ -40,18 +40,21 @@ replaces its private format and restricts the final file to mode 0600 on Unix.
 - Component and application failures now have a constrained, testable local
   reporting contract without introducing a telemetry dependency.
 - Unit tests prove source attribution, redaction, bounded in-memory retention,
-  write-through persistence, and a file-store reload; they do not prove crash
-  capture from a running desktop session.
+  write-through persistence, and a file-store reload. A process-local panic
+  hook now maps a real child-process panic into the same typed schema, and the
+  Shell installs that hook at startup without collecting a backtrace, process
+  arguments, environment, attachment, or dump.
 - Diagnostics consumers must map failures to the closed code catalog. New
   categories require an API review instead of a free-form event-name escape
   hatch.
 
 ## Deferred work and non-claims
 
-This foundation does not authenticate a live transport caller, capture a real
-process crash, collect a backtrace, provide a consent UI, encrypt records,
-upload anything, or establish remote telemetry retention. Those capabilities
-need separate threat-model, consent, and operational decisions. In particular,
+This foundation does not authenticate a live transport caller, capture signals
+or externally observed process exits, prove capture in a complete desktop
+session, collect a backtrace, provide a consent UI, encrypt records, upload
+anything, or establish remote telemetry retention. Those capabilities need
+separate threat-model, consent, and operational decisions. In particular,
 adding arbitrary shell access or opaque crash payloads would violate this ADR.
 
 ## Related

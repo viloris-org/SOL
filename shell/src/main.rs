@@ -39,6 +39,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 
 use client::Globals;
 use sol_design::color::Color;
+use sol_diagnostics::{DiagnosticSource, SolComponent, install_default_panic_capture};
 
 /// The logical height of the top bar.
 const BAR_HEIGHT: i32 = 40;
@@ -304,6 +305,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_max_level(LevelFilter::DEBUG)
         .init();
+
+    if let Err(error) =
+        install_default_panic_capture(DiagnosticSource::Component(SolComponent::Shell))
+    {
+        tracing::warn!(%error, "shell crash capture is unavailable");
+    }
 
     let once = std::env::args().any(|a| a == "--once");
     tracing::info!(once, "sol-shell starting");

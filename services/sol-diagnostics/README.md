@@ -2,7 +2,8 @@
 
 `sol-diagnostics` is the local, typed diagnostics foundation for SOL services,
 the shell, compositor, and first-party applications. It is intentionally a
-storage and API boundary, not a telemetry client or a system crash-handler.
+storage and API boundary, not a telemetry client or a system-wide crash
+handler.
 
 ## Current contract
 
@@ -19,6 +20,11 @@ storage and API boundary, not a telemetry client or a system crash-handler.
 - `MemoryDiagnosticStore` is appropriate for tests; `FileDiagnosticStore`
   atomically replaces its daemon-private versioned file and applies mode 0600
   on Unix.
+- `install_panic_capture` installs one process-local Rust panic hook. The Shell
+  enables it at startup and records only a `Fatal` / `ProcessCrash` event with
+  the same bounded redacted summary. It captures no backtrace, arguments,
+  environment, attachment, or dump. A subprocess test proves a real panic
+  reaches the private file store before the process exits.
 
 The executable initializes the local store at
 `$XDG_STATE_HOME/sol/diagnostics.log`, falling back to
@@ -32,9 +38,9 @@ cargo run -p sol-diagnostics
 
 ## Deferred work
 
-Running-service transport, trusted source authentication, crash capture,
-consent UX, encrypted export/upload, upload policy, and field validation are
-separate decisions. They must consume this bounded schema rather than adding a
-shell or opaque-payload escape hatch.
+Running-service transport, trusted source authentication, non-panic signal or
+process-supervisor capture, consent UX, encrypted export/upload, upload policy,
+and field validation are separate decisions. They must consume this bounded
+schema rather than adding a shell or opaque-payload escape hatch.
 
 See [ADR-0016](../../docs/decisions/0016-diagnostics-foundation.md).

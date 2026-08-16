@@ -4111,6 +4111,7 @@ dependencies = [
  "sol-animation",
  "sol-app",
  "sol-design",
+ "sol-diagnostics",
  "sol-graphics",
  "sol-notificationd",
  "sol-settingsd",

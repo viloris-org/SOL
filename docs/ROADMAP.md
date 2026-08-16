@@ -526,6 +526,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Live crash reporting:** authenticated service transport, real crash
       capture, consent UX, encrypted export/upload policy, and field validation
       remain required before treating diagnostics as a production reporter.
+  - [x] **Shell panic-capture foundation:** the real Shell startup installs a
+        process-local panic hook that persists a typed fatal/process-crash event
+        through the private bounded diagnostics store. A child-process test
+        proves an actual Rust panic is redacted and written before exit. Signal
+        capture, authenticated transport, consent, encryption, upload, and
+        desktop-session validation remain open.
 - [x] **Permission grant persistence foundation:** `FilePermissionStore`
       persists caller/capability allow or deny grants through the typed action
       boundary with atomic private files and repeatable revocation tests.

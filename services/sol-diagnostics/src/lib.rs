@@ -11,12 +11,14 @@ use std::error::Error;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
+use std::panic::{self, PanicHookInfo};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const STORAGE_VERSION: u32 = 1;
 const MAX_MESSAGE_CHARS: usize = 240;
+static PANIC_CAPTURE_INSTALLED: OnceLock<()> = OnceLock::new();
 
 /// Result type returned by the diagnostics service and stores.
 pub type DiagnosticResult<T> = Result<T, DiagnosticError>;
@@ -30,6 +32,8 @@ pub enum DiagnosticError {
     Clock(String),
     /// Persistent storage could not be read or written safely.
     Storage(String),
+    /// A process may install only one diagnostics panic hook.
+    PanicCaptureAlreadyInstalled,
 }
 
 impl fmt::Display for DiagnosticError {
@@ -40,6 +44,9 @@ impl fmt::Display for DiagnosticError {
             }
             Self::Clock(error) => write!(formatter, "diagnostic clock failure: {error}"),
             Self::Storage(error) => write!(formatter, "diagnostic storage failure: {error}"),
+            Self::PanicCaptureAlreadyInstalled => {
+                formatter.write_str("diagnostic panic capture is already installed")
+            }
         }
     }
 }
@@ -336,6 +343,52 @@ pub const DEFAULT_RETENTION: DiagnosticRetention = DiagnosticRetention {
     maximum_records: 256,
 };
 
+/// Return the daemon-private default diagnostics path for the current user.
+#[must_use]
+pub fn default_diagnostics_path() -> PathBuf {
+    if let Some(state_home) = std::env::var_os("XDG_STATE_HOME") {
+        return PathBuf::from(state_home).join("sol/diagnostics.log");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".local/state/sol/diagnostics.log");
+    }
+    PathBuf::from("sol/diagnostics.log")
+}
+
+/// Install a process-global panic hook that records one typed, redacted crash
+/// event before delegating to Rust's existing hook.
+///
+/// This must be called once during process startup. It captures no backtrace,
+/// arguments, environment, attachment, or opaque crash dump.
+pub fn install_panic_capture(
+    source: DiagnosticSource,
+    path: impl Into<PathBuf>,
+    retention: DiagnosticRetention,
+) -> DiagnosticResult<()> {
+    let service = DiagnosticsService::new(FileDiagnosticStore::new(path), retention)?;
+    PANIC_CAPTURE_INSTALLED
+        .set(())
+        .map_err(|()| DiagnosticError::PanicCaptureAlreadyInstalled)?;
+    let previous = panic::take_hook();
+    panic::set_hook(Box::new(move |information| {
+        let event = DiagnosticEvent::new(
+            source.clone(),
+            DiagnosticSeverity::Fatal,
+            DiagnosticCode::ProcessCrash,
+        )
+        .with_message(panic_summary(information));
+        let _ = service.record(event);
+        previous(information);
+    }));
+    Ok(())
+}
+
+/// Install panic capture using [`default_diagnostics_path`] and
+/// [`DEFAULT_RETENTION`].
+pub fn install_default_panic_capture(source: DiagnosticSource) -> DiagnosticResult<()> {
+    install_panic_capture(source, default_diagnostics_path(), DEFAULT_RETENTION)
+}
+
 /// Storage boundary for bounded diagnostics history.
 pub trait DiagnosticStore: Send + Sync {
     /// Load the most recently persisted daemon state, if it exists.
@@ -511,6 +564,31 @@ fn unix_time_ms() -> DiagnosticResult<u64> {
         .as_millis();
     u64::try_from(milliseconds)
         .map_err(|_| DiagnosticError::Clock("Unix timestamp exceeds u64 milliseconds".to_owned()))
+}
+
+fn panic_summary(information: &PanicHookInfo<'_>) -> String {
+    let payload = information
+        .payload()
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| {
+            information
+                .payload()
+                .downcast_ref::<String>()
+                .map(String::as_str)
+        })
+        .unwrap_or("non-string panic payload");
+    information.location().map_or_else(
+        || format!("panic: {payload}"),
+        |location| {
+            format!(
+                "panic at {}:{}:{}: {payload}",
+                location.file(),
+                location.line(),
+                location.column()
+            )
+        },
+    )
 }
 
 fn temporary_path(path: &Path) -> DiagnosticResult<PathBuf> {
