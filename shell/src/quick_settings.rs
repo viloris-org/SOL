@@ -241,7 +241,7 @@ impl<S: SettingsApi, A: SystemActionApi> QuickSettings<S, A> {
                 capability: QuickSettingsCapability::Bluetooth,
                 title: "Bluetooth",
                 state: CapabilityState::Unavailable(
-                    "Bluetooth controls are unavailable until a typed Bluetooth service API is provided.",
+                    "Bluetooth controls are unavailable until a permission-gated Bluetooth action API is provided.",
                 ),
             },
         ]

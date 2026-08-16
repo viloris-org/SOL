@@ -1,7 +1,7 @@
 //! Renderer-neutral SOL top bar and status-area model.
 //!
 //! Platform providers supply snapshots; they never leak NetworkManager,
-//! PipeWire, UPower, compositor, or portal types into the shell model.
+//! PipeWire, UPower, BlueZ, compositor, or portal types into the shell model.
 
 use std::{error::Error, fmt};
 
@@ -76,6 +76,31 @@ pub struct PowerStatus {
     pub percent: u8,
     pub charging: bool,
 }
+/// Read-only Bluetooth summary, independent of BlueZ's D-Bus representation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BluetoothStatus {
+    pub adapters: Vec<BluetoothAdapterStatus>,
+    pub devices: Vec<BluetoothDeviceStatus>,
+}
+/// A local Bluetooth adapter observed from the system service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BluetoothAdapterStatus {
+    pub name: String,
+    pub address: String,
+    pub powered: bool,
+    pub discovering: bool,
+    pub device_count: u16,
+}
+/// A remote Bluetooth device observed from the system service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BluetoothDeviceStatus {
+    pub name: String,
+    pub address: String,
+    pub connected: bool,
+    pub paired: bool,
+    pub trusted: bool,
+    pub battery_percent: Option<u8>,
+}
 /// Privacy/activity indicator that must be explicitly observed by a trusted adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityIndicator {
@@ -101,6 +126,9 @@ pub trait AudioProvider {
 }
 pub trait PowerProvider {
     fn power(&self) -> ProviderState<PowerStatus>;
+}
+pub trait BluetoothProvider {
+    fn bluetooth(&self) -> ProviderState<BluetoothStatus>;
 }
 pub trait ActivityProvider {
     fn activity(&self) -> ProviderState<Vec<ActivityIndicator>>;

@@ -392,9 +392,8 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         `SettingsDbusProxy` against an isolated `sol-settingsd`, applying
         appearance directly and volume/mute only after typed authorization;
         the daemon snapshot proves all three mutations persisted.
-  - [ ] **Remaining system adapters:** typed network, Bluetooth, and
-        audio-device services; unavailable states remain intentional until
-        those APIs exist.
+  - [x] **Read-only system status adapters:** typed network, Bluetooth, and
+        audio-device status are available without granting mutation authority.
     - [x] **Read-only PipeWire output inventory:** structured `pactl` JSON maps
           validated output IDs, descriptions, running/idle/suspended state,
           default membership, active ports, and port availability into a typed
@@ -405,7 +404,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
           reads the system-bus global state, active connection identity, and
           Wi-Fi/wired link quality through typed D-Bus properties. Unknown or
           inconsistent states become explicit provider errors; network writes,
-          device switching, and BlueZ integration remain open.
+          and device switching remain open.
+    - [x] **Read-only BlueZ status:** the Shell `BluetoothProvider` reads local
+          adapters and remote devices from the system-bus ObjectManager,
+          validates identities, state, and optional battery percentages, and
+          exposes a deterministic renderer-neutral snapshot. Pairing,
+          connecting, disconnecting, discovery control, and all other BlueZ
+          writes remain open.
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress
   - [x] **Renderer-neutral workspace gesture model:** the overview controller
@@ -478,8 +483,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         structured `pactl` JSON from PipeWire's Pulse compatibility service,
         validates the declared default sink and channel volumes, and exposes a
         read-only typed output/port inventory checked against the live user
-        service. Device switching, authorized writes, and BlueZ integration
-        remain open.
+        service. Device switching and authorized writes remain open.
+  - [x] **BlueZ status adapter:** the Shell reads adapter power/discovery state
+        and paired/connected remote-device state through the system-bus object
+        manager, with strict validation and an optional live-service smoke
+        test. Pairing, connection changes, discovery control, and other BlueZ
+        writes remain open.
 
 **Desktop core capabilities**
 
@@ -699,3 +708,6 @@ SOL Applications → Third-party Applications
   deterministic state validation and an optional system-bus smoke test. The
   Quick Settings network write path remains intentionally unavailable until a
   permission-gated typed action/service API exists.
+- **2026-08-16** — Shell gained a read-only BlueZ ObjectManager adapter with
+  deterministic adapter/device validation and an optional system-bus smoke
+  test. Pairing, connection, and discovery writes remain intentionally open.
