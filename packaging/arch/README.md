@@ -35,6 +35,25 @@ no signed release archive or public license declaration yet. Consequently this
 directory does **not** claim that source retrieval, source verification,
 signed repositories, AUR publication, or installation has been validated.
 
+## Isolated local build validation
+
+For a local source-archive build check, run:
+
+```bash
+./validate-local-build.sh
+```
+
+The script creates a temporary `git archive` of the current `HEAD` with the
+required `sol-0.1.0/` prefix, copies the package recipe beside it, and invokes
+`makepkg --nodeps --cleanbuild` in that temporary directory. It then verifies
+all split package archives, their executable payloads, the installed Wayland
+session file, and the intentionally empty `sol-desktop` meta-package payload.
+It neither installs packages nor changes pacman configuration.
+
+This is only a local source-archive build proof. It does not provide a public
+license, canonical repository URL, published archive/checksum, signing trust
+chain, repository publication, or a real pacman installation validation.
+
 For a prepared release archive, run from this directory:
 
 ```bash

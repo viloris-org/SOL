@@ -401,6 +401,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
           Shell contract. Deterministic rejection fixtures and a live host
           query cover the installed USB output without changing audio state.
           Device switching and all writes remain open.
+    - [x] **Read-only NetworkManager status:** the Shell `NetworkProvider`
+          reads the system-bus global state, active connection identity, and
+          Wi-Fi/wired link quality through typed D-Bus properties. Unknown or
+          inconsistent states become explicit provider errors; network writes,
+          device switching, and BlueZ integration remain open.
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress
   - [x] **Renderer-neutral workspace gesture model:** the overview controller
@@ -609,6 +614,14 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         optional full workspace check without modifying the target project.
 - [ ] **Packaging polish:** pacman/AUR integration, signed-repo trust chain
       (AUR not in the official trust chain, §30)
+  - [x] **Isolated local split-package build:**
+        `packaging/arch/validate-local-build.sh` archives the current Git
+        revision with the required `sol-0.1.0/` prefix, runs
+        `makepkg --nodeps --cleanbuild` in a temporary directory, and checks
+        every split archive's binary/session-file payload plus the empty meta
+        package. This is not a claim of a public license or repository URL,
+        published archive/checksum, signing, repository publication, or real
+        pacman installation validation.
 - [x] **Store backend (§41 #15, optional):** ADR-0018 settles pacman/AUR as
       the package backend; a future store may wrap it but cannot create a
       second package or trust path.
@@ -682,3 +695,7 @@ SOL Applications → Third-party Applications
   engine/frontend event boundary. A fake pinyin round-trip covers preedit,
   candidates, and commit without a daemon; the optional D-Bus smoke verifies
   input-context setup and frontend UI signals on a running fcitx5 session.
+- **2026-08-16** — Shell gained a read-only NetworkManager status adapter with
+  deterministic state validation and an optional system-bus smoke test. The
+  Quick Settings network write path remains intentionally unavailable until a
+  permission-gated typed action/service API exists.
