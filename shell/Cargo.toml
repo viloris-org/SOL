@@ -25,3 +25,4 @@ sol-ui = { path = "../sdk/sol-ui" }
 
 [dev-dependencies]
 sol-settingsd = { path = "../services/sol-settingsd" }
+sol-notificationd = { path = "../services/sol-notificationd" }

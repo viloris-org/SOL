@@ -353,11 +353,15 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       real desktop activation remain deferred.
 - [x] **Notification service foundation:** typed `NotificationApi` +
       `sol-notificationd` lifecycle, replacement, action, query, and storage
-      boundary (Shell/D-Bus adapters remain pending)
+      boundary, including a Shell-consumed `NotificationDbusProxy` adapter
+      validated against the real daemon on an isolated session bus.
 - [ ] **Notification Center** (wired to `sol-notificationd`)
   - [x] **Renderer-neutral center core:** typed `NotificationApi` adapter,
         application/urgency grouping, lifecycle dismissal/actions, keyboard,
-        accessibility semantics, and repeatable service-adapter fixtures.
+        accessibility semantics, and repeatable service-adapter fixtures. An
+        isolated `dbus-run-session` test proves `NotificationCenter` drives
+        the real `sol-notificationd` through `NotificationDbusProxy` for
+        grouping, action invocation, user dismissal, and retained history.
   - [x] **Notification service adapters:** `org.sol.Notifications1` exposes
         caller-attributed typed notification publish, replacement, query,
         action-validation, and dismissal flows. The daemon also implements
