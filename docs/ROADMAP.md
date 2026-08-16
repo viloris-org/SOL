@@ -18,8 +18,8 @@
 | Phase | Name | Goal | Success criterion (from PRD §38) | Status |
 |---|---|---|---|---|
 | 0 | Foundation | Standalone Wayland session | Start a standalone SOL Wayland session and run standard Wayland apps | ✅ **Complete (2026-08-15)** |
-| 1 | Desktop Core | A usable daily Wayland compositor | SOL works as a basic daily-use Wayland compositor | ⏳ Next up (in progress) |
-| 2 | SolKit | Native app framework | Build an app with native SOL look and interaction entirely in SolKit | ⏸ Not started |
+| 1 | Desktop Core | A usable daily Wayland compositor | SOL works as a basic daily-use Wayland compositor | ✅ **Complete (2026-08-16)** |
+| 2 | SolKit | Native app framework | Build an app with native SOL look and interaction entirely in SolKit | ⏳ Next up (in progress) |
 | 3 | First-party Applications | First-party apps | The three first-party apps share a unified UX | ⏸ Not started |
 | 4 | Shell Experience | Complete desktop interaction model | SOL forms a complete, coherent desktop interaction model | ⏸ Not started |
 | 5 | Daily Driver | Long-term daily use | Developers can use SOL as their primary desktop long-term | ⏸ Not started |
@@ -56,20 +56,17 @@ later implementation.
 > applications." Demonstrated via `--spawn weston-terminal` and the
 > `sol_session` integration test.
 
-### Phase 0 → Phase 1 handoff
+### Phase 0 → Phase 1 handoff ✅
 
-- **Reusable core:** `SolState` (`compositor/src/state.rs`) is decoupled from
-  the backend. In Phase 1 it keeps growing; do not bloat `main.rs`.
-- **Known carryovers:** the DRM/udev backend requires `libdisplay-info < 0.3.0`
-  and must be enabled on real hardware (ADR-0005); the shell IPC wire format
-  is not committed (ADR-0006); Shell/SDK/Apps are still scaffolds.
-- **Reference implementation:** Smithay `anvil` example (vendored
-  `smithay-0.7.0/anvil/`) = the model for real hit-testing / focus /
-  DRM-udev wiring.
+Phase 1 is now complete. Phase 0's reusable core (`SolState`) has been extended
+with window management, workspace, layer-shell, and IME handling. The DRM/udev
+backend remain future work; winit-first keeps CI green.
 
 ---
 
-## Phase 1 — Desktop Core
+## Phase 1 — Desktop Core ✅
+
+> **Status:** Complete (2026-08-16)
 
 > **Goal:** evolve from "minimal well-formed compositor" into a **basic
 > daily-use Wayland compositor**: window management, focus, move/resize,
@@ -159,7 +156,9 @@ later implementation.
 
 ---
 
-## Phase 2 — SolKit
+## Phase 2 — SolKit ⏳
+
+> **Status:** In progress
 
 > **Goal:** form a complete **native application development framework** so
 > third-party developers can build apps with SOL-native look and interaction
@@ -414,6 +413,11 @@ SOL Applications → Third-party Applications
   text-input v3 + input-method v2 globals added to the compositor; sol-shell
   renders a top-bar layer surface and round-trips via a headless integration
   test; sol-ime frontend scaffold models the candidate window / preedit with
-  sol-design tokens. Initial roadmap published based on the seven PRD §38
-  phases, mapped against the current repository state and settled ADRs. Each
-  Phase's section is refined as it closes.
+  sol-design tokens.
+
+- **2026-08-16** — Phase 1 (Desktop Core) complete. All M1 deliverables
+  achieved: window management (hit-test/focus/Alt+Tab, move/resize, Floating+Snap),
+  workspace model, output management + HiDPI + display-hotplug, layer-shell
+  protocol integration, D-Bus IPC decision, structural shell/compositor split,
+  compositor text-input v3 + input-method v2 integration. Remaining items
+  (fcitx5 transport wiring, DRM/udev multi-monitor) are post-M1 follow-on.

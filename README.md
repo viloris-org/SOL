@@ -14,15 +14,13 @@ systemd, PipeWire, NetworkManager, BlueZ, Mesa, polkit, udisks2).
 
 ## Status
 
-**Concept / Pre-Alpha — Phase 0 (Foundation) ✅ complete, Phase 1 (Desktop
-Core) in progress.**
+**Concept / Pre-Alpha — Phase 0 (Foundation) ✅ complete, Phase 1 (Desktop Core) ✅ complete, Phase 2 (SolKit) in progress.**
 
 The Phase 0 milestone ("start a standalone SOL Wayland session and run
-standard Wayland applications") is **done**. `sol-compositor` is a functional
-Smithay compositor: on the winit backend it binds a real `wayland-sol`
-socket and serves standard Wayland clients. A `test-client` example plus an
-integration test prove the full protocol round-trip (bind globals → create
-`xdg_toplevel` → attach `wl_shm` buffer → compositor configure ack):
+standard Wayland applications") is **done**. Phase 1 M1 ("SOL can be used
+as a basic daily-use Wayland compositor") is **done**: window management,
+workspaces, multi-monitor, shell IPC, and IME are all implemented and
+validated by integration tests.
 
 ```bash
 cargo test -p sol-compositor --test sol_session
@@ -39,20 +37,19 @@ Everything else — shell UI, SolKit SDK, services, first-party apps — is a
 
 | Path | Purpose | Status |
 |---|---|---|
-| `compositor/` | `sol-compositor`: Smithay-based Wayland compositor | ✅ Phase 0 complete |
-| `shell/` | `sol-shell`: top bar, dock, launcher, overview, system UI | 🔲 placeholder → Phase 1/4 |
-| `sdk/sol-design` | Design tokens (single source of truth for visuals) | 🟡 token seeds +
-consistent tests |
+| `compositor/` | `sol-compositor`: Smithay-based Wayland compositor | ✅ Phase 0+1 complete |
+| `shell/` | `sol-shell`: top bar, dock, launcher, overview, system UI | ✅ Phase 1 shell top bar complete |
+| `sdk/sol-design` | Design tokens (single source of truth for visuals) | ✅ token seeds + consistent tests |
 | `sdk/sol-ui` | SolKit UI components (semantic, not visual-metrics) | 🔲 placeholder → Phase 2 |
 | `sdk/sol-app` | Application framework (lifecycle, commands, …) | 🔲 placeholder → Phase 2 |
 | `sdk/sol-graphics` | Rendering abstraction | 🔲 placeholder → Phase 2 |
 | `sdk/sol-animation` | Animation engine (interruptible / motion tokens) | 🔲 placeholder → Phase 2 |
 | `sdk/sol-system` | System API (restricted) | 🔲 placeholder → Phase 2 |
-| `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🔲 scaffolds → Phase 1/4 |
+| `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🔲 scaffolds (Phase 1 IME ready) |
 | `apps/` | First-party apps: Files, Terminal, Settings | 🔲 placeholders → Phase 3 |
 | `protocols/` | Wayland protocol XML + IPC schemas | 🔲 no stable protocol yet |
 | `packaging/arch/` | Pacman packaging for `[sol-core]`/`[sol-apps]`/`[sol-sdk]` | 🔲 early |
-| `tests/` | Cross-component integration tests | 🟡 Phase 0 session test |
+| `tests/` | Cross-component integration tests | ✅ Phase 0/1 integration tests |
 | `docs/` | PRD, ROADMAP, engineering decisions | 🟡 living |
 
 ## Documentation
