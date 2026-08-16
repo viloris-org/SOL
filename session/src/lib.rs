@@ -21,6 +21,7 @@ use std::{
 
 const DEFAULT_SOCKET: &str = "wayland-sol";
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
+const SERVICE_READY_GRACE: Duration = Duration::from_millis(100);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +34,9 @@ pub struct SessionEnvironment {
 pub struct ProgramPaths {
     pub compositor: PathBuf,
     pub shell: PathBuf,
+    pub settingsd: PathBuf,
+    pub notificationd: PathBuf,
+    pub portal: PathBuf,
 }
 
 impl ProgramPaths {
@@ -41,6 +45,9 @@ impl ProgramPaths {
         Self {
             compositor: env_path("SOL_COMPOSITOR_BIN", "sol-compositor"),
             shell: env_path("SOL_SHELL_BIN", "sol-shell"),
+            settingsd: env_path("SOL_SETTINGSD_BIN", "sol-settingsd"),
+            notificationd: env_path("SOL_NOTIFICATIOND_BIN", "sol-notificationd"),
+            portal: env_path("SOL_PORTAL_BIN", "sol-portal"),
         }
     }
 }
@@ -56,6 +63,9 @@ pub struct ProcessPlan {
 pub struct LaunchPlan {
     pub compositor: ProcessPlan,
     pub shell: ProcessPlan,
+    pub settingsd: ProcessPlan,
+    pub notificationd: ProcessPlan,
+    pub portal: ProcessPlan,
     pub socket_path: PathBuf,
 }
 
@@ -64,6 +74,11 @@ impl LaunchPlan {
     pub fn new(environment: &SessionEnvironment, programs: &ProgramPaths) -> Self {
         let runtime_dir = environment.runtime_dir.as_os_str().to_os_string();
         let socket = OsString::from(&environment.socket);
+        let desktop_environment = vec![
+            (OsString::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
+            (OsString::from("XDG_CURRENT_DESKTOP"), OsString::from("SOL")),
+            (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
+        ];
         Self {
             compositor: ProcessPlan {
                 program: programs.compositor.clone(),
@@ -79,12 +94,15 @@ impl LaunchPlan {
                 program: programs.shell.clone(),
                 arguments: Vec::new(),
                 environment: vec![
-                    (OsString::from("XDG_RUNTIME_DIR"), runtime_dir),
+                    (OsString::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
                     (OsString::from("WAYLAND_DISPLAY"), socket),
                     (OsString::from("XDG_CURRENT_DESKTOP"), OsString::from("SOL")),
                     (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
                 ],
             },
+            settingsd: service_plan(&programs.settingsd, &desktop_environment),
+            notificationd: service_plan(&programs.notificationd, &desktop_environment),
+            portal: service_plan(&programs.portal, &desktop_environment),
             socket_path: environment.runtime_dir.join(&environment.socket),
         }
     }
@@ -92,12 +110,15 @@ impl LaunchPlan {
     #[must_use]
     pub fn dry_run_output(&self) -> String {
         format!(
-            "compositor: {} --tty-udev\ncompositor env: XDG_RUNTIME_DIR={} SOL_WAYLAND_SOCKET={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nshell: {}\nshell env: XDG_RUNTIME_DIR={} WAYLAND_DISPLAY={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nwait for socket: {}\n",
+            "compositor: {} --tty-udev\ncompositor env: XDG_RUNTIME_DIR={} SOL_WAYLAND_SOCKET={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nsettingsd: {} --dbus\nnotificationd: {} --dbus\nportal: {} --dbus\nshell: {}\nshell env: XDG_RUNTIME_DIR={} WAYLAND_DISPLAY={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nwait for socket: {}\n",
             self.compositor.program.display(),
             value(&self.compositor.environment[0].1),
             value(&self.compositor.environment[1].1),
             value(&self.compositor.environment[2].1),
             value(&self.compositor.environment[3].1),
+            self.settingsd.program.display(),
+            self.notificationd.program.display(),
+            self.portal.program.display(),
             self.shell.program.display(),
             value(&self.shell.environment[0].1),
             value(&self.shell.environment[1].1),
@@ -105,6 +126,22 @@ impl LaunchPlan {
             value(&self.shell.environment[3].1),
             self.socket_path.display(),
         )
+    }
+
+    fn services(&self) -> [(&'static str, &ProcessPlan); 3] {
+        [
+            ("settingsd", &self.settingsd),
+            ("notificationd", &self.notificationd),
+            ("portal", &self.portal),
+        ]
+    }
+}
+
+fn service_plan(program: &Path, environment: &[(OsString, OsString)]) -> ProcessPlan {
+    ProcessPlan {
+        program: program.to_path_buf(),
+        arguments: vec![OsString::from("--dbus")],
+        environment: environment.to_vec(),
     }
 }
 
@@ -199,18 +236,49 @@ pub fn run(plan: &LaunchPlan) -> Result<(), String> {
         stop(&mut compositor);
         return Err(error);
     }
-    let mut shell = match spawn(&plan.shell) {
-        Ok(shell) => shell,
+    let mut companions = Vec::new();
+    for (name, child_plan) in plan.services() {
+        match spawn(child_plan) {
+            Ok(child) => companions.push(ManagedChild {
+                name,
+                plan: child_plan,
+                child,
+            }),
+            Err(error) => {
+                stop(&mut compositor);
+                stop_all(&mut companions);
+                return Err(error);
+            }
+        }
+    }
+    if let Err(error) = wait_for_services(&mut compositor, &mut companions, &running) {
+        stop(&mut compositor);
+        stop_all(&mut companions);
+        return Err(error);
+    }
+    match spawn(&plan.shell) {
+        Ok(child) => companions.push(ManagedChild {
+            name: "shell",
+            plan: &plan.shell,
+            child,
+        }),
         Err(error) => {
             stop(&mut compositor);
+            stop_all(&mut companions);
             return Err(error);
         }
-    };
+    }
 
-    let result = supervise(&mut compositor, &mut shell, &running);
+    let result = supervise(&mut compositor, &mut companions, &running);
     stop(&mut compositor);
-    stop(&mut shell);
+    stop_all(&mut companions);
     result
+}
+
+struct ManagedChild<'a> {
+    name: &'static str,
+    plan: &'a ProcessPlan,
+    child: Child,
 }
 
 fn spawn(plan: &ProcessPlan) -> Result<Child, String> {
@@ -221,6 +289,38 @@ fn spawn(plan: &ProcessPlan) -> Result<Child, String> {
     command
         .spawn()
         .map_err(|error| format!("failed to start {}: {error}", plan.program.display()))
+}
+
+fn wait_for_services(
+    compositor: &mut Child,
+    services: &mut [ManagedChild<'_>],
+    running: &AtomicBool,
+) -> Result<(), String> {
+    let deadline = Instant::now() + SERVICE_READY_GRACE;
+    while Instant::now() < deadline {
+        if !running.load(Ordering::SeqCst) {
+            return Err("session launch interrupted while services started".to_owned());
+        }
+        if let Some(status) = compositor.try_wait().map_err(child_error("compositor"))? {
+            return Err(format!(
+                "compositor exited while services started: {status}"
+            ));
+        }
+        for service in &mut *services {
+            if let Some(status) = service
+                .child
+                .try_wait()
+                .map_err(child_error(service.name))?
+            {
+                return Err(format!(
+                    "{} exited during service startup: {status}",
+                    service.name
+                ));
+            }
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    Ok(())
 }
 
 fn wait_for_socket(
@@ -252,7 +352,7 @@ fn wait_for_socket(
 
 fn supervise(
     compositor: &mut Child,
-    shell: &mut Child,
+    companions: &mut [ManagedChild<'_>],
     running: &AtomicBool,
 ) -> Result<(), String> {
     while running.load(Ordering::SeqCst) {
@@ -261,8 +361,20 @@ fn supervise(
                 "compositor exited while shell was running: {status}"
             ));
         }
-        if let Some(status) = shell.try_wait().map_err(child_error("shell"))? {
-            return status_result("shell", status);
+        for companion in &mut *companions {
+            if let Some(status) = companion
+                .child
+                .try_wait()
+                .map_err(child_error(companion.name))?
+            {
+                tracing_restart(companion.name, status);
+                companion.child = spawn(companion.plan).map_err(|error| {
+                    format!(
+                        "could not restart {} after {status}: {error}",
+                        companion.name
+                    )
+                })?;
+            }
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -273,12 +385,8 @@ fn child_error(name: &'static str) -> impl FnOnce(io::Error) -> String {
     move |error| format!("could not inspect {name}: {error}")
 }
 
-fn status_result(name: &str, status: ExitStatus) -> Result<(), String> {
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("{name} exited unsuccessfully: {status}"))
-    }
+fn tracing_restart(name: &str, status: ExitStatus) {
+    eprintln!("sol-session: restarting {name} after exit: {status}");
 }
 
 fn stop(child: &mut Child) {
@@ -286,6 +394,12 @@ fn stop(child: &mut Child) {
         let _ = child.kill();
     }
     let _ = child.wait();
+}
+
+fn stop_all(children: &mut [ManagedChild<'_>]) {
+    for child in children {
+        stop(&mut child.child);
+    }
 }
 
 fn env_path(variable: &str, default: &str) -> PathBuf {
@@ -309,9 +423,19 @@ mod tests {
         let programs = ProgramPaths {
             compositor: PathBuf::from("/usr/bin/sol-compositor"),
             shell: PathBuf::from("/usr/bin/sol-shell"),
+            settingsd: PathBuf::from("/usr/bin/sol-settingsd"),
+            notificationd: PathBuf::from("/usr/bin/sol-notificationd"),
+            portal: PathBuf::from("/usr/bin/sol-portal"),
         };
         let plan = LaunchPlan::new(&environment, &programs);
         assert_eq!(plan.compositor.arguments, [OsString::from("--tty-udev")]);
+        for (_, service) in [
+            ("settingsd", &plan.settingsd),
+            ("notificationd", &plan.notificationd),
+            ("portal", &plan.portal),
+        ] {
+            assert_eq!(service.arguments, [OsString::from("--dbus")]);
+        }
         assert!(plan.compositor.environment.contains(&(
             OsString::from("SOL_WAYLAND_SOCKET"),
             OsString::from("wayland-sol-test")
@@ -349,11 +473,14 @@ mod tests {
             &ProgramPaths {
                 compositor: PathBuf::from("sol-compositor"),
                 shell: PathBuf::from("sol-shell"),
+                settingsd: PathBuf::from("sol-settingsd"),
+                notificationd: PathBuf::from("sol-notificationd"),
+                portal: PathBuf::from("sol-portal"),
             },
         );
         assert_eq!(
             plan.dry_run_output(),
-            "compositor: sol-compositor --tty-udev\ncompositor env: XDG_RUNTIME_DIR=/run/user/42 SOL_WAYLAND_SOCKET=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nshell: sol-shell\nshell env: XDG_RUNTIME_DIR=/run/user/42 WAYLAND_DISPLAY=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: /run/user/42/wayland-sol\n"
+            "compositor: sol-compositor --tty-udev\ncompositor env: XDG_RUNTIME_DIR=/run/user/42 SOL_WAYLAND_SOCKET=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nsettingsd: sol-settingsd --dbus\nnotificationd: sol-notificationd --dbus\nportal: sol-portal --dbus\nshell: sol-shell\nshell env: XDG_RUNTIME_DIR=/run/user/42 WAYLAND_DISPLAY=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: /run/user/42/wayland-sol\n"
         );
     }
 

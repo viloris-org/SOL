@@ -26,6 +26,9 @@ fn binary_prints_a_non_hardware_launch_plan() {
         .env("XDG_RUNTIME_DIR", &runtime_dir)
         .env("SOL_COMPOSITOR_BIN", "/opt/sol/bin/sol-compositor")
         .env("SOL_SHELL_BIN", "/opt/sol/bin/sol-shell")
+        .env("SOL_SETTINGSD_BIN", "/opt/sol/bin/sol-settingsd")
+        .env("SOL_NOTIFICATIOND_BIN", "/opt/sol/bin/sol-notificationd")
+        .env("SOL_PORTAL_BIN", "/opt/sol/bin/sol-portal")
         .output()
         .expect("run sol-session --dry-run");
     let _ = fs::remove_dir(&runtime_dir);
@@ -35,7 +38,7 @@ fn binary_prints_a_non_hardware_launch_plan() {
         "compositor: /opt/sol/bin/sol-compositor --tty-udev\ncompositor env: XDG_RUNTIME_DIR="
             .to_owned()
             + &runtime_dir.display().to_string()
-            + " SOL_WAYLAND_SOCKET=wayland-sol-test XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nshell: /opt/sol/bin/sol-shell\nshell env: XDG_RUNTIME_DIR="
+            + " SOL_WAYLAND_SOCKET=wayland-sol-test XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nsettingsd: /opt/sol/bin/sol-settingsd --dbus\nnotificationd: /opt/sol/bin/sol-notificationd --dbus\nportal: /opt/sol/bin/sol-portal --dbus\nshell: /opt/sol/bin/sol-shell\nshell env: XDG_RUNTIME_DIR="
             + &runtime_dir.display().to_string()
             + " WAYLAND_DISPLAY=wayland-sol-test XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: "
             + &runtime_dir.join("wayland-sol-test").display().to_string()
@@ -57,33 +60,70 @@ fn binary_rejects_socket_paths_before_starting_processes() {
 }
 
 #[test]
-fn actual_mode_orders_processes_and_stops_the_compositor_when_shell_exits() {
+fn actual_mode_starts_services_and_restarts_shell_until_compositor_exits() {
     let runtime_dir = runtime_dir();
     let compositor = executable(
         &runtime_dir,
         "fake-compositor",
-        "#!/bin/sh\n: > \"$XDG_RUNTIME_DIR/$SOL_WAYLAND_SOCKET\"\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+        "#!/bin/sh\n: > \"$XDG_RUNTIME_DIR/$SOL_WAYLAND_SOCKET\"\nsleep 0.4\nexit 7\n",
     );
     let shell = executable(
         &runtime_dir,
         "fake-shell",
-        "#!/bin/sh\ntest \"$WAYLAND_DISPLAY\" = wayland-sol-test\ntest \"$XDG_CURRENT_DESKTOP\" = SOL\ntest \"$XDG_SESSION_DESKTOP\" = SOL\ntest -d \"$XDG_RUNTIME_DIR\"\nexit 0\n",
+        "#!/bin/sh\ntest \"$WAYLAND_DISPLAY\" = wayland-sol-test\ntest \"$XDG_CURRENT_DESKTOP\" = SOL\ntest \"$XDG_SESSION_DESKTOP\" = SOL\ncount=0\n[ ! -f \"$XDG_RUNTIME_DIR/shell-count\" ] || count=$(cat \"$XDG_RUNTIME_DIR/shell-count\")\ncount=$((count + 1))\nprintf '%s\\n' \"$count\" > \"$XDG_RUNTIME_DIR/shell-count\"\n[ \"$count\" -ne 1 ] || exit 0\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
     );
+    let settingsd = service_executable(&runtime_dir, "fake-settingsd", "settingsd-started");
+    let notificationd =
+        service_executable(&runtime_dir, "fake-notificationd", "notificationd-started");
+    let portal = service_executable(&runtime_dir, "fake-portal", "portal-started");
     let environment = sol_session::SessionEnvironment {
         runtime_dir: runtime_dir.clone(),
         socket: "wayland-sol-test".to_owned(),
     };
     let plan = sol_session::LaunchPlan::new(
         &environment,
-        &sol_session::ProgramPaths { compositor, shell },
+        &sol_session::ProgramPaths {
+            compositor,
+            shell,
+            settingsd,
+            notificationd,
+            portal,
+        },
     );
 
     let result = sol_session::run(&plan);
-    let _ = fs::remove_file(runtime_dir.join("wayland-sol-test"));
-    let _ = fs::remove_file(runtime_dir.join("fake-compositor"));
-    let _ = fs::remove_file(runtime_dir.join("fake-shell"));
+    assert!(
+        result
+            .as_ref()
+            .is_err_and(|error| error.contains("compositor exited")),
+        "{result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(runtime_dir.join("shell-count")).expect("read shell restart count"),
+        "2\n"
+    );
+    for marker in [
+        "settingsd-started",
+        "notificationd-started",
+        "portal-started",
+    ] {
+        assert!(runtime_dir.join(marker).exists(), "missing {marker}");
+    }
+    for entry in fs::read_dir(&runtime_dir).expect("read test runtime directory") {
+        let path = entry.expect("read runtime entry").path();
+        let _ = fs::remove_file(path);
+    }
     let _ = fs::remove_dir(&runtime_dir);
-    assert!(result.is_ok(), "{result:?}");
+}
+
+fn service_executable(directory: &std::path::Path, name: &str, marker: &str) -> PathBuf {
+    executable(
+        directory,
+        name,
+        &format!(
+            "#!/bin/sh\ntest \"$1\" = --dbus\ntest \"$XDG_CURRENT_DESKTOP\" = SOL\ntest \"$XDG_SESSION_DESKTOP\" = SOL\n: > \"$XDG_RUNTIME_DIR/{marker}\"\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n"
+        ),
+    )
 }
 
 fn executable(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {

@@ -438,8 +438,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [x] **Session-launch foundation:** installed `sol-session` validates an
       XDG runtime directory and deterministic socket name, starts
       `sol-compositor --tty-udev`, waits for its Wayland socket, then starts
-      `sol-shell` with the matching Wayland environment; dry-run and process
-      plan tests do not require DRM, a VT, or a login manager. Real
+      settingsd, notificationd, and portal session-bus services before
+      `sol-shell` with the matching desktop/Wayland environment. The
+      compositor remains session-critical while shell/service crashes restart
+      independently. Dry-run and process supervision tests do not require DRM,
+      a VT, or a login manager; `scripts/validate-session-services.sh` runs the
+      real service daemons under an isolated session bus, probes all three
+      names, and verifies shutdown releases them. Real
       display-manager, libseat/DRM, VT, and desktop-session validation remain
       required before calling this a field-validated session path.
 - [ ] Clipboard, drag & drop fully polished

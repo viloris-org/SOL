@@ -75,7 +75,7 @@ package_sol-compositor() {
 
 package_sol-session() {
   pkgdesc='SOL TTY/udev session launcher'
-  depends=('sol-compositor' 'sol-shell')
+  depends=('sol-compositor' 'sol-notificationd' 'sol-portal' 'sol-settingsd' 'sol-shell')
   _package_binary sol-session
   install -Dm644 "${srcdir}/${_source_dir}/session/assets/sol.desktop" \
     "${pkgdir}/usr/share/wayland-sessions/sol.desktop"

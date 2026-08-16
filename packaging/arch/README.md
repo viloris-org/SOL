@@ -12,8 +12,10 @@ versioned SOL source archive:
 
 `sol-desktop` is a meta package. Its dependencies are deliberately limited to
 the binaries this repository can build today. `sol-session` starts the
-`sol-compositor --tty-udev` and `sol-shell` process pair after validating its
-runtime directory, and installs `sol.desktop` in the standard
+`sol-compositor --tty-udev`, typed D-Bus services, and `sol-shell` after
+validating its runtime directory. The compositor is the critical process;
+shell and service companions restart independently. The package installs
+`sol.desktop` in the standard
 `/usr/share/wayland-sessions` location for a display manager to invoke. It is
 not itself a display-manager or login-manager adapter.
 Future polkit integration, desktop entries, services, and applications must be added
