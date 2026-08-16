@@ -28,6 +28,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 9 | Settings storage and stable minimum API boundary | Accepted | Phase 2 | [0011-settings-storage-api.md](0011-settings-storage-api.md) |
 | 10 | Application identity and lifecycle contracts | Accepted | Phase 2 | [0012-application-identity-lifecycle.md](0012-application-identity-lifecycle.md) |
 | 11 | Typed System Action and permission layer | Accepted (API contract) | Phase 4 | [0013-system-action-permission-layer.md](0013-system-action-permission-layer.md) |
+| 12 | Local, privacy-preserving search index | Accepted (foundation) | Phase 4 | [0014-local-search-index.md](0014-local-search-index.md) |
 
 ## Open decisions (PRD §41 — to settle during prototyping)
 
@@ -46,7 +47,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 13 | SOL Stable vs Arch rolling sync strategy | Phase 5+ | Not an MVP blocker |
 | 14 | Installer | Phase 6 | Not an MVP blocker |
 | 15 | Store backend | Phase 4+ | Hide package implementation details behind pacman/AUR |
-| 16 | Search index architecture | Phase 4 | Command/Action API is the interface |
+| 16 | Search index architecture | **Accepted (Phase 4 foundation)** | [ADR-0014](0014-local-search-index.md): explicit local application catalog; no filesystem/document/clipboard/network indexing; typed launch results only |
 | 17 | System Action API | **Accepted (Phase 4 API contract)** | [ADR-0013](0013-system-action-permission-layer.md): typed caller-attributed actions, default-deny grants, consent boundary, and audit; system adapters remain deferred |
 | 18 | Crash reporting / diagnostics | Phase 5 | Must not require arbitrary shell access |
 | 19 | IME engine/frontend integration boundary | Phase 1 | fcitx5 addon coverage; sol-ime frontend owns candidate-window UI; engine upgrade strategy; when a custom engine is ever considered |

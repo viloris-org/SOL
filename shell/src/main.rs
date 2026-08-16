@@ -14,6 +14,7 @@
 //! shell D-Bus IPC from ADR-0006).
 
 mod client;
+pub mod launcher;
 
 use std::{
     fs::File,

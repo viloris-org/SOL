@@ -3889,7 +3889,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ctrlc",
+ "sol-app",
  "sol-design",
+ "sol-graphics",
+ "sol-system",
+ "sol-ui",
  "tracing",
  "tracing-subscriber",
  "wayland-client",

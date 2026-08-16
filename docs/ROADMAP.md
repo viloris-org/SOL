@@ -328,7 +328,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 
 ### Milestone M4 deliverables
 
-- [ ] **Dock / Launcher:** app launch, running indicators, pin / unpin
+- [x] **Dock / Launcher foundation:** renderer-neutral pinned/running app model,
+      deterministic app catalog, typed launch / activate / close requests, and
+      SolUI keyboard/accessibility navigation. Real compositor activation and
+      close adapters remain unimplemented and explicitly report unavailable.
 - [ ] **Overview / Workspace:** workspace overview, visual switching
 - [ ] **Top Bar:** clock, status area (network / volume / battery / bluetooth)
 - [x] **Notification service foundation:** typed `NotificationApi` +
@@ -338,8 +341,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Quick Settings** (wired to `sol-settingsd`)
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress
-- [ ] **Search & Launcher (§28):** default `Super+Space`; Applications / Files /
-      Settings / Commands / Calculator to start
+- [x] **Search & Launcher (§28) foundation:** private local application catalog,
+      deterministic explainable ranking, and permission-gated typed launch
+      execution. File/document/clipboard/command/calculator providers and the
+      `Super+Space` desktop shortcut remain explicit follow-up adapters.
 - [x] **Command / Action API (§21):** typed action + permission layer shared by
       search / automation / accessibility. **API contract accepted in
       ADR-0013:** caller-attributed action catalog, default-deny grants, trusted
@@ -356,9 +361,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > interactions.
 
 > **Decision gate (PRD §41):** #10 global menu, #11 tiling product model
-> (if not already settled), #16 search index, #17 System Action API. **#17 is
-> settled at the API-contract level by ADR-0013; production adapters and
-> desktop-session validation remain follow-on work.**
+> (if not already settled), #16 search index, #17 System Action API. **#16 is
+> settled by ADR-0014's local/private application catalog; #17 is settled at
+> the API-contract level by ADR-0013. Production adapters and desktop-session
+> validation remain follow-on work.**
 
 ---
 

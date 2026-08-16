@@ -17,3 +17,7 @@ anyhow = "1.0"
 
 # SOL design tokens (single source of truth for visual parameters — PRD §19).
 sol-design = { path = "../sdk/sol-design" }
+sol-app = { path = "../sdk/sol-app" }
+sol-graphics = { path = "../sdk/sol-graphics" }
+sol-system = { path = "../sdk/sol-system" }
+sol-ui = { path = "../sdk/sol-ui" }
