@@ -483,6 +483,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [x] **Starter template:** `templates/solkit-starter` provides a public-crate
       app skeleton, copy-out dependency instructions, and deterministic
       external-copy validation (`scripts/validate-solkit-starter.sh`)
+- [x] **Project scaffolding:** `scripts/new-solkit-project.sh` creates a named
+      external starter, validates its package and app identity, and is covered
+      by `scripts/test-new-solkit-project.sh`
 - [ ] **Templates:** `cargo new` / project scaffolding beyond the starter
 - [ ] **Developer tools:** scaffolding, debugging, packaging tools
 - [ ] **Packaging polish:** pacman/AUR integration, signed-repo trust chain

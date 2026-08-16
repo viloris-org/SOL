@@ -23,7 +23,21 @@ Rename the package and replace `APP_ID` in `src/lib.rs` before making an app.
 The identifier must be one owned by the publisher, for example
 `com.example.notes`.
 
-## Copy outside this repository
+## Scaffold an external project
+
+From a SOL checkout, create a named app outside this repository:
+
+```bash
+./scripts/new-solkit-project.sh ../notes-app notes-app com.example.notes
+```
+
+The scaffolder rejects existing or in-repository destinations, validates the
+Cargo package name and reverse-DNS app ID, rewrites both values, and points the
+copied project at the local SDK checkout. It also updates the binary's Rust
+crate identifier when the package name contains hyphens. Then run the command
+it prints.
+
+## Copy outside this repository manually
 
 Copy the directory, then change every `path` dependency in `Cargo.toml` to
 the SDK checkout that the application will build against. For example, when a

@@ -21,12 +21,16 @@ session is required.
 
 ## Make it your app
 
-1. Copy `templates/solkit-starter` to a directory outside this workspace.
-2. Rename the Cargo package and replace `APP_ID` with an identifier owned by
-   the publisher.
-3. Point the three SolKit `path` dependencies at the SDK checkout used to
-   build the application.
-4. Run `cargo test` in the copied project before adding application behavior.
+1. Run `./scripts/new-solkit-project.sh ../my-app my-app com.example.my-app`
+   from a SOL checkout.
+2. Run `cargo test --manifest-path ../my-app/Cargo.toml`.
+3. Add application behavior using the public SolKit crates.
+
+The scaffolder creates only new directories outside the SOL checkout. It
+validates lowercase Cargo package names and `AppId`-compatible reverse-DNS
+identifiers, then rewrites the template and local SDK dependency paths. Use
+the template README's manual copy instructions when the project needs a
+different SDK checkout location.
 
 See the template [README](../templates/solkit-starter/README.md) for the exact
 dependency replacement. SolKit crates are currently local SDK crates, not
@@ -49,4 +53,5 @@ it:
 
 ```bash
 ./scripts/validate-solkit-starter.sh
+./scripts/test-new-solkit-project.sh
 ```

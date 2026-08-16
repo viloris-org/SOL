@@ -13,6 +13,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 cp -R "$repo_root/templates/solkit-starter" "$project_dir"
+rm -rf "$project_dir/target"
 sed -i "s|../../sdk|$repo_root/sdk|g" "$project_dir/Cargo.toml"
 
 cargo test --manifest-path "$project_dir/Cargo.toml"
