@@ -176,8 +176,8 @@ backend remain future work; winit-first keeps CI green.
 - [x] Layout engine (`HStack` / `VStack` semantic layout, PRD §18) — Implemented
 - [ ] `sol-design` full token convergence: typography / spacing / radius /
       material / motion / shadows / color (PRD §19, §19.1)
-- [ ] Consistency testing: golden-snapshot asserts component-tree output
-      contains only token values (§19.1)
+- [x] Consistency testing: golden-snapshot asserts component-tree output: golden-snapshot asserts component-tree output
+      contains only token values (tests in sol-design) (§19.1)
 
 **SolAnimation**
 
