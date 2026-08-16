@@ -252,11 +252,12 @@ real-hardware DRM/GBM smoke validation remains a hardware follow-up.
       covers layout/components, command execution, interruptible motion,
       token-mode accessibility preferences, keyboard navigation, and the
       semantic accessibility tree without importing a concrete backend.
-- [ ] **Real-platform closure:** run the native showcase on a SOL Wayland
-      session and verify a real accessibility bridge with assistive technology.
-      The `native` feature compiles the private Slint adapter, but headless
-      results do not prove GPU pacing, input latency, multi-output behavior,
-      or AT-SPI/screen-reader transport.
+- [x] **Native Wayland session smoke:** the Slint-backed showcase ran against
+      a live `sol-compositor` Wayland socket on 2026-08-16. The bounded run
+      reached the native event loop without a protocol or renderer failure.
+- [ ] **Accessibility-platform closure:** verify a real accessibility bridge
+      with assistive technology. The native smoke does not prove GPU pacing,
+      input latency, multi-output behavior, or AT-SPI/screen-reader transport.
 
 **M2 remains in progress until the real-platform closure item is evidenced.**
 The example proves the framework API workflow; it must not be mistaken for a
