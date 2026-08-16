@@ -352,6 +352,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [x] **Renderer-neutral overview core:** typed workspace/window snapshots,
         accessibility and keyboard model, switch/move-window intents, and a
         compositor-bridge contract with repeatable fixtures.
+  - [x] **Native overview surface contract:** validated output/fractional-scale
+        boundary, bounded thumbnail projection, deterministic card layout,
+        accessibility tree, raster frame, lifecycle, and typed host dispatch
+        now live in `shell::overview_surface`. Real compositor IPC, live window
+        thumbnails, and layer-shell presentation remain open.
   - [ ] **Native overview surface:** compositor IPC adapter, real window
         thumbnails/layout, and presentation on a layer-shell surface.
 - [x] **Top Bar foundation:** renderer-neutral clock/date, workspace, network,
@@ -534,6 +539,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Screen sharing / screen recording:** XDG portal D-Bus, file chooser
       UI, PipeWire/screencopy adapters, stream lifecycle, and desktop-session
       validation remain required.
+  - [x] **Authorized ScreenCast lifecycle core:** `sol-portal` consumes only a
+        matching private `PortalAuthorization`, enforces create → select
+        sources → start → close ordering, validates backend stream/node data,
+        and owns cleanup through a typed compositor/PipeWire adapter boundary.
+        XDG portal interfaces, picker UI, real streams, and desktop validation
+        remain open.
 - [ ] Application compatibility matrix (GTK / Qt / SDL / Flutter / Electron —
       Wayland-native, §4.2)
   - [x] **GTK 4 / Qt 6 / SDL 2 protocol smoke:** native toolkit probes compile

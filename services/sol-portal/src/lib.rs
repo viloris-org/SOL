@@ -7,6 +7,7 @@
 //! [`PortalAuthorization`] rather than bypassing this boundary.
 
 pub mod dbus;
+pub mod screencast;
 
 use sol_system::{
     ActionAuthorization, ActionError, ActionSource, AppId, SystemAction, SystemActionApi,
