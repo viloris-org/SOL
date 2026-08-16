@@ -277,6 +277,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       palette, keyboard/accessibility tree, and settingsd round-trip; layered
       UI → Settings API → system services. Display and input pages explicitly
       report unavailable until their typed service APIs exist.
+  - [x] **Private settings persistence:** `FileSettingsStore` uses atomic
+        replacement, private `0600` files, and parent-directory sync after
+        rename; reload and permission tests cover the daemon-owned profile.
 - [x] **Terminal (PRD §27) core:** direct-exec PTY/process lifecycle, ANSI/VT
       grid with Unicode and true color, bounded scrollback/search, tabs,
       selection/clipboard and keyboard/resize contracts, renderer-neutral

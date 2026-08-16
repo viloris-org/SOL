@@ -109,7 +109,10 @@ impl SettingsStore for FileSettingsStore {
             return Err(error);
         }
 
-        fs::rename(&temporary_path, &self.path).map_err(|error| io_error("replace settings", error))
+        fs::rename(&temporary_path, &self.path)
+            .map_err(|error| io_error("replace settings", error))?;
+        restrict_permissions(&self.path).map_err(|error| io_error("restrict settings", error))?;
+        sync_directory(parent).map_err(|error| io_error("sync settings directory", error))
     }
 }
 
@@ -187,15 +190,45 @@ impl<S: SettingsStore> SettingsApi for SettingsDaemon<S> {
 }
 
 fn write_snapshot(path: &Path, snapshot: &SettingsSnapshot) -> SettingsResult<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
         .open(path)
         .map_err(|error| io_error("create temporary settings", error))?;
     file.write_all(serialize_snapshot(snapshot).as_bytes())
         .map_err(|error| io_error("write temporary settings", error))?;
     file.sync_all()
         .map_err(|error| io_error("sync temporary settings", error))
+}
+
+fn restrict_permissions(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::fs::File::open(path)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 fn temporary_path(path: &Path) -> SettingsResult<PathBuf> {
@@ -373,6 +406,13 @@ mod tests {
         assert_eq!(reloaded, expected);
         assert!(reloaded.appearance.high_contrast);
         assert_eq!(reloaded.appearance.text_scale, TextScale::Large);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
 
         fs::remove_file(path).expect("test settings file should be removable");
     }
