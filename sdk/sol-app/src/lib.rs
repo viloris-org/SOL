@@ -137,17 +137,10 @@ impl AppWindow {
 }
 
 /// Command registry.
+#[derive(Default)]
 pub struct CommandRegistry {
     /// Registered commands.
     commands: HashMap<String, Box<dyn Command>>,
-}
-
-impl Default for CommandRegistry {
-    fn default() -> Self {
-        Self {
-            commands: HashMap::new(),
-        }
-    }
 }
 
 impl CommandRegistry {
@@ -163,8 +156,8 @@ impl CommandRegistry {
     }
 
     /// Get a command by ID.
-    pub fn get(&self, id: &str) -> Option<&Box<dyn Command>> {
-        self.commands.get(id)
+    pub fn get(&self, id: &str) -> Option<&dyn Command> {
+        self.commands.get(id).map(|b| b.as_ref())
     }
 
     /// Execute a command by ID.
