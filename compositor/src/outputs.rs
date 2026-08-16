@@ -31,6 +31,32 @@ use smithay::{
 /// The number of logical millimeters a 1920×1080 monitor roughly is.
 const DEFAULT_PHYSICAL_MM: (u32, u32) = (530, 300);
 
+/// A backend-supplied logical configuration for one connected output.
+///
+/// This is deliberately renderer-independent: winit, headless tests, and the
+/// udev/DRM backend can all advertise the same Wayland output contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputConfiguration {
+    /// Stable backend connector/output name.
+    pub name: String,
+    /// Current mode size in physical pixels at scale 1.
+    pub size: (i32, i32),
+    /// Logical top-left position in the desktop layout.
+    pub location: (i32, i32),
+}
+
+impl OutputConfiguration {
+    /// Create one output configuration.
+    #[must_use]
+    pub fn new(name: impl Into<String>, size: (i32, i32), location: (i32, i32)) -> Self {
+        Self {
+            name: name.into(),
+            size,
+            location,
+        }
+    }
+}
+
 /// A single compositor output and its manager state.
 pub struct Outputs {
     /// Tracks every `wl_output`/`zxdg_output` client bound object.
@@ -58,42 +84,118 @@ impl Outputs {
         D: smithay::wayland::compositor::CompositorHandler,
         D: 'static,
     {
-        let manager = OutputManagerState::new();
+        Self::from_configurations::<D>(
+            display,
+            &[OutputConfiguration::new("output-0", (1920, 1080), (0, 0))],
+        )
+    }
 
-        let primary = Output::new(
-            "output-0".into(),
+    /// Create output globals from backend-provided configurations.
+    pub fn from_configurations<D>(
+        display: &DisplayHandle,
+        configurations: &[OutputConfiguration],
+    ) -> Self
+    where
+        D: smithay::wayland::output::OutputHandler,
+        D: smithay::wayland::compositor::CompositorHandler,
+        D: smithay::reexports::wayland_server::GlobalDispatch<
+                smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
+                smithay::wayland::output::WlOutputData,
+            >,
+        D: smithay::reexports::wayland_server::Dispatch<
+                smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
+                smithay::wayland::output::OutputUserData,
+            >,
+        D: 'static,
+    {
+        let manager = OutputManagerState::new();
+        let outputs = configurations
+            .iter()
+            .map(|configuration| Self::create_output::<D>(configuration, display))
+            .collect();
+        Self { manager, outputs }
+    }
+
+    fn create_output<D>(configuration: &OutputConfiguration, display: &DisplayHandle) -> Output
+    where
+        D: smithay::wayland::output::OutputHandler,
+        D: smithay::wayland::compositor::CompositorHandler,
+        D: smithay::reexports::wayland_server::GlobalDispatch<
+                smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
+                smithay::wayland::output::WlOutputData,
+            >,
+        D: smithay::reexports::wayland_server::Dispatch<
+                smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
+                smithay::wayland::output::OutputUserData,
+            >,
+        D: 'static,
+    {
+        let output = Output::new(
+            configuration.name.clone(),
             PhysicalProperties {
                 size: (DEFAULT_PHYSICAL_MM.0 as i32, DEFAULT_PHYSICAL_MM.1 as i32).into(),
                 subpixel: Subpixel::Unknown,
                 make: "SOL".into(),
-                model: "SOL Virtual Output".into(),
+                model: "SOL Output".into(),
             },
         );
-
-        // Advertise the output to clients and give it a 1080p@60 mode.
-        primary.create_global::<D>(display);
-        primary.change_current_state(
-            Some(Mode {
-                size: (1920, 1080).into(),
-                refresh: 60_000,
-            }),
+        let mode = Mode {
+            size: configuration.size.into(),
+            refresh: 60_000,
+        };
+        output.create_global::<D>(display);
+        output.change_current_state(
+            Some(mode),
             Some(Transform::Normal),
             Some(Scale::Integer(1)),
-            Some(Point::from((0, 0))),
+            Some(Point::from(configuration.location)),
         );
-        primary.set_preferred(Mode {
-            size: (1920, 1080).into(),
-            refresh: 60_000,
-        });
-        primary.add_mode(Mode {
-            size: (800, 600).into(),
-            refresh: 60_000,
-        });
+        output.set_preferred(mode);
+        output
+    }
 
-        Outputs {
-            manager,
-            outputs: vec![primary],
+    /// Reconcile the Wayland output globals with a backend topology refresh.
+    ///
+    /// Existing outputs retain their identity while their mode/location is
+    /// updated. New connectors receive a global; disconnected connectors are
+    /// retired from the compositor's active output set.
+    #[cfg(feature = "udev")]
+    pub fn reconcile<D>(&mut self, configurations: &[OutputConfiguration], display: &DisplayHandle)
+    where
+        D: smithay::wayland::output::OutputHandler,
+        D: smithay::wayland::compositor::CompositorHandler,
+        D: smithay::reexports::wayland_server::GlobalDispatch<
+                smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
+                smithay::wayland::output::WlOutputData,
+            >,
+        D: smithay::reexports::wayland_server::Dispatch<
+                smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
+                smithay::wayland::output::OutputUserData,
+            >,
+        D: 'static,
+    {
+        let mut active = Vec::with_capacity(configurations.len());
+        for configuration in configurations {
+            if let Some(output) = self
+                .outputs
+                .iter()
+                .find(|output| output.name() == configuration.name)
+            {
+                output.change_current_state(
+                    Some(Mode {
+                        size: configuration.size.into(),
+                        refresh: 60_000,
+                    }),
+                    Some(Transform::Normal),
+                    Some(Scale::Integer(1)),
+                    Some(Point::from(configuration.location)),
+                );
+                active.push(output.clone());
+            } else {
+                active.push(Self::create_output::<D>(configuration, display));
+            }
         }
+        self.outputs = active;
     }
 
     /// The primary output (the first in the list, or a fresh 1080p fallback).

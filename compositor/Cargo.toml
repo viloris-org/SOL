@@ -8,7 +8,6 @@ publish = false
 
 [dependencies]
 smithay = { version = "0.7", default-features = false, features = ["backend_winit", "renderer_gl", "wayland_frontend"] }
-smithay-drm-extras = { version = "0.1", optional = true }
 
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -33,8 +32,10 @@ default = ["winit", "egl"]
 winit = ["smithay/backend_winit"]
 egl = ["smithay/backend_egl"]
 # Real-hardware session backend (Phase 1+). Requires compatible system
-# `libdisplay-info` (< 0.3.0), plus DRM/GBM/libinput/libseat dev packages.
-udev = ["smithay/backend_udev", "smithay/backend_libinput", "smithay/backend_drm", "smithay/backend_gbm", "smithay/backend_session_libseat", "smithay-drm-extras"]
+# DRM/GBM/libinput/libseat dev packages. `smithay-drm-extras` is not part of
+# the backend and was unused; removing it avoids its stale libdisplay-info
+# (< 0.3.0) build constraint on current Arch hosts.
+udev = ["smithay/backend_udev", "smithay/backend_libinput", "smithay/backend_drm", "smithay/backend_gbm", "smithay/backend_session_libseat"]
 # NOTE: there is intentionally no `headless` Cargo feature. Headless mode is a
 # runtime `--headless` flag (see main.rs): the protocol loop runs with no render
 # backend, and is used by the integration tests / CI.

@@ -48,7 +48,10 @@ use smithay::{
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
 use wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 
-use crate::{outputs::Outputs, window};
+use crate::{
+    outputs::{OutputConfiguration, Outputs},
+    window,
+};
 
 /// Client-level state attached to each connected Wayland client.
 #[derive(Default)]
@@ -84,6 +87,14 @@ pub struct SolState {
 
 impl SolState {
     pub fn new(display: &DisplayHandle) -> Self {
+        Self::with_output_configurations(display, None)
+    }
+
+    /// Create compositor state with backend-provided output configurations.
+    pub fn with_output_configurations(
+        display: &DisplayHandle,
+        configurations: Option<&[OutputConfiguration]>,
+    ) -> Self {
         let compositor_state = CompositorState::new::<SolState>(display);
         let shm_state = ShmState::new::<SolState>(display, vec![]);
         let mut seat_state = SeatState::new();
@@ -92,7 +103,12 @@ impl SolState {
 
         // Build the output set before the window manager so the work area can
         // be seeded from the primary output's size.
-        let outputs = Outputs::new::<SolState>(display);
+        let outputs = configurations
+            .filter(|configurations| !configurations.is_empty())
+            .map_or_else(
+                || Outputs::new::<SolState>(display),
+                |configurations| Outputs::from_configurations::<SolState>(display, configurations),
+            );
         let (w, h) = outputs.primary_size();
         let mut window_manager = window::WindowManager::default();
         window_manager.set_work_area(smithay::utils::Rectangle::from_size(
@@ -113,6 +129,25 @@ impl SolState {
             pointer,
             window_manager,
         }
+    }
+
+    /// Update active output globals and keep window placement bounded by the
+    /// first (primary) configured output.
+    #[cfg(feature = "udev")]
+    pub fn reconcile_outputs(
+        &mut self,
+        configurations: &[OutputConfiguration],
+        display: &DisplayHandle,
+    ) {
+        if configurations.is_empty() {
+            return;
+        }
+        self.outputs.reconcile::<SolState>(configurations, display);
+        let (width, height) = self.outputs.primary_size();
+        self.window_manager
+            .set_work_area(smithay::utils::Rectangle::from_size(
+                smithay::utils::Size::new(width, height),
+            ));
     }
 }
 

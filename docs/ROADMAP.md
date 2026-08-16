@@ -60,7 +60,8 @@ later implementation.
 
 Phase 1 is now complete. Phase 0's reusable core (`SolState`) has been extended
 with window management, workspace, layer-shell, and IME handling. The DRM/udev
-backend remain future work; winit-first keeps CI green.
+connector and hotplug path now builds and has fixture-backed contracts;
+real-hardware DRM/GBM smoke validation remains a hardware follow-up.
 
 ---
 
@@ -144,7 +145,7 @@ backend remain future work; winit-first keeps CI green.
 | Dependency | Notes |
 |---|---|
 | `layer-shell` protocol | Introduced from `wayland-protocols-wlr` (no clash with `wayland-protocols`); the shell top bar round-trips in the `sol_session` integration test ✅ |
-| DRM/udev backend | Real-hardware session (resolve the ADR-0005 `libdisplay-info` issue on target hardware); winit-first dev path keeps M1 green in CI |
+| DRM/udev backend | `--features udev` builds on current Arch; udev/sysfs connector enumeration + hotplug reconciliation are fixture-tested. Real VT + DRM/GBM smoke remains required (ADR-0005). |
 | IPC transport | Settled: D-Bus via ADR-0006; shell and compositor are separate processes |
 
 ### M1 milestone status
@@ -155,7 +156,8 @@ backend remain future work; winit-first keeps CI green.
   shell/compositor split, output management + HiDPI + display-hotplug,
   compositor text-input v3 + input-method v2, sol-ime frontend scaffold +
   fcitx5 D-Bus transport / pinyin fake harness.
-- **Not yet (post-M1 / Phase 1 follow-on):** real DRM/udev multi-monitor
+- **Not yet (post-M1 / Phase 1 follow-on):** real-hardware DRM/GBM
+  multi-monitor smoke across device, connector, and driver combinations
   (ADR-0005). IME candidate-window rendering and full compositor-surface
   delivery remain later UI integration work.
 

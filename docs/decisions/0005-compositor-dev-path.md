@@ -1,4 +1,4 @@
-# 5. Compositor dev path: winit-first, DRM deferred to Phase 1
+# 5. Compositor dev path: winit-first, DRM/udev validated in Phase 1
 
 - **Status:** Accepted
 - **Date:** 2026-08-15
@@ -15,7 +15,7 @@ The workspace needs a compositor that (a) builds in CI / a dev container
 without root or a VT grab, and (b) can later expand to real hardware
 DRM/udev/libinput/libseat without a rewrite of the protocol core.
 
-## Evaluation
+## Historical evaluation
 
 The full `smithay` crate set with the `udev`/`backend_drm` path also pulls
 `libdisplay-info-sys`, which in this dev environment fails to build:
@@ -41,6 +41,28 @@ real hardware target.
    eventual udev driver both call into the same `run_*` entry path against the
    same `SolState`. No compositor rendering or protocol logic is duplicated.
 
+## Phase 1 update (2026-08-16)
+
+`smithay-drm-extras` was an unused optional dependency, not part of SOL's
+backend implementation. Its default `display-info` feature pulled
+`libdisplay-info-sys` with the obsolete `< 0.3.0` pkg-config constraint.
+Removing that unused dependency leaves the Smithay DRM/GBM/libinput/libseat
+feature set intact and makes `cargo build -p sol-compositor --features udev`
+build on current Arch with `libdisplay-info` 0.3.0.
+
+The udev runtime now creates Smithay's real `UdevBackend`, obtains its initial
+DRM-device list, reads connected connectors and modes from `/sys/class/drm`,
+and creates matching Wayland output globals. Udev change events trigger a
+fresh sysfs scan and reconcile adds, changes, and removals into the active
+output set. The connector parser and reconciliation policy are tested from
+filesystem fixtures; those tests deliberately validate the contract only and
+are not presented as hardware validation.
+
+The default layout is deterministic left-to-right placement using each
+connector's first advertised mode. It is a backend default, not a replacement
+for future persisted per-monitor configuration. The udev path is selected with
+`--tty-udev` on a binary built using `--features udev`.
+
 ## Consequences
 
 - `cargo check` / `cargo build` / `cargo test` for Phase 0 work on a plain
@@ -49,14 +71,17 @@ real hardware target.
 - A `--headless` Cargo feature is reserved for future CI that runs the
   compositor socket-first (no window) and drives a headless client purely
   over the file descriptor — useful for environments with no display at all.
-- The DRM/udev path is not broken; it is simply opt-in. The build failure
-  above is environment-specific to this container and does not block Phase 0.
+- The DRM/udev connector and hotplug path has a repeatable feature-build and
+  fixture-test contract while the normal winit/headless paths remain CI-safe.
+- A real-hardware smoke test still requires a local VT, a libseat/logind or
+  seatd session, accessible `/dev/dri/card*`, and one or more connected DRM
+  connectors. It has not been substituted by fixture tests.
 - See `src/main.rs` (`run_winit`) and `compositor/tests/sol_session.rs` for
   the reference wiring.
 
-## Open question
+## Hardware follow-up
 
-Whether Phase 1 needs `libdisplay-info < 0.3.0` patched in the AUR PKGBUILD or
-whether the next `smithay` release bumps the `libdisplay-info-sys` pin — to be
-settled when `features = ["udev"]` is exercised on target hardware (ADR-0006
-will record the outcome).
+Validate `--tty-udev` on Intel/AMD and NVIDIA GBM paths with one internal and
+one external display; cover connector add/remove, mode changes, VT pause/resume
+through libseat, and DRM/GBM presentation. These are hardware smoke tests and
+remain distinct from the build and fixture verification above.
