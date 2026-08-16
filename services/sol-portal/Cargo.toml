@@ -7,3 +7,4 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+sol-system = { path = "../../sdk/sol-system" }

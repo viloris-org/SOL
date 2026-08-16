@@ -3878,6 +3878,9 @@ dependencies = [
 [[package]]
 name = "sol-portal"
 version = "0.1.0"
+dependencies = [
+ "sol-system",
+]
 
 [[package]]
 name = "sol-settings"

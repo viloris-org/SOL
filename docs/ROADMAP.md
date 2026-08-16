@@ -426,7 +426,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 **Desktop core capabilities**
 
 - [ ] Clipboard, drag & drop fully polished
-- [ ] Screen sharing / screen recording (portal + screencopy)
+- [x] **Portal authorization foundation:** `sol-portal` maps typed document
+      open and screen-capture requests through the caller-attributed
+      `SystemActionApi`; default-deny and explicit authorization are fixture
+      tested without granting arbitrary portal work.
+- [ ] **Screen sharing / screen recording:** XDG portal D-Bus, file chooser
+      UI, PipeWire/screencopy adapters, stream lifecycle, and desktop-session
+      validation remain required.
 - [ ] Application compatibility matrix (GTK / Qt / SDL / Flutter / Electron —
       Wayland-native, §4.2)
 - [ ] **IME complete (§21.1):** stable end-to-end flow for mainstream languages

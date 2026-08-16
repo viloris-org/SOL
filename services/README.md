@@ -9,7 +9,7 @@ protocols to the compositor, shell, and apps.
 |---|---|---|---|
 | `sol-settingsd` | `services/sol-settingsd/` | Settings backend (Appearance / Displays / Sound / Network / Bluetooth / …) | Phase 0 scaffold → Phase 3 |
 | `sol-notificationd` | `services/sol-notificationd/` | Notification daemon | Phase 0 scaffold → Phase 4 |
-| `sol-portal` | `services/sol-portal/` | xdg-desktop-portal implementation (file pick / screencast / record / …) | Phase 0 scaffold → Phase 4/5 |
+| `sol-portal` | `services/sol-portal/` | Permission-bound typed document-open / capture request boundary | Phase 5 foundation; D-Bus / PipeWire adapters pending |
 | `sol-ime` | `services/sol-ime/` | First-party IME frontend + fcitx5 engine bridge | Phase 0 scaffold → Phase 1 |
 | `sol-diagnostics` | `services/sol-diagnostics/` | Typed, redacted, bounded local diagnostics store | Phase 5 foundation |
 

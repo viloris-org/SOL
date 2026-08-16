@@ -1,3 +1,13 @@
+use sol_portal::PortalService;
+use sol_system::{
+    DefaultDenyPolicy, MemoryActionAuditStore, MemoryPermissionStore, SystemActionService,
+};
+
 fn main() {
-    println!("sol-portal: Phase 0 scaffold, not yet implemented");
+    let _portal = PortalService::new(SystemActionService::new(
+        DefaultDenyPolicy,
+        MemoryPermissionStore::default(),
+        MemoryActionAuditStore::default(),
+    ));
+    println!("sol-portal: typed permission-bound request service ready");
 }
