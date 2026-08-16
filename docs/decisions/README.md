@@ -31,6 +31,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 12 | Local, privacy-preserving search index | Accepted (foundation) | Phase 4 | [0014-local-search-index.md](0014-local-search-index.md) |
 | 13 | System overlays and layer-shell popup contract | Accepted (headless contract) | Phase 4 | [0015-layer-shell-overlays-popup-contract.md](0015-layer-shell-overlays-popup-contract.md) |
 | 14 | Privacy-bounded diagnostics foundation | Accepted (Phase 5 foundation) | Phase 5 | [0016-diagnostics-foundation.md](0016-diagnostics-foundation.md) |
+| 15 | SolKit stability policy, SDK tiers, and monorepo review | Accepted (Phase 6 policy) | Phase 6 | [0017](0017-solkit-stability-tiers.md) |
 
 ## Open decisions (PRD §41 — to settle during prototyping)
 
@@ -41,7 +42,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 5 | Compositor ↔ Shell IPC transport / wire format | Phase 1 | Structural split resolved in 0006; choose transport (D-Bus / Wayland protocol / shm ring) |
 | 6 | Settings storage architecture | **Accepted (Phase 2)** | [ADR-0011](0011-settings-storage-api.md): typed API; daemon-owned storage boundary |
 | 7 | Application identity format | **Accepted (Phase 2)** | [ADR-0012](0012-application-identity-lifecycle.md): validated reverse-DNS `AppId`; lifecycle boundary |
-| 8 | SolKit ABI/API stability strategy | Phase 6 | No stability promise in v0.1 |
+| 8 | SolKit ABI/API stability strategy | **Accepted (Phase 6 policy)** | [ADR-0017](0017-solkit-stability-tiers.md): source-API semver begins only with a post-v0.1 public release; no Rust ABI promise |
 | 9 | Server-side vs client-side decorations | Phase 1 | Wayland-first policy; affects GTK/Qt/Electron behavior |
 | 10 | Global menu | Phase 4 | Optional; do not let it drive initial shell IPC |
 | 11 | Window tiling product model | Phase 1/4 | Floating + snap first; optional advanced tiling |

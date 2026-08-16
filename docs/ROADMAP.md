@@ -503,8 +503,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 ### Milestone M6 deliverables
 
 - [ ] **Public SolKit:** public API polish and versioning
-- [ ] **SDK stability strategy (§41 #8):** introduce an ABI/API stability
-      promise after v0.1
+- [x] **SDK stability policy (§41 #8):** ADR-0017 defines post-v0.1 Public
+      source-API semver gates, rejects a Rust ABI promise, and makes no claim
+      that the current unpublished crates are stable.
 - [ ] **Documentation:** getting started, guides, API reference
       (`sol-sdk-docs`)
 - [x] **Starter template:** `templates/solkit-starter` provides a public-crate
@@ -519,9 +520,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       (AUR not in the official trust chain, §30)
 - [ ] **Store backend (§41 #15, optional):** hide package implementation
       details behind pacman/AUR
-- [ ] Formalize the third-party SDK permission tiers: Public / Restricted /
-      Private (§23)
-- [ ] Re-evaluate monorepo boundaries (§39: split after API stabilization?)
+- [x] **SDK permission tiers (§23):** ADR-0017 formalizes Public, Restricted,
+      and Private contracts and their dependency direction.
+- [x] **Monorepo review (§39):** ADR-0017 retains the monorepo until a public
+      SDK release, independent consumers, enforceable boundaries, and an
+      independently versioned component justify a split.
 
 ### M6 success criterion
 
