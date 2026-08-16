@@ -253,9 +253,11 @@ real-hardware DRM/GBM smoke validation remains a hardware follow-up.
 
 ### Milestone M3 deliverables
 
-- [ ] **Settings (PRD §26):** Appearance / Displays / Sound / Network /
-      Bluetooth / Keyboard / Mouse / Touchpad / Power / etc.; layered as
-      UI → Settings API → system services
+- [x] **Settings (PRD §26) foundation:** typed Appearance (theme / high
+      contrast / reduced motion / text scale) and Sound controls, command
+      palette, keyboard/accessibility tree, and settingsd round-trip; layered
+      UI → Settings API → system services. Display and input pages explicitly
+      report unavailable until their typed service APIs exist.
 - [ ] **Terminal (PRD §27):** GPU-accelerated rendering, tabs, Unicode,
       true color, clipboard, search, configurable shell
 - [ ] **Files (PRD §25):** sidebar / tabs / search / drag & drop / preview /

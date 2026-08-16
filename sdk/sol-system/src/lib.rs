@@ -51,6 +51,30 @@ pub enum ColorScheme {
     Dark,
 }
 
+/// Named user text-size preference shared with SolUI accessibility mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextScale {
+    /// SOL baseline text size.
+    #[default]
+    Default,
+    /// Larger standard reading size.
+    Large,
+    /// Largest standard reading size.
+    ExtraLarge,
+}
+
+impl TextScale {
+    /// Stable storage spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Large => "large",
+            Self::ExtraLarge => "extra-large",
+        }
+    }
+}
+
 impl ColorScheme {
     /// Return the stable storage spelling for this policy.
     #[must_use]
@@ -68,6 +92,12 @@ impl ColorScheme {
 pub struct AppearanceSettings {
     /// The preferred colour-scheme policy.
     pub color_scheme: ColorScheme,
+    /// Request stronger contrast for native SOL surfaces.
+    pub high_contrast: bool,
+    /// Request reduced non-essential motion.
+    pub reduced_motion: bool,
+    /// Named text size preference.
+    pub text_scale: TextScale,
 }
 
 /// An output-volume percentage validated by the typed API.
@@ -148,6 +178,12 @@ pub struct SettingsSnapshot {
 pub enum SettingsChange {
     /// Update the requested colour-scheme policy.
     SetColorScheme(ColorScheme),
+    /// Enable or disable high-contrast rendering.
+    SetHighContrast(bool),
+    /// Enable or disable reduced motion.
+    SetReducedMotion(bool),
+    /// Update the named text-size preference.
+    SetTextScale(TextScale),
     /// Update the requested output volume.
     SetOutputVolume(OutputVolume),
     /// Mute or unmute the current output.
@@ -203,6 +239,15 @@ mod tests {
             match change {
                 SettingsChange::SetColorScheme(color_scheme) => {
                     snapshot.appearance.color_scheme = color_scheme;
+                }
+                SettingsChange::SetHighContrast(high_contrast) => {
+                    snapshot.appearance.high_contrast = high_contrast;
+                }
+                SettingsChange::SetReducedMotion(reduced_motion) => {
+                    snapshot.appearance.reduced_motion = reduced_motion;
+                }
+                SettingsChange::SetTextScale(text_scale) => {
+                    snapshot.appearance.text_scale = text_scale;
                 }
                 SettingsChange::SetOutputVolume(output_volume) => {
                     snapshot.audio.output_volume = output_volume;

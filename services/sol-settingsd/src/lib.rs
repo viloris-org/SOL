@@ -6,7 +6,7 @@
 
 use sol_system::{
     ColorScheme, OutputVolume, SettingsApi, SettingsChange, SettingsError, SettingsResult,
-    SettingsSnapshot,
+    SettingsSnapshot, TextScale,
 };
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -159,6 +159,13 @@ impl<S: SettingsStore> SettingsApi for SettingsDaemon<S> {
             SettingsChange::SetColorScheme(color_scheme) => {
                 next.appearance.color_scheme = color_scheme;
             }
+            SettingsChange::SetHighContrast(high_contrast) => {
+                next.appearance.high_contrast = high_contrast
+            }
+            SettingsChange::SetReducedMotion(reduced_motion) => {
+                next.appearance.reduced_motion = reduced_motion
+            }
+            SettingsChange::SetTextScale(text_scale) => next.appearance.text_scale = text_scale,
             SettingsChange::SetOutputVolume(output_volume) => {
                 next.audio.output_volume = output_volume;
             }
@@ -205,9 +212,12 @@ fn temporary_path(path: &Path) -> SettingsResult<PathBuf> {
 
 fn serialize_snapshot(snapshot: &SettingsSnapshot) -> String {
     format!(
-        "# SOL settings storage; format version {STORAGE_VERSION}\nversion={STORAGE_VERSION}\nrevision={}\ncolor_scheme={}\noutput_volume={}\noutput_muted={}\n",
+        "# SOL settings storage; format version {STORAGE_VERSION}\nversion={STORAGE_VERSION}\nrevision={}\ncolor_scheme={}\nhigh_contrast={}\nreduced_motion={}\ntext_scale={}\noutput_volume={}\noutput_muted={}\n",
         snapshot.revision,
         snapshot.appearance.color_scheme.as_str(),
+        snapshot.appearance.high_contrast,
+        snapshot.appearance.reduced_motion,
+        snapshot.appearance.text_scale.as_str(),
         snapshot.audio.output_volume.percent(),
         snapshot.audio.output_muted,
     )
@@ -217,6 +227,9 @@ fn parse_snapshot(contents: &str) -> SettingsResult<SettingsSnapshot> {
     let mut version = None;
     let mut revision = None;
     let mut color_scheme = None;
+    let mut high_contrast = None;
+    let mut reduced_motion = None;
+    let mut text_scale = None;
     let mut output_volume = None;
     let mut output_muted = None;
 
@@ -231,6 +244,9 @@ fn parse_snapshot(contents: &str) -> SettingsResult<SettingsSnapshot> {
             "version" => version = Some(parse_value(value, "storage version")?),
             "revision" => revision = Some(parse_value(value, "revision")?),
             "color_scheme" => color_scheme = Some(parse_color_scheme(value)?),
+            "high_contrast" => high_contrast = Some(parse_value(value, "high contrast")?),
+            "reduced_motion" => reduced_motion = Some(parse_value(value, "reduced motion")?),
+            "text_scale" => text_scale = Some(parse_text_scale(value)?),
             "output_volume" => {
                 let percent = parse_value(value, "output volume")?;
                 output_volume = Some(OutputVolume::new(percent)?);
@@ -256,6 +272,9 @@ fn parse_snapshot(contents: &str) -> SettingsResult<SettingsSnapshot> {
         appearance: sol_system::AppearanceSettings {
             color_scheme: color_scheme
                 .ok_or_else(|| SettingsError::backend("settings storage has no color scheme"))?,
+            high_contrast: high_contrast.unwrap_or(false),
+            reduced_motion: reduced_motion.unwrap_or(false),
+            text_scale: text_scale.unwrap_or_default(),
         },
         audio: sol_system::AudioSettings {
             output_volume: output_volume
@@ -287,6 +306,17 @@ fn parse_color_scheme(value: &str) -> SettingsResult<ColorScheme> {
     }
 }
 
+fn parse_text_scale(value: &str) -> SettingsResult<TextScale> {
+    match value {
+        "default" => Ok(TextScale::Default),
+        "large" => Ok(TextScale::Large),
+        "extra-large" => Ok(TextScale::ExtraLarge),
+        _ => Err(SettingsError::backend(
+            "invalid text scale in settings storage",
+        )),
+    }
+}
+
 fn io_error(action: &str, error: io::Error) -> SettingsError {
     SettingsError::backend(format!("could not {action}: {error}"))
 }
@@ -294,7 +324,7 @@ fn io_error(action: &str, error: io::Error) -> SettingsError {
 #[cfg(test)]
 mod tests {
     use super::{FileSettingsStore, MemorySettingsStore, SettingsDaemon, SettingsStore};
-    use sol_system::{ColorScheme, OutputVolume, SettingsApi, SettingsChange};
+    use sol_system::{ColorScheme, OutputVolume, SettingsApi, SettingsChange, TextScale};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -327,8 +357,11 @@ mod tests {
         let path = temporary_test_path();
         let store = FileSettingsStore::new(&path);
         let daemon = SettingsDaemon::new(store).expect("new file store should initialize");
+        daemon
+            .apply(SettingsChange::SetHighContrast(true))
+            .expect("contrast update should succeed");
         let expected = daemon
-            .apply(SettingsChange::SetOutputMuted(true))
+            .apply(SettingsChange::SetTextScale(TextScale::Large))
             .expect("mute update should succeed");
 
         let reloaded = SettingsDaemon::new(FileSettingsStore::new(&path))
@@ -336,6 +369,8 @@ mod tests {
             .snapshot()
             .expect("reloaded daemon should return a snapshot");
         assert_eq!(reloaded, expected);
+        assert!(reloaded.appearance.high_contrast);
+        assert_eq!(reloaded.appearance.text_scale, TextScale::Large);
 
         fs::remove_file(path).expect("test settings file should be removable");
     }
