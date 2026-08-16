@@ -19,11 +19,11 @@
 |---|---|---|---|---|
 | 0 | Foundation | Standalone Wayland session | Start a standalone SOL Wayland session and run standard Wayland apps | ✅ **Complete (2026-08-15)** |
 | 1 | Desktop Core | A usable daily Wayland compositor | SOL works as a basic daily-use Wayland compositor | ✅ **Complete (2026-08-16)** |
-| 2 | SolKit | Native app framework | Build an app with native SOL look and interaction entirely in SolKit | ⏳ Next up (in progress) |
-| 3 | First-party Applications | First-party apps | The three first-party apps share a unified UX | ⏸ Not started |
-| 4 | Shell Experience | Complete desktop interaction model | SOL forms a complete, coherent desktop interaction model | ⏸ Not started |
-| 5 | Daily Driver | Long-term daily use | Developers can use SOL as their primary desktop long-term | ⏸ Not started |
-| 6 | Developer Platform | Ecosystem & SDK stability | Third-party devs build high-quality native apps without knowing SOL internals | ⏸ Not started |
+| 2 | SolKit | Native app framework | Build an app with native SOL look and interaction entirely in SolKit | ⏳ In progress (real-platform closure pending) |
+| 3 | First-party Applications | First-party apps | The three first-party apps share a unified UX | ⏳ In progress |
+| 4 | Shell Experience | Complete desktop interaction model | SOL forms a complete, coherent desktop interaction model | ⏳ In progress |
+| 5 | Daily Driver | Long-term daily use | Developers can use SOL as their primary desktop long-term | ⏳ In progress (foundations) |
+| 6 | Developer Platform | Ecosystem & SDK stability | Third-party devs build high-quality native apps without knowing SOL internals | ⏳ In progress |
 
 **Do-not-defer-to-the-end themes across phases** (PRD §33): Multi-monitor,
 Fractional Scaling, Suspend/Resume, NVIDIA, Touchpad, Display Hotplug, IME.
@@ -289,9 +289,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         multi-selection and keyboard navigation, address breadcrumbs, local
         copy/move/rename, recoverable-trash and drag/drop contracts, typed
         errors, command palette, and temp-fixture operation tests.
-  - [ ] **Native Files surface and integrations:** SolUI sidebar/search/context
-        UI, preview, removable and network locations, portal-backed trash, and
-        real desktop drag/drop transport.
+  - [x] **Files surface foundation:** SolUI toolbar/tab/sidebar/search/context
+        projections, dynamic directory tabs, accessibility semantics, and
+        bounded local text/image/binary/metadata preview data are covered by
+        deterministic fixtures.
+  - [ ] **Desktop and platform integrations:** native Wayland/GPU rendering,
+        removable and network locations, portal-backed trash, image thumbnails,
+        and real desktop drag/drop transport.
 - [x] Dogfooding loop (§24): first-party command-palette divergence found in
       Settings / Terminal / Files → shared renderer-neutral SolUI palette
       contract → all three apps now share it, with deterministic dogfood tests.
