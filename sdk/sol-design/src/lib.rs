@@ -16,8 +16,10 @@
 //! screen and dogfood surfaces. It is intentionally NOT exhaustive:
 //! categories and named values are added per-component in Design Review.
 
+pub mod accessibility;
 pub mod color;
 pub mod material;
+pub mod metrics;
 pub mod motion;
 pub mod radius;
 pub mod spacing;
