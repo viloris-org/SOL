@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=SOL
+Comment=SOL Wayland desktop session
+Exec=sol-session
+Type=Application
+DesktopNames=SOL

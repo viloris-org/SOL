@@ -6,13 +6,17 @@ versioned SOL source archive:
 
 | Repository | Packages currently represented |
 |---|---|
-| `[sol-core]` | `sol-compositor`, `sol-shell`, `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime`, `sol-desktop` |
+| `[sol-core]` | `sol-compositor`, `sol-session`, `sol-shell`, `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime`, `sol-desktop` |
 | `[sol-apps]` | `sol-files`, `sol-terminal`, `sol-settings` |
 | `[sol-sdk]` | No package yet; the SolKit crates are not public, versioned SDK artifacts. |
 
 `sol-desktop` is a meta package. Its dependencies are deliberately limited to
-the binaries this repository can build today; future session launchers,
-polkit integration, desktop entries, services, and applications must be added
+the binaries this repository can build today. `sol-session` starts the
+`sol-compositor --tty-udev` and `sol-shell` process pair after validating its
+runtime directory, and installs `sol.desktop` in the standard
+`/usr/share/wayland-sessions` location for a display manager to invoke. It is
+not itself a display-manager or login-manager adapter.
+Future polkit integration, desktop entries, services, and applications must be added
 to the dependency set only when their install contracts exist.
 
 ## Build input contract

@@ -1,0 +1,11 @@
+[package]
+name = "sol-session"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+ctrlc = { version = "3", features = ["termination"] }
+

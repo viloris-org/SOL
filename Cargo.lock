@@ -3883,6 +3883,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sol-session"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+]
+
+[[package]]
 name = "sol-settings"
 version = "0.1.0"
 dependencies = [

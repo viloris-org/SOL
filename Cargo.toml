@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "compositor",
     "shell",
+    "session",
     "sdk/sol-design",
     "sdk/sol-ui",
     "sdk/sol-app",

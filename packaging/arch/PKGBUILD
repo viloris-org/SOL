@@ -7,6 +7,7 @@
 pkgbase=sol
 pkgname=(
   sol-compositor
+  sol-session
   sol-shell
   sol-settingsd
   sol-notificationd
@@ -32,6 +33,7 @@ options=('!lto')
 _source_dir="${pkgbase}-${pkgver}"
 _binaries=(
   sol-compositor
+  sol-session
   sol-shell
   sol-settingsd
   sol-notificationd
@@ -44,7 +46,8 @@ _binaries=(
 
 build() {
   cd "${srcdir}/${_source_dir}"
-  cargo build --release --locked --package sol-compositor --package sol-shell \
+  cargo build --release --locked --package sol-compositor --features sol-compositor/udev \
+    --package sol-session --package sol-shell \
     --package sol-settingsd --package sol-notificationd --package sol-portal \
     --package sol-ime --package sol-files --package sol-terminal \
     --package sol-settings
@@ -52,7 +55,8 @@ build() {
 
 check() {
   cd "${srcdir}/${_source_dir}"
-  cargo test --locked --package sol-compositor --package sol-shell \
+  cargo test --locked --package sol-compositor --features sol-compositor/udev \
+    --package sol-session --package sol-shell \
     --package sol-settingsd --package sol-notificationd --package sol-portal \
     --package sol-ime --package sol-files --package sol-terminal \
     --package sol-settings
@@ -65,9 +69,16 @@ _package_binary() {
 
 package_sol-compositor() {
   pkgdesc='SOL Wayland compositor'
-  # The hardware backend is an opt-in Cargo feature and is not packaged yet.
-  depends=('gcc-libs' 'glibc' 'libxkbcommon' 'wayland')
+  depends=('gcc-libs' 'glibc' 'libinput' 'libxkbcommon' 'mesa' 'seatd' 'systemd-libs' 'wayland')
   _package_binary sol-compositor
+}
+
+package_sol-session() {
+  pkgdesc='SOL TTY/udev session launcher'
+  depends=('sol-compositor' 'sol-shell')
+  _package_binary sol-session
+  install -Dm644 "${srcdir}/${_source_dir}/session/assets/sol.desktop" \
+    "${pkgdir}/usr/share/wayland-sessions/sol.desktop"
 }
 
 package_sol-shell() {
@@ -122,6 +133,7 @@ package_sol-desktop() {
   pkgdesc='SOL desktop meta package'
   depends=(
     'sol-compositor'
+    'sol-session'
     'sol-shell'
     'sol-settingsd'
     'sol-notificationd'
