@@ -14,12 +14,6 @@
 //! shell D-Bus IPC from ADR-0006).
 
 mod client;
-pub mod launcher;
-pub mod notification_center;
-pub mod overlay;
-pub mod overview;
-pub mod quick_settings;
-pub mod topbar;
 
 use std::{
     fs::File,

@@ -22,3 +22,6 @@ sol-graphics = { path = "../sdk/sol-graphics" }
 sol-system = { path = "../sdk/sol-system" }
 sol-animation = { path = "../sdk/sol-animation" }
 sol-ui = { path = "../sdk/sol-ui" }
+
+[dev-dependencies]
+sol-settingsd = { path = "../services/sol-settingsd" }

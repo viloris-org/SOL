@@ -376,6 +376,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         service exposes only complete typed snapshots and named setting changes;
         `SettingsDbusProxy` implements `SettingsApi`, with an isolated
         `dbus-run-session` service/client round trip.
+  - [x] **Quick Settings daemon integration:** the real Shell model uses
+        `SettingsDbusProxy` against an isolated `sol-settingsd`, applying
+        appearance directly and volume/mute only after typed authorization;
+        the daemon snapshot proves all three mutations persisted.
   - [ ] **Remaining system adapters:** typed network, Bluetooth, and
         audio-device services; unavailable states remain intentional until
         those APIs exist.
