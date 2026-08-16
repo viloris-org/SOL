@@ -3922,6 +3922,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ctrlc",
+ "serde",
+ "serde_json",
  "sol-animation",
  "sol-app",
  "sol-design",

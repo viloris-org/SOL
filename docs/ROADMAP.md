@@ -455,7 +455,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         aggregate display device over the real system bus, distinguishes a
         battery-less desktop from a zero-percent battery, rejects malformed or
         unknown device state, and has a live host-service validation script.
-        PipeWire and BlueZ integration remain open.
+  - [x] **PipeWire audio status adapter:** the Shell top-bar provider consumes
+        structured `pactl` JSON from PipeWire's Pulse compatibility service,
+        validates the declared default sink and channel volumes, and is checked
+        against the live user service. Device switching, authorized writes,
+        and BlueZ integration remain open.
 
 **Desktop core capabilities**
 
