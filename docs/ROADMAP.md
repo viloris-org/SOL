@@ -124,16 +124,17 @@ backend remain future work; winit-first keeps CI green.
       layout with `sol-design` tokens (visual rendering via `sol-ui` lands in
       Phase 2, when `sol-ui` exists)
 - [x] fcitx5 engine bridge seam (`EngineBridge` trait + stub `Fcitx5Bridge`);
-      the full `fcitx5-ime` / `fcitx5-chinese-addons` transport (Chinese pinyin
-      first) is built on the Arch dev host where fcitx5 is present, and the
-      `NoopEngine` default keeps the workspace CI-green
+      the `NoopEngine` default keeps the workspace CI-green. The full
+      `fcitx5-ime` / `fcitx5-chinese-addons` transport (Chinese pinyin first)
+      remains post-M1 follow-on work.
 
 ### M1 success criterion
 
 > "SOL can be used as a basic daily-use Wayland compositor."
 > Judged by: windows can be created/moved/resized/focused, multiple
 > workspaces switchable, multi-monitor works, the shell top bar coexists with
-> the compositor over the settled IPC, and Chinese pinyin input works.
+> the compositor over the settled IPC, and the IME protocol/frontend seam is
+> present. Stable Chinese pinyin delivery requires the post-M1 fcitx5 transport.
 
 ### M1 dependencies & risks
 

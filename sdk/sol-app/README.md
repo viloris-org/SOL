@@ -22,5 +22,6 @@ every developer to hand-replicate system behavior (PRD §4.3 Framework First).
 
 ## Status
 
-**Phase 0 scaffold.** The API is designed in Phase 2 and dogfooded alongside
-`sol-files` / `sol-terminal` / `sol-settings`.
+**Phase 2 foundation implemented.** Lifecycle (`App`, `AppWindow`, `AppState`)
+and command-registry APIs are present. The broader framework is dogfooded
+alongside `sol-files` / `sol-terminal` / `sol-settings`.

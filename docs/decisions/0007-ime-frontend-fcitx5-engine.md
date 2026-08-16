@@ -21,18 +21,21 @@ engine backend, no self-hosted engine.**
 
 ```text
 sol-compositor
-     │ text-input v4 / input-method v3 protocols
+     │ target: text-input v4 / input-method v3 protocols
      ▼
-sol-ime      (first-party frontend + candidate window, rendered with sol-ui + sol-design)
+sol-ime      (first-party frontend + candidate-window/preedit model; sol-ui rendering pending)
      │            ↘ engine: reuse fcitx5
      ▼
 fcitx5-ime / fcitx5-chinese-addons (pinyin and other mainstream language engines)
 ```
 
-- `sol-ime` renders the candidate window / preedit with `sol-ui` +
-  `sol-design` → the IME's UI is unmistakably SOL.
-- The compositor integrates `text-input v4` + `input-method v3` as
-  **first-class** protocols in Phase 1 (not Phase 5/6).
+- `sol-ime` owns the candidate-window/preedit frontend model. Rendering it
+  with `sol-ui` + `sol-design` is follow-on work.
+- The product protocol target is `text-input v4` + `input-method v3`. The
+  current Smithay 0.7 implementation advertises and dispatches `text-input
+  v3` + `input-method v2`; SOL evaluates the newer staging protocols when
+  Smithay supports them. This remains a **first-class** Phase 1 concern (not
+  Phase 5/6).
 - **Mainstream languages first**: Chinese pinyin via `fcitx5-chinese-addons`
   (already on Arch), then Japanese/Korean via existing fcitx5 addons.
 - SOL's differentiator is compositor + SDK + first-party visual consistency,
@@ -40,10 +43,12 @@ fcitx5-ime / fcitx5-chinese-addons (pinyin and other mainstream language engines
 
 ## Consequences
 
-- `sol-ime` service scaffold lives in `services/sol-ime/` and compiles in the
-  workspace (Phase 0 placeholder).
+- `sol-ime` provides the Phase 1 candidate-window/preedit data model and
+  fcitx5 engine seam. Candidate-window rendering and fcitx5 transport wiring
+  remain follow-on work.
 - PRD §7 `sol-core` package list includes `sol-ime`; PRD §40 IME row; §36 MVP
-  includes IME; §38 Phase 1 adds text-input v4 + input-method v3.
+  includes IME; §38 Phase 1 adds the current Smithay `text-input v3` +
+  `input-method v2` integration while keeping v4/v3 as the protocol target.
 - PRD §41 #19 tracks the engine/frontend integration boundary (fcitx5 addon
   coverage, engine upgrade strategy, when a custom engine is ever considered).
 

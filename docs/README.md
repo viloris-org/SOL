@@ -22,10 +22,10 @@ Documentation is organized by audience and lifecycle:
 
 | Area | Status |
 |---|---|
-| Platform / compositor | Phase 0 complete — composite Win/Smithay compositor runs a standalone Wayland session |
-| Shell | Scaffold — first shell surface (layer-shell top bar) is a Phase 1 goal |
-| SolKit SDK | Scaffolds — `sol-design` carries token seeds + consistency tests; `sol-ui`/`sol-app`/etc. designed in Phase 2 |
-| Services | Scaffolds — `sol-ime` first active in Phase 1 |
+| Platform / compositor | Phase 0 and Phase 1 complete — the Smithay compositor runs a standalone Wayland session with desktop-core protocol integration |
+| Shell | Phase 1 top-bar layer-shell surface complete; broader shell experience is Phase 4 |
+| SolKit SDK | Phase 2 in progress — token, semantic-component, layout, lifecycle/command, graphics, and motion foundations are implemented; rendering, accessibility, and keyboard work remain |
+| Services | Scaffolds — `sol-ime` has Phase 1 protocol/frontend seams; fcitx5 transport and candidate-window rendering remain pending |
 | Apps | Scaffolds — Files/Terminal/Settings in Phase 3 |
 | Protocols / packaging | Early — no stable protocol; PKGBUILDs follow milestone completion |
 

@@ -26,5 +26,6 @@ long-term role of Vulkan / wgpu is undecided (§41 #4).
 
 ## Status
 
-**Phase 0 scaffold.** The API converges in Phase 2/3 alongside the SolUI
-spike.
+**Phase 2 abstraction foundation implemented.** Renderbuffer, Surface,
+GraphicsContext, Brush, and Paint APIs are present. Backend rendering
+integration converges alongside the SolUI spike.

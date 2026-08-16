@@ -32,7 +32,9 @@ App code never programs against `.slint` or Slint APIs directly.
 
 ## Status
 
-**Phase 0 scaffold.** The public API is designed and dogfooded in Phase 2.
+**Phase 2 foundation implemented.** Semantic components and `HStack` / `VStack`
+layout are present. The renderer decision, keyboard/focus behavior, and
+accessibility work remain in progress.
 
 ## Consistency iron rules (PRD §19.1)
 

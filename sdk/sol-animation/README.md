@@ -31,6 +31,8 @@ semantic role**, and duration + curve resolve from `sol-design` tokens.
 
 ## Status
 
-**Phase 0 scaffold.** The API is designed in Phase 2 alongside the SolUI
-spike; the compositor animation system (gestures / workspace motion) is
-established early in Phase 1.
+**Phase 2 semantic-motion foundation implemented.** Motion specifications,
+tiers, animation-driver contracts, and interruptible-animation state are
+present. The compositor animation system (gestures / workspace motion) is
+established early in Phase 1; renderer integration remains part of the SolUI
+spike.

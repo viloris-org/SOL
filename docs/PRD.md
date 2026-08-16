@@ -898,19 +898,22 @@ engine backend.**
 
 ```text
 sol-compositor
-     │ text-input v4 / input-method v3 protocols
+     │ target: text-input v4 / input-method v3 protocols
      ▼
-sol-ime   (first-party frontend + candidate window, rendered with sol-ui + sol-design)
+sol-ime   (first-party frontend + candidate-window/preedit model; sol-ui rendering pending)
      │            ↘ engine: reuse fcitx5
      ▼
 fcitx5-ime / fcitx5-chinese-addons (pinyin and other mainstream language engines)
 ```
 
-- `sol-ime` provides the first-party IME frontend and candidate window;
-  candidates / preedit are rendered with `sol-ui` + `sol-design` → visual
-  consistency across first-party apps.
-- The compositor integrates `text-input v4` + `input-method v3` as a
-  first-class participant in Phase 1 (not Phase 5/6).
+- `sol-ime` owns the first-party IME frontend and candidate-window/preedit
+  model. Candidate-window rendering with `sol-ui` and the fcitx5 transport are
+  follow-on work.
+- The protocol target is `text-input v4` + `input-method v3`. The current
+  Smithay 0.7 implementation advertises and dispatches `text-input v3` +
+  `input-method v2`; SOL will evaluate the newer staging protocols when
+  Smithay supports them. This protocol integration remains a Phase 1 concern,
+  not Phase 5/6.
 - **We do not self-host a pinyin engine**: pinyin segmentation / candidate
   ranking is a decade-scale accumulation (`libpinyin` / `rime` / `fcitx5`
   among others). SOL reuses `fcitx5` addon engines, starting with Chinese

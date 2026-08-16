@@ -19,8 +19,9 @@ systemd, PipeWire, NetworkManager, BlueZ, Mesa, polkit, udisks2).
 The Phase 0 milestone ("start a standalone SOL Wayland session and run
 standard Wayland applications") is **done**. Phase 1 M1 ("SOL can be used
 as a basic daily-use Wayland compositor") is **done**: window management,
-workspaces, multi-monitor, shell IPC, and IME are all implemented and
-validated by integration tests.
+workspaces, multi-monitor, and shell IPC are implemented and covered by
+integration tests. IME protocol integration and the frontend scaffold are
+present; the fcitx5 transport remains a post-M1 follow-on.
 
 Phase 2 M2 started: semantic components (Button, TextField, Toolbar, TabBar,
 Tab, HStack, VStack) and layout engine implemented. Slint/SolUI spike
@@ -46,11 +47,11 @@ tokens. Slint backend integration pending spike validation.
 | `shell/` | `sol-shell`: top bar, dock, launcher, overview, system UI | ✅ Phase 1 shell top bar complete |
 | `sdk/sol-design` | Design tokens (single source of truth for visuals) | ✅ token seeds + consistent tests |
 | `sdk/sol-ui` | SolKit UI components (semantic, not visual-metrics) | ✅ Phase 2 buttons/layout/start |
-| `sdk/sol-app` | Application framework (lifecycle, commands, …) | 🔲 placeholder → Phase 2 |
-| `sdk/sol-graphics` | Rendering abstraction | 🔲 placeholder → Phase 2 |
-| `sdk/sol-animation` | Animation engine (interruptible / motion tokens) | 🔲 placeholder → Phase 2 |
+| `sdk/sol-app` | Application framework (lifecycle, commands, …) | ✅ Phase 2 lifecycle + command foundations |
+| `sdk/sol-graphics` | Rendering abstraction | ✅ Phase 2 abstraction foundations |
+| `sdk/sol-animation` | Animation engine (interruptible / motion tokens) | ✅ Phase 2 semantic motion foundations |
 | `sdk/sol-system` | System API (restricted) | 🔲 placeholder → Phase 2 |
-| `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🔲 scaffolds (Phase 1 IME ready) |
+| `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🟡 scaffolds; `sol-ime` has Phase 1 protocol/frontend seams, while fcitx5 transport and UI rendering remain pending |
 | `apps/` | First-party apps: Files, Terminal, Settings | 🔲 placeholders → Phase 3 |
 | `protocols/` | Wayland protocol XML + IPC schemas | 🔲 no stable protocol yet |
 | `packaging/arch/` | Pacman packaging for `[sol-core]`/`[sol-apps]`/`[sol-sdk]` | 🔲 early |
