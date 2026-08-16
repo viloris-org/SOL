@@ -1,35 +1,62 @@
 # Arch packaging
 
-SOL first-party packages ship through Arch repositories, packaged with
-**pacman** — not Flatpak-first (PRD §30; ADR-0008).
+This directory is the source-package foundation for SOL's official Arch
+repositories. It produces the currently buildable executable packages from one
+versioned SOL source archive:
 
-## Target repositories
-
-| Repo | Contents |
+| Repository | Packages currently represented |
 |---|---|
-| `[sol-core]` | `sol-compositor`, `sol-shell`, `sol-session`, `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-polkit-agent`, `sol-ime`, `sol-desktop` (meta) |
-| `[sol-apps]` | `sol-files`, `sol-terminal`, `sol-settings`, `sol-store`, `sol-viewer`, `sol-monitor` |
-| `[sol-sdk]` | `solkit`, `sol-ui`, `sol-sdk`, `sol-sdk-docs` |
+| `[sol-core]` | `sol-compositor`, `sol-shell`, `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime`, `sol-desktop` |
+| `[sol-apps]` | `sol-files`, `sol-terminal`, `sol-settings` |
+| `[sol-sdk]` | No package yet; the SolKit crates are not public, versioned SDK artifacts. |
 
-## Meta package
+`sol-desktop` is a meta package. Its dependencies are deliberately limited to
+the binaries this repository can build today; future session launchers,
+polkit integration, desktop entries, services, and applications must be added
+to the dependency set only when their install contracts exist.
+
+## Build input contract
+
+`PKGBUILD` consumes a release archive named `sol-<version>.tar.gz` whose top
+level directory is `sol-<version>/`. A release job must produce that archive
+from the exact tagged source revision, calculate its SHA-256 digest, and
+replace the temporary `SKIP` digest before publishing. This keeps the package
+recipe independent of an unpublished source host while making the required
+release artifact and verification step explicit.
+
+The current workspace repository URL is a deliberate placeholder and there is
+no signed release archive or public license declaration yet. Consequently this
+directory does **not** claim that source retrieval, source verification,
+signed repositories, AUR publication, or installation has been validated.
+
+For a prepared release archive, run from this directory:
 
 ```bash
-sudo pacman -S sol-desktop
+makepkg --syncdeps --cleanbuild
 ```
 
-installs a complete SOL Desktop on a compatible Arch Linux system.
+`makepkg` will emit the split packages. Do not use this command against the
+repository checkout until a release archive and verified checksum have been
+provided.
 
-## Notes
+## Static validation
 
-- **AUR is not part of SOL's official trust chain.** Official apps ship from
-  the signed `[sol-*]` repos; AUR packages are community-maintained.
-- A SOL Store (if implemented) hides package-implementation details behind
-  pacman/AUR as the real delivery mechanism (PRD §30, §41 #15).
-- Functional PKGBUILDs land when the workspace members they reference exist
-  (compositor now; shell/SDK/apps as their milestones complete). See
-  [roadmap →](../../docs/ROADMAP.md).
+The following check does not download or build anything:
 
-## See also
+```bash
+./validate-pkgbuild.sh
+```
 
-- [ADR-0008 distribution + XWayland scope](../docs/decisions/0008-distribution-xwayland-scope.md)
-- [Roadmap →](../../docs/ROADMAP.md)
+It validates shell syntax, `.SRCINFO` generation, the exact package set, and
+the `sol-desktop` dependency contract. The CI-friendly check cannot validate a
+release archive that has not yet been published.
+
+## Scope
+
+SOL distributes through pacman rather than Flatpak-first (PRD section 30 and
+ADR-0008). The official trust chain is planned around signed `[sol-core]`,
+`[sol-apps]`, and `[sol-sdk]` repositories. AUR packages are community
+maintained and are not part of that trust chain.
+
+See [ADR-0008](../../docs/decisions/0008-distribution-xwayland-scope.md) and
+the [roadmap](../../docs/ROADMAP.md).

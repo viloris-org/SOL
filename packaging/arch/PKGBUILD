@@ -1,0 +1,134 @@
+# Maintainer: SOL contributors
+#
+# Source-release contract: place sol-${pkgver}.tar.gz beside this PKGBUILD.
+# Before publishing, replace the SKIP checksum with the SHA-256 of that exact
+# release archive. The repository does not yet publish a canonical archive.
+
+pkgbase=sol
+pkgname=(
+  sol-compositor
+  sol-shell
+  sol-settingsd
+  sol-notificationd
+  sol-portal
+  sol-ime
+  sol-files
+  sol-terminal
+  sol-settings
+  sol-desktop
+)
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='SOL Wayland desktop platform components'
+arch=('x86_64')
+url='https://example.invalid/sol'
+license=('unknown')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo' 'rust')
+source=("${pkgbase}-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+options=('!lto')
+
+_source_dir="${pkgbase}-${pkgver}"
+_binaries=(
+  sol-compositor
+  sol-shell
+  sol-settingsd
+  sol-notificationd
+  sol-portal
+  sol-ime
+  sol-files
+  sol-terminal
+  sol-settings
+)
+
+build() {
+  cd "${srcdir}/${_source_dir}"
+  cargo build --release --locked --package sol-compositor --package sol-shell \
+    --package sol-settingsd --package sol-notificationd --package sol-portal \
+    --package sol-ime --package sol-files --package sol-terminal \
+    --package sol-settings
+}
+
+check() {
+  cd "${srcdir}/${_source_dir}"
+  cargo test --locked --package sol-compositor --package sol-shell \
+    --package sol-settingsd --package sol-notificationd --package sol-portal \
+    --package sol-ime --package sol-files --package sol-terminal \
+    --package sol-settings
+}
+
+_package_binary() {
+  install -Dm755 "${srcdir}/${_source_dir}/target/release/${1}" \
+    "${pkgdir}/usr/bin/${1}"
+}
+
+package_sol-compositor() {
+  pkgdesc='SOL Wayland compositor'
+  # The hardware backend is an opt-in Cargo feature and is not packaged yet.
+  depends=('gcc-libs' 'glibc' 'libxkbcommon' 'wayland')
+  _package_binary sol-compositor
+}
+
+package_sol-shell() {
+  pkgdesc='SOL desktop shell'
+  depends=('gcc-libs' 'glibc' 'libxkbcommon' 'wayland')
+  _package_binary sol-shell
+}
+
+package_sol-settingsd() {
+  pkgdesc='SOL settings service'
+  depends=('gcc-libs' 'glibc')
+  _package_binary sol-settingsd
+}
+
+package_sol-notificationd() {
+  pkgdesc='SOL notification service'
+  depends=('gcc-libs' 'glibc')
+  _package_binary sol-notificationd
+}
+
+package_sol-portal() {
+  pkgdesc='SOL portal authorization boundary'
+  depends=('gcc-libs' 'glibc')
+  _package_binary sol-portal
+}
+
+package_sol-ime() {
+  pkgdesc='SOL input method frontend'
+  depends=('gcc-libs' 'glibc' 'dbus')
+  _package_binary sol-ime
+}
+
+package_sol-files() {
+  pkgdesc='SOL file manager'
+  depends=('gcc-libs' 'glibc')
+  _package_binary sol-files
+}
+
+package_sol-terminal() {
+  pkgdesc='SOL terminal'
+  depends=('gcc-libs' 'glibc')
+  _package_binary sol-terminal
+}
+
+package_sol-settings() {
+  pkgdesc='SOL settings application'
+  depends=('gcc-libs' 'glibc')
+  _package_binary sol-settings
+}
+
+package_sol-desktop() {
+  pkgdesc='SOL desktop meta package'
+  depends=(
+    'sol-compositor'
+    'sol-shell'
+    'sol-settingsd'
+    'sol-notificationd'
+    'sol-portal'
+    'sol-ime'
+    'sol-files'
+    'sol-terminal'
+    'sol-settings'
+  )
+}
