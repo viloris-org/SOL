@@ -11,6 +11,7 @@ pub mod networkmanager;
 pub mod notification_center;
 pub mod overlay;
 pub mod overview;
+pub mod overview_surface;
 pub mod pipewire_audio;
 pub mod quick_settings;
 pub mod topbar;
