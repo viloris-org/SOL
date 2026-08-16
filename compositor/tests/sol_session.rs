@@ -14,7 +14,7 @@
 //!      protocol round-trip through the compositor's dispatch + render loop).
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
@@ -120,7 +120,7 @@ fn build_bin(spec: &str) -> PathBuf {
     path_for_spec(&tree, spec)
 }
 
-fn path_for_spec(tree: &PathBuf, spec: &str) -> PathBuf {
+fn path_for_spec(tree: &Path, spec: &str) -> PathBuf {
     if let Some((base, rest)) = spec.split_once(' ') {
         // "sol-compositor --example test-client" -> target/debug/examples/test-client
         if rest.contains("--example") {
