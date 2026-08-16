@@ -338,7 +338,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         compositor-bridge contract with repeatable fixtures.
   - [ ] **Native overview surface:** compositor IPC adapter, real window
         thumbnails/layout, and presentation on a layer-shell surface.
-- [ ] **Top Bar:** clock, status area (network / volume / battery / bluetooth)
+- [x] **Top Bar foundation:** renderer-neutral clock/date, workspace, network,
+      audio, power, and privacy/activity provider contracts; unavailable/stale/
+      error state, keyboard/accessibility navigation, and permission-gated typed
+      intents. NetworkManager/PipeWire/UPower/compositor/portal adapters and
+      real desktop activation remain deferred.
 - [x] **Notification service foundation:** typed `NotificationApi` +
       `sol-notificationd` lifecycle, replacement, action, query, and storage
       boundary (Shell/D-Bus adapters remain pending)
