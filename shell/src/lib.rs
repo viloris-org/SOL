@@ -11,3 +11,4 @@ pub mod overlay;
 pub mod overview;
 pub mod quick_settings;
 pub mod topbar;
+pub mod upower;

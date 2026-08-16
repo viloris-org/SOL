@@ -451,6 +451,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] **Touchpad / gestures:** mature gesture stack
 - [ ] **Display hotplug:** complete
 - [ ] **Audio / Bluetooth / Power** (PipeWire / BlueZ / UPower integration)
+  - [x] **UPower status adapter:** the Shell top-bar provider reads UPower's
+        aggregate display device over the real system bus, distinguishes a
+        battery-less desktop from a zero-percent battery, rejects malformed or
+        unknown device state, and has a live host-service validation script.
+        PipeWire and BlueZ integration remain open.
 
 **Desktop core capabilities**
 
