@@ -1,8 +1,8 @@
 //! sol-ui — Semantic UI components for SolKit
 //!
 //! This crate provides SOL-native UI components that use `sol-design` tokens
-//! for visual consistency. Per ADR-0004, Slint is the intended rendering
-//! substrate, but the semantic API is independent of the rendering backend.
+//! for visual consistency. ADR-0004 settles Slint as the native rendering
+//! substrate while keeping the semantic API independent of Slint types.
 //!
 //! # Layering
 //!
@@ -11,7 +11,7 @@
 //!                               ↓
 //!                sol-design tokens (colors, spacing, motion)
 //!                               ↓
-//!                Slint rendering substrate (pending spike validation)
+//!                Slint rendering substrate (private adapter)
 //! ```
 //!
 //! # Motivation
@@ -20,6 +20,19 @@
 //! values. This ensures visual consistency across Shell and first-party apps.
 
 use sol_design::{color::Color, motion::Motion, radius::Radius, spacing::Spacing};
+
+mod runtime;
+
+#[cfg(feature = "native")]
+mod slint_backend;
+
+pub use runtime::{
+    ButtonController, ButtonFrame, FixtureSurfaceHost, LogicalSize, RecordingRenderer, Renderer,
+    SurfaceHost, present_button,
+};
+
+#[cfg(feature = "native")]
+pub use slint_backend::NativeRenderer;
 
 /// A semantic button component.
 ///

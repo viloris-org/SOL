@@ -169,9 +169,12 @@ backend remain future work; winit-first keeps CI green.
 
 **SolUI & rendering architecture**
 
-- [ ] **Decision #1 (ADR-0004 validation):** complete the Slint/SolUI spike
-      and settle the SolUI rendering architecture (retained vs declarative,
-      Slint backend integration pending network access for crate download)
+- [x] **Decision #1/#2 (ADR-0004):** Slint-backed SolUI spike completed;
+      architecture settled as retained semantic state projected to a private
+      reactive/declarative Slint adapter. Repeatable headless adapter and
+      scale/animation fixtures live in `sdk/sol-ui`; real GPU, accessibility,
+      multi-output, popup/input-region, and distribution-license validation
+      remain explicitly tracked in ADR-0004 rather than being claimed here.
 - [x] Semantic component system: `Button`, `TextField`, `Toolbar`, `Tab`, `TabBar`, `HStack`, `VStack`
        (PRD §18); apps write intent, not visuals
 - [x] Layout engine (`HStack` / `VStack` semantic layout, PRD §18) — Implemented

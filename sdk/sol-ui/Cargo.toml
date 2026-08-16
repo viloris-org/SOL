@@ -8,14 +8,10 @@ publish = false
 
 [dependencies]
 sol-design = { path = "../sol-design" }
-
-# NOTE: Slint is the intended rendering substrate per ADR-0004.
-# Slint dependency added but not yet used in this placeholder API.
-# The Slint/SolUI spike validation is pending (ADR-0004 status: "spike pending").
-# This crate defines the semantic component API that will drive Slint rendering.
+sol-animation = { path = "../sol-animation" }
+slint = { version = "=1.13.1", default-features = false, features = ["std", "compat-1-2", "backend-winit-wayland", "renderer-winit-software"], optional = true }
 
 [features]
 default = []
-# The "native" feature enables Slint backend rendering.
-# Without it, the crate provides token-based semantic APIs for testing/design.
-native = []
+# Compiles the ADR-0004 Slint adapter. The public API remains Slint-free.
+native = ["dep:slint"]

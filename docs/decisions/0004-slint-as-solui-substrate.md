@@ -1,7 +1,7 @@
-# 4. Slint as a candidate rendering/widget substrate for SolUI
+# 4. Slint-backed retained/reactive rendering for SolUI
 
-- Status: Accepted (spike pending)
-- Date: 2026-08-15
+- Status: Accepted — Phase 2 architecture spike completed
+- Date: 2026-08-16
 
 ## Context
 
@@ -18,7 +18,7 @@ Slint differs from Quickshell in nature:
 - Slint: can serve as a general-purpose rendering and widget base for
   SolKit/SolUI, serving both Shell and first-party apps.
 
-If adopted, the correct layering is:
+The chosen layering is:
 
 ```text
 SolKit Application API
@@ -28,42 +28,73 @@ SolUI semantic components + Design Tokens + SolAnimation
 Slint (rendering / widget substrate)
 ```
 
-Not apps or shell programming against `.slint` and Slint APIs directly.
+`sol-ui` owns retained semantic component state and a renderer-neutral
+`SurfaceHost` contract. The private Slint adapter projects that state into a
+reactive Slint component tree. Application code must not program against
+`.slint` or Slint APIs directly.
+
+There is one declarative source of truth: SolUI semantic state. Slint
+properties are a projection, not a second app-facing UI model. This preserves
+SOL ownership of focus, accessibility semantics, and `sol-animation`
+interruption while using Slint for native widget layout and rendering.
+
+This settles PRD §41 decisions #1 and #2: the rendering architecture is
+retained, renderer-neutral SolUI state with a private Slint adapter; the UI
+model is reactive/declarative at the API boundary, backed by that retained
+state. Immediate-mode drawing and a public Slint model are rejected.
 
 ## Fit with the PRD
 
-| PRD requirement | Slint candidate assessment |
+| PRD requirement | Assessment |
 |---|---|
-| Rust First | Good: Rust API, declarative UI model |
-| Framework First | Satisfiable: SolUI sits above Slint to provide semantic components |
-| Consistency First | Satisfiable: one Slint substrate serves both Shell and first-party apps |
-| Design Tokens | Must be defined by SolKit; Slint only executes |
-| Interactive Motion | To-be-verified: SolAnimation drives Slint properties; interrupt, spring, velocity, gesture progress remain unproven |
-| Accessibility | To-be-verified: Wayland accessibility support against the SolKit semantic layer |
-| Wayland First | To-be-verified: standard toplevels work; layer-shell integration for Shell is the primary risk |
+| Rust First | Satisfied: public contract and adapter are Rust. |
+| Framework First | Satisfied: SolUI semantics sit above Slint. |
+| Consistency First | Satisfied at the adapter boundary: components resolve `sol-design` tokens before projection. |
+| Design Tokens | SolKit owns token resolution; Slint only executes the resolved values. |
+| Interactive Motion | Validated at adapter boundary: `ButtonController` uses `sol-animation::InterruptibleAnimation` and externally overwrites Slint progress while preserving velocity. |
+| Accessibility | Architecture retained; backend integration is still unvalidated. SolUI must own semantics before mapping them to a platform bridge. |
+| Wayland First | Standard-window adapter compiles for Wayland/winit. Shell layer surfaces remain owned by `sol-shell`, not Slint. |
 
-## Required validation items
+## Phase 2 spike and evidence
 
-Before a final decision is made, a Slint/SolUI spike must complete:
+The repeatable implementation lives in `sdk/sol-ui`:
 
-1. `sol-shell` running as a layer-shell surface (anchor, exclusive zone,
-   input region, popup).
-2. Behavior under fractional scaling, HiDPI, and multi-monitor.
-3. Whether SolAnimation can externally interrupt/take over Slint animation
-   and achieve gesture progress → UI progress.
-4. Wayland accessibility integration path.
-5. Renderer GPU path, frame pacing, and input latency meeting PRD §34.
-6. Slint license model supporting SOL Desktop / SOL OS distribution targets.
-7. Slint kept strictly behind SolUI — application code never touching Slint
-   types directly.
+- `cargo test -p sol-ui` verifies retained semantic state, token resolution,
+  fractional scale conversion, frame scheduling, and gesture takeover using a
+  deterministic `FixtureSurfaceHost` / `RecordingRenderer`.
+- `cargo test -p sol-ui --features native` additionally builds a real Slint
+  component on Slint's headless software window and asserts that SOL tokens,
+  label data, and externally driven progress reach it.
+- `cargo check -p sol-ui --features native` compiles the production Wayland
+  winit adapter feature (`backend-winit-wayland`) without exposing Slint types
+  in the public SolUI API.
+
+| Required item | Result | Evidence / limit |
+|---|---|---|
+| Retained vs reactive/declarative model | **Settled** | Retained `ButtonController` is the semantic owner; its state is reactively projected to Slint. |
+| SolUI rendering architecture | **Settled** | Slint is the native widget/rendering adapter behind renderer-neutral SolUI state and `SurfaceHost`. |
+| External animation takeover | **Validated in a headless fixture** | `slint_adapter_receives_tokens_and_external_gesture_progress` changes private Slint progress through `sol-animation`. Spring integration and frame-time measurements remain future work. |
+| Layer-shell anchor / exclusive zone / configure / frame | **Validated at host boundary** | `cargo test -p sol-compositor --test sol_session` runs `sol-shell --once` through the real layer-shell round-trip. The Slint adapter deliberately is not a layer-shell client; Phase 4 will host SolUI through `SurfaceHost`. Popups and input regions are not yet covered. |
+| Fractional scale / HiDPI / multi-monitor | **Contract fixture only** | `LogicalSize::physical_pixels(1.25)` is deterministic and `SurfaceHost` carries scale, but no physical multi-output test is available in this headless environment. |
+| Accessibility | **Not yet validated** | A Wayland accessibility bridge and keyboard/focus semantics still need implementation. |
+| GPU path, pacing, input latency | **Not yet validated** | The spike uses Slint's software renderer for reproducible headless tests. GPU renderer selection, damage/frame pacing, and PRD §34 measurements require a real Wayland/GPU session. |
+| License / distribution | **Not yet cleared for distribution** | Slint 1.13.1 advertises GPL-3.0-only, royalty-free, and software license alternatives. A distribution license choice/review is required before shipping SOL binaries. |
+| Slint containment | **Validated by API boundary** | `slint` is an optional private adapter dependency; public `sol-ui` APIs exchange only SOL types. |
+
+The feature and fixture make unavailable system validation explicit instead of
+making a hardware claim from a unit test. Phase 4 must provide a `SurfaceHost`
+over its already-proven layer-shell surface and add real output, popup,
+input-region, accessibility, and performance integration coverage.
 
 ## Consequences
 
-- If validation passes: SolUI rendering architecture (PRD §41 item 1) is
-  locked to Slint-backed SolUI; SOL does not need to build a GPU UI toolkit
-  from scratch.
-- If layer-shell or animation validation fails: Slint still works for
-  first-party app window UI, but Shell needs a separate SolKit rendering
-  path, increasing architecture cost; revisit then.
+- SOL does not build a general-purpose GPU widget toolkit at this stage.
+- Shell remains a distinct Wayland surface host, preserving ADR-0003/0006's
+  process and protocol boundaries instead of pretending a normal Slint window
+  is a layer-shell surface.
+- Revisit the backend only if the outstanding hardware performance,
+  accessibility, or distribution-license gates fail. Those gates do not reopen
+  decisions #1/#2; they determine whether a future adapter replacement is
+  necessary.
 - Compositor unaffected: `sol-compositor` remains Smithay-based; Slint does
   not enter the compositor render pipeline.

@@ -7,17 +7,20 @@ f32. (PRD §18, §19.1 Consistency First.)
 
 ## Positioning
 
-ADR-0004 lists Slint as a **candidate** rendering substrate — **undecided**.
-A Phase 2 SolUI spike must validate layer-shell, fractional scaling, and
-`sol-animation`'s interruptible / gesture-driven capabilities. Whichever way
-that lands, the public `sol-ui` API layering stays the same:
+ADR-0004 settles Slint as the native rendering/widget adapter. SolUI owns
+retained semantic state and projects it into a private reactive Slint tree;
+applications never see Slint types. The Phase 2 spike has repeatable headless
+coverage for token projection, fractional-scale conversion, and external
+`sol-animation` gesture progress. GPU performance, accessibility, real
+multi-output, and distribution licensing remain explicit follow-ups in the
+ADR.
 
 ```
 SolKit Application API
         ↓
 SolUI semantic components + Design Tokens + SolAnimation
         ↓
-Slint (rendering / widget substrate — candidate)
+Slint (private rendering / widget adapter)
 ```
 
 App code never programs against `.slint` or Slint APIs directly.
@@ -32,9 +35,10 @@ App code never programs against `.slint` or Slint APIs directly.
 
 ## Status
 
-**Phase 2 foundation implemented.** Semantic components and `HStack` / `VStack`
-layout are present. The renderer decision, keyboard/focus behavior, and
-accessibility work remain in progress.
+**Phase 2 architecture spike complete.** `native` compiles the Wayland/winit
+Slint adapter; the default feature set keeps deterministic semantic tests
+headless and renderer-independent. Keyboard/focus behavior and accessibility
+work remain in progress.
 
 ## Consistency iron rules (PRD §19.1)
 
