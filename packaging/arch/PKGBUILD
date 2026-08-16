@@ -89,7 +89,7 @@ package_sol-shell() {
 
 package_sol-settingsd() {
   pkgdesc='SOL settings service'
-  depends=('gcc-libs' 'glibc')
+  depends=('dbus' 'gcc-libs' 'glibc')
   _package_binary sol-settingsd
 }
 

@@ -4,6 +4,8 @@
 //! adapter can implement or delegate to [`SettingsApi`] without changing the
 //! typed API used by first-party applications.
 
+pub mod dbus;
+
 use sol_system::{
     ColorScheme, OutputVolume, SettingsApi, SettingsChange, SettingsError, SettingsResult,
     SettingsSnapshot, TextScale,

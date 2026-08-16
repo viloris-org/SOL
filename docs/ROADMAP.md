@@ -361,9 +361,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [x] **Renderer-neutral quick settings core:** typed volume/mute with
         `SystemActionApi` authorization, appearance/accessibility preferences,
         keyboard/accessibility semantics, and fixture-backed adapters.
-  - [ ] **System adapters:** settingsd D-Bus proxy plus typed network,
-        Bluetooth, and audio-device services; unavailable states remain
-        intentional until those APIs exist.
+  - [x] **Settings service adapter:** the `org.sol.Settings1` session-bus
+        service exposes only complete typed snapshots and named setting changes;
+        `SettingsDbusProxy` implements `SettingsApi`, with an isolated
+        `dbus-run-session` service/client round trip.
+  - [ ] **Remaining system adapters:** typed network, Bluetooth, and
+        audio-device services; unavailable states remain intentional until
+        those APIs exist.
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress
 - [x] **Search & Launcher (§28) foundation:** private local application catalog,

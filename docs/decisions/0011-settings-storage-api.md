@@ -29,7 +29,11 @@ The API intentionally contains no storage paths, serialization, D-Bus types,
 or free-form string key/value interface.  New settings pages add named domain
 types and explicit change variants; they do not establish a second protocol.
 
-`sol-settingsd` owns the implementation boundary through `SettingsStore`.
+`sol-settingsd` owns the implementation boundary through `SettingsStore` and
+the `org.sol.Settings1` session-bus adapter. The adapter maps only complete
+revisioned snapshots and explicit `SettingsChange` variants; it never exposes a
+file path, a backend object, or free-form setting keys. `SettingsDbusProxy`
+implements the same `SettingsApi` consumed by first-party UI clients.
 `SettingsDaemon<S>` validates and revisions a snapshot, then writes it through
 the store before publishing it to readers.  It currently supplies:
 
@@ -46,8 +50,8 @@ backend changes only a `SettingsStore` implementation.
 ## Consequences
 
 - A Phase 3 Settings UI can be written and mock-tested solely against
-  `SettingsApi`, then use a daemon proxy without changing its domain code.
-- IPC remains an adapter concern.  A D-Bus adapter can delegate to the same
+  `SettingsApi`, then use `SettingsDbusProxy` without changing its domain code.
+- IPC remains an adapter concern. `org.sol.Settings1` delegates to the same
   daemon core in line with ADR-0006, without exposing D-Bus in `sol-system`.
 - The first stable surface is intentionally narrow.  Network, displays,
   Bluetooth, input, power, and accessibility settings must add typed domains
@@ -66,12 +70,14 @@ backend changes only a `SettingsStore` implementation.
    reviewable.
 3. **Make a JSON/TOML file the public API.** Rejected: it would freeze a
    persistence format before the system-service model and permissions exist.
-4. **Choose the D-Bus wire interface in this decision.** Rejected: this gate
-   settles storage and the in-process typed boundary.  Transport can wrap that
-   boundary when the long-running service interface is introduced.
+4. **Expose generic D-Bus properties or a string map.** Rejected: the session
+   adapter preserves the same complete snapshots and explicit mutations as the
+   in-process API, so no new untyped settings protocol is introduced.
 
 ## Verification
 
 `sol-system` contains a mock `SettingsApi` round-trip test, and
 `sol-settingsd` tests both service-to-memory-store write-through and a
-file-store reload round-trip.
+file-store reload round-trip. `scripts/validate-settingsd-dbus.sh` starts the
+real daemon under `dbus-run-session`, applies settings through `busctl` and
+`SettingsDbusProxy`, and reads the typed result back through the session bus.
