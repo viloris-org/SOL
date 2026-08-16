@@ -203,6 +203,11 @@ backend remain future work; winit-first keeps CI green.
 - [ ] Accessibility semantic tree, reduced motion, high contrast (§35)
 - [ ] Theme switching touches only `sol-design` (§19.1 single source of truth)
 
+**Settings boundary**
+
+- [x] **Decision #6:** settings storage and stable minimum API boundary
+      (typed `SettingsApi`; daemon-owned persistent store; ADR-0011)
+
 ### M2 success criterion
 
 > "It is possible to fully develop an app with SOL-native look and
@@ -212,7 +217,8 @@ backend remain future work; winit-first keeps CI green.
 > concrete renderer.
 
 > **Decision gate (PRD §41):** this Phase settles #1 SolUI rendering
-> architecture, #2 retained/declarative, #6 settings storage architecture,
+> architecture, #2 retained/declarative, #6 settings storage architecture
+> (settled: ADR-0011),
 > #7 application identity format.
 
 ---
