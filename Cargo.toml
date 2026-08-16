@@ -16,6 +16,7 @@ members = [
     "apps/sol-files",
     "apps/sol-terminal",
     "apps/sol-settings",
+    "examples/solkit-showcase",
 ]
 
 [workspace.package]

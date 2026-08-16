@@ -59,6 +59,14 @@ impl NativeRenderer {
     pub fn font_size(&self) -> f32 {
         self.button.get_font_size()
     }
+
+    /// Enter the native Slint event loop for this semantic component.
+    ///
+    /// Applications call this through SolUI's renderer-neutral API; no Slint
+    /// type is exposed at the call site.
+    pub fn run(&self) -> Result<(), String> {
+        self.button.run().map_err(|error| error.to_string())
+    }
 }
 
 impl Renderer for NativeRenderer {

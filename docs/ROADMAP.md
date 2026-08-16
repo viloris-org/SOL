@@ -244,6 +244,24 @@ real-hardware DRM/GBM smoke validation remains a hardware follow-up.
 > (settled: ADR-0011),
 > #7 application identity format (settled: ADR-0012).
 
+### M2 acceptance evidence and closure gate
+
+- [x] **SolKit workflow example:** `examples/solkit-showcase` creates an app
+      using only `sol-app`, `sol-ui`, `sol-design`, `sol-animation`, and the
+      renderer-neutral `sol-graphics` contract. Its deterministic CLI/test
+      covers layout/components, command execution, interruptible motion,
+      token-mode accessibility preferences, keyboard navigation, and the
+      semantic accessibility tree without importing a concrete backend.
+- [ ] **Real-platform closure:** run the native showcase on a SOL Wayland
+      session and verify a real accessibility bridge with assistive technology.
+      The `native` feature compiles the private Slint adapter, but headless
+      results do not prove GPU pacing, input latency, multi-output behavior,
+      or AT-SPI/screen-reader transport.
+
+**M2 remains in progress until the real-platform closure item is evidenced.**
+The example proves the framework API workflow; it must not be mistaken for a
+claim that the unavailable Wayland and assistive-technology environment passed.
+
 ---
 
 ## Phase 3 — First-party Applications

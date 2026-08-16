@@ -1,0 +1,19 @@
+[package]
+name = "solkit-showcase"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+sol-app = { path = "../../sdk/sol-app" }
+sol-animation = { path = "../../sdk/sol-animation" }
+sol-design = { path = "../../sdk/sol-design" }
+sol-graphics = { path = "../../sdk/sol-graphics" }
+sol-ui = { path = "../../sdk/sol-ui" }
+
+[features]
+default = []
+# Opens the same semantic view through SolUI's private native adapter.
+native = ["sol-ui/native"]
