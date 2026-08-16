@@ -1,92 +1,97 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+   push:
+     branches: [main]
+   pull_request:
 
 env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
+   CARGO_TERM_COLOR: always
+   RUSTFLAGS: "-D warnings"
 
 jobs:
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust (stable-2024)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: rustfmt check
-        run: cargo fmt --all -- --check
+   fmt:
+     name: Format
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+       - name: Install Rust (stable-2024)
+         uses: dtolnay/rust-toolchain@stable
+         with:
+           components: rustfmt
+       - uses: Swatinem/rust-cache@v2
+       - name: rustfmt check
+         run: cargo fmt --all -- --check
 
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install system libs (EGL/Wayland for the compositor winit backend)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libegl1 libgles2 libgbm1 libgl1-mesa-dri \
-            libwayland-dev libwayland-bin \
-            libxkbcommon-dev \
-            xwayland xvfb
-      - name: Install Rust (stable-2024)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      # Default features only. The `udev` feature (DRM/GBM/libseat) requires a
-      # host libdisplay-info < 0.3.0 and a real seat (ADR-0005); it is
-      # exercised on hardware in Phase 1+, not in CI.
-      - name: cargo check (workspace, default features)
-        run: cargo check --workspace
+   check:
+     name: Check
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+       - name: Install system libs (EGL/Wayland for the compositor winit backend)
+         run: |
+           sudo apt-get update
+           sudo apt-get install -y \
+             libegl1 libgles2 libgbm1 libgl1-mesa-dri \
+             libwayland-dev libwayland-bin \
+             libxkbcommon-dev \
+             xwayland xvfb
+       - name: Install Rust (stable-2024)
+         uses: dtolnay/rust-toolchain@stable
+         with:
+           components: clippy
+       - uses: Swatinem/rust-cache@v2
+       # Default features only. The `udev` feature (DRM/GBM/libseat) requires a
+       # host libdisplay-info < 0.3.0 and a real seat (ADR-0005); it is
+       # exercised on hardware in Phase 1+, not in CI.
+       - name: cargo check (workspace, default features)
+         run: cargo check --workspace
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install system libs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libegl1 libgles2 libgbm1 libgl1-mesa-dri \
-            libwayland-dev libwayland-bin \
-            libxkbcommon-dev
-      - name: Install Rust (stable-2024)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo clippy (workspace, default features)
-        run: cargo clippy --workspace -- -D warnings
+   clippy:
+     name: Clippy
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+       - name: Install system libs
+         run: |
+           sudo apt-get update
+           sudo apt-get install -y \
+             libegl1 libgles2 libgbm1 libgl1-mesa-dri \
+             libwayland-dev libwayland-bin \
+             libxkbcommon-dev
+       - name: Install Rust (stable-2024)
+         uses: dtolnay/rust-toolchain@stable
+         with:
+           components: clippy
+       - uses: Swatinem/rust-cache@v2
+       - name: cargo clippy (workspace, default features)
+         run: cargo clippy --workspace -- -D warnings
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    # The sol_session integration tests drive the compositor in `--headless`
-    # mode (no GPU / no display needed) and exercise two end-to-end paths:
-    #   1. the Phase 0 reference client (`test-client`),
-    #   2. the Phase 1 M1 layer-shell top bar (`sol-shell --once`),
-    # asserting the layer-shell configure round-trip. System libs are still
-    # installed so the binaries build (winit/EGL dev path is the default set).
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install system libs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libegl1 libgles2 libgbm1 libgl1-mesa-dri \
-            libwayland-dev libwayland-bin \
-            libxkbcommon-dev
-      - name: Install Rust (stable-2024)
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo test (workspace)
-        run: cargo test --workspace -- --nocapture
+   test:
+     name: Test
+     runs-on: ubuntu-latest
+     # The sol_session integration tests drive the compositor in `--headless`
+     # mode (no GPU / no display needed) and exercise two end-to-end paths:
+     #   1. the Phase 0 reference client (`test-client`),
+     #   2. the Phase 1 M1 layer-shell top bar (`sol-shell --once`),
+     # asserting the layer-shell configure round-trip. System libs are still
+     # installed so the binaries build (winit/EGL dev path is the default set).
+     env:
+       # Required for tests: Wayland socket path resolution.
+       XDG_RUNTIME_DIR: /tmp
+     steps:
+       - uses: actions/checkout@v4
+       - name: Install system libs
+         run: |
+           sudo apt-get update
+           sudo apt-get install -y \
+             libegl1 libgles2 libgbm1 libgl1-mesa-dri \
+             libwayland-dev libwayland-bin \
+             libxkbcommon-dev
+       - name: Install Rust (stable-2024)
+         uses: dtolnay/rust-toolchain@stable
+         with:
+           components: clippy
+       - uses: Swatinem/rust-cache@v2
+       - name: cargo test (workspace)
+         run: cargo test --workspace -- --nocapture
