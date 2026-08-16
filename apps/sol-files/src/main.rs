@@ -4,6 +4,14 @@
 //! file operations). A future SolUI native surface consumes this model; it is
 //! deliberately not tied to Slint or another concrete renderer.
 
+mod surface;
+
+pub use surface::{
+    FilesContextAction, FilesContextMenuProjection, FilesSidebarLocation, FilesSidebarProjection,
+    FilesSurface, FilesSurfaceError, FilesSurfaceEvent, FilesSurfaceOutcome,
+    FilesSurfaceProjection, FilesSurfaceResult,
+};
+
 use sol_app::{App, AppId};
 use sol_design::{color::Color, motion::Motion, spacing::Spacing};
 use sol_ui::{
@@ -451,6 +459,12 @@ impl<T: TrashStore> FilesApp<T> {
     #[must_use]
     pub fn tabs(&self) -> &[DirectoryTab] {
         &self.tabs
+    }
+
+    /// Return the index of the tab currently shown by the native surface.
+    #[must_use]
+    pub const fn active_tab_index(&self) -> usize {
+        self.active_tab
     }
 
     /// Return the active tab's model.

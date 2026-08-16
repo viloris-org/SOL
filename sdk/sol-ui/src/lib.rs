@@ -482,7 +482,7 @@ pub enum ToolbarItem {
 #[derive(Debug)]
 pub struct Tab {
     /// The tab label.
-    pub label: &'static str,
+    pub label: String,
     /// Whether this tab is selected.
     pub selected: bool,
     /// Whether this tab is enabled.
@@ -491,9 +491,9 @@ pub struct Tab {
 
 impl Tab {
     /// Create a new tab.
-    pub fn new(label: &'static str) -> Self {
+    pub fn new(label: impl Into<String>) -> Self {
         Self {
-            label,
+            label: label.into(),
             selected: false,
             enabled: true,
         }
