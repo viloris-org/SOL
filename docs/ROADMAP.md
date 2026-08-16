@@ -374,8 +374,17 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       ADR-0013:** caller-attributed action catalog, default-deny grants, trusted
       consent boundary, and audit are covered by deterministic fixtures;
       concrete portal/polkit/system-service adapters remain deferred.
-- [ ] **System overlays:** screen-recording indicator, IME candidate window, etc.
-- [ ] Layer-shell popup integration validation (ADR-0004 validation point #1)
+- [x] **System overlay / popup contract:** renderer-neutral OSD, menu,
+      popover, and modal/scrim roles now have typed output, anchor,
+      exclusive-zone, input-region, focus, Escape/dismiss, accessibility, and
+      token-motion contracts with deterministic SolUI fixtures (ADR-0015).
+      Screen-recording and IME candidate-window product surfaces remain open.
+- [x] **Layer-shell popup integration validation (ADR-0004 validation point #1):**
+      repeatable headless compositor + SolUI fixture validates placement,
+      fractional scale, input, focus, and lifecycle contracts. The existing
+      `sol_session` test remains the real top-bar layer-shell round trip;
+      native transient popup, physical multi-output, GPU, and AT-SPI validation
+      remain field work rather than CI claims.
 
 ### M4 success criterion
 

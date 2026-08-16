@@ -172,8 +172,22 @@ pub fn present_button(
     renderer: &mut impl Renderer,
     button: &ButtonController,
 ) {
+    present_button_for(host, renderer, button, TokenMode::default());
+}
+
+/// Drive a retained button through a renderer using the surface's active
+/// design-token mode, then schedule one host frame.
+///
+/// A shell or application host supplies this mode at the semantic boundary;
+/// renderers never need a second theme, contrast, motion, or text-scale API.
+pub fn present_button_for(
+    host: &mut impl SurfaceHost,
+    renderer: &mut impl Renderer,
+    button: &ButtonController,
+    mode: TokenMode,
+) {
     let _physical_size = host.logical_size().physical_pixels(host.scale_factor());
-    renderer.render_button(&button.frame());
+    renderer.render_button(&button.frame_for(mode));
     host.request_frame();
 }
 

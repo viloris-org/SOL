@@ -37,7 +37,7 @@ pub use command_palette::{
 };
 pub use runtime::{
     ButtonController, ButtonFrame, FixtureSurfaceHost, LogicalSize, RecordingRenderer, Renderer,
-    SurfaceHost, present_button,
+    SurfaceHost, present_button, present_button_for,
 };
 pub use semantic::{
     AccessibilityNode, AccessibilityState, InteractionTree, Key, KeyboardOutcome, SemanticControl,

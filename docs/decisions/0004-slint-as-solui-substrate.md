@@ -74,17 +74,18 @@ The repeatable implementation lives in `sdk/sol-ui`:
 | Retained vs reactive/declarative model | **Settled** | Retained `ButtonController` is the semantic owner; its state is reactively projected to Slint. |
 | SolUI rendering architecture | **Settled** | Slint is the native widget/rendering adapter behind renderer-neutral SolUI state and `SurfaceHost`. |
 | External animation takeover | **Validated in a headless fixture** | `slint_adapter_receives_tokens_and_external_gesture_progress` changes private Slint progress through `sol-animation`. Spring integration and frame-time measurements remain future work. |
-| Layer-shell anchor / exclusive zone / configure / frame | **Validated at host boundary** | `cargo test -p sol-compositor --test sol_session` runs `sol-shell --once` through the real layer-shell round-trip. The Slint adapter deliberately is not a layer-shell client; Phase 4 will host SolUI through `SurfaceHost`. Popups and input regions are not yet covered. |
-| Fractional scale / HiDPI / multi-monitor | **Contract fixture only** | `LogicalSize::physical_pixels(1.25)` is deterministic and `SurfaceHost` carries scale, but no physical multi-output test is available in this headless environment. |
+| Layer-shell anchor / exclusive zone / configure / frame | **Validated at host boundary** | `cargo test -p sol-compositor --test sol_session` runs `sol-shell --once` through the real layer-shell round-trip. The Slint adapter deliberately is not a layer-shell client. ADR-0015 adds a headless SolUI + layer-shell contract fixture for overlay role, placement, input, focus, Escape, and dismissal; a native transient popup round-trip remains field work. |
+| Fractional scale / HiDPI / multi-monitor | **Contract fixture only** | `LogicalSize::physical_pixels(1.25)` is deterministic and ADR-0015 resolves contracts across named output fixtures, but no physical multi-output test is available in this headless environment. |
 | Accessibility | **Semantic core validated; platform bridge not yet validated** | `InteractionTree` covers focus traversal, activation, tab selection, text editing, and renderer-neutral accessibility state. A Wayland screen-reader/AT-SPI bridge still needs a real assistive-technology session. |
 | GPU path, pacing, input latency | **Not yet validated** | The spike uses Slint's software renderer for reproducible headless tests. GPU renderer selection, damage/frame pacing, and PRD §34 measurements require a real Wayland/GPU session. |
 | License / distribution | **Not yet cleared for distribution** | Slint 1.13.1 advertises GPL-3.0-only, royalty-free, and software license alternatives. A distribution license choice/review is required before shipping SOL binaries. |
 | Slint containment | **Validated by API boundary** | `slint` is an optional private adapter dependency; public `sol-ui` APIs exchange only SOL types. |
 
 The feature and fixture make unavailable system validation explicit instead of
-making a hardware claim from a unit test. Phase 4 must provide a `SurfaceHost`
-over its already-proven layer-shell surface and add real output, popup,
-input-region, accessibility, and performance integration coverage.
+making a hardware claim from a unit test. Phase 4 now provides the typed
+`SurfaceHost` hand-off and headless overlay contract in ADR-0015; real output,
+native popup/input-region, accessibility, and performance integration coverage
+remain required field validation.
 
 ## Consequences
 

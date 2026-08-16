@@ -29,6 +29,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 10 | Application identity and lifecycle contracts | Accepted | Phase 2 | [0012-application-identity-lifecycle.md](0012-application-identity-lifecycle.md) |
 | 11 | Typed System Action and permission layer | Accepted (API contract) | Phase 4 | [0013-system-action-permission-layer.md](0013-system-action-permission-layer.md) |
 | 12 | Local, privacy-preserving search index | Accepted (foundation) | Phase 4 | [0014-local-search-index.md](0014-local-search-index.md) |
+| 13 | System overlays and layer-shell popup contract | Accepted (headless contract) | Phase 4 | [0015-layer-shell-overlays-popup-contract.md](0015-layer-shell-overlays-popup-contract.md) |
 
 ## Open decisions (PRD §41 — to settle during prototyping)
 
