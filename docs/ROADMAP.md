@@ -298,6 +298,9 @@ real-hardware DRM/GBM smoke validation remains a hardware follow-up.
 - [ ] **Dock / Launcher:** app launch, running indicators, pin / unpin
 - [ ] **Overview / Workspace:** workspace overview, visual switching
 - [ ] **Top Bar:** clock, status area (network / volume / battery / bluetooth)
+- [x] **Notification service foundation:** typed `NotificationApi` +
+      `sol-notificationd` lifecycle, replacement, action, query, and storage
+      boundary (Shell/D-Bus adapters remain pending)
 - [ ] **Notification Center** (wired to `sol-notificationd`)
 - [ ] **Quick Settings** (wired to `sol-settingsd`)
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,

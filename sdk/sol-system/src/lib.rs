@@ -5,8 +5,11 @@
 //! crate while `sol-settingsd` remains free to use an in-memory store in tests,
 //! a file today, and an IPC-backed implementation later.
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
+
+pub use sol_app::AppId;
 
 /// Result returned by the settings API.
 pub type SettingsResult<T> = Result<T, SettingsError>;
@@ -200,6 +203,307 @@ pub trait SettingsApi: Send + Sync {
 
     /// Persist one typed user-intent change and return the resulting snapshot.
     fn apply(&self, change: SettingsChange) -> SettingsResult<SettingsSnapshot>;
+}
+
+/// Result returned by the notification API.
+pub type NotificationResult<T> = Result<T, NotificationError>;
+
+/// An error returned while publishing or querying notifications.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationError {
+    /// The request cannot be represented by the stable notification contract.
+    InvalidRequest(&'static str),
+    /// The requested notification does not exist.
+    NotFound(NotificationId),
+    /// Only the application that created a notification may replace it.
+    ReplacementOwnerMismatch,
+    /// An action cannot be invoked after a notification has left the active state.
+    NotActive(NotificationId),
+    /// The requested action is not part of the notification.
+    UnknownAction(NotificationActionId),
+    /// The backing service or transport could not complete the operation.
+    Backend(String),
+}
+
+impl NotificationError {
+    /// Construct an error reported by the backing service or transport.
+    #[must_use]
+    pub fn backend(message: impl Into<String>) -> Self {
+        Self::Backend(message.into())
+    }
+}
+
+impl fmt::Display for NotificationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest(message) => {
+                write!(formatter, "invalid notification request: {message}")
+            }
+            Self::NotFound(id) => write!(formatter, "notification {id} was not found"),
+            Self::ReplacementOwnerMismatch => {
+                formatter.write_str("an application may only replace its own notification")
+            }
+            Self::NotActive(id) => write!(formatter, "notification {id} is not active"),
+            Self::UnknownAction(id) => write!(formatter, "notification action {id} was not found"),
+            Self::Backend(message) => write!(formatter, "notification backend error: {message}"),
+        }
+    }
+}
+
+impl Error for NotificationError {}
+
+/// A daemon-assigned notification identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NotificationId(u64);
+
+impl NotificationId {
+    /// Return the stable numeric value used by transports and storage adapters.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Construct an ID returned by a trusted storage or transport adapter.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for NotificationId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// Priority requested by the emitting application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum NotificationUrgency {
+    /// Informational, non-interrupting notification.
+    Low,
+    /// The normal user-visible notification priority.
+    #[default]
+    Normal,
+    /// Time-sensitive notification requiring prominent presentation policy.
+    Critical,
+}
+
+/// A typed, application-local action identifier.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NotificationActionId(String);
+
+impl NotificationActionId {
+    /// Create an action ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NotificationError::InvalidRequest`] for an empty identifier.
+    pub fn new(value: impl Into<String>) -> NotificationResult<Self> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(NotificationError::InvalidRequest(
+                "action IDs must not be empty",
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    /// Return the action's stable application-local identifier.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for NotificationActionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A user-visible notification action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationAction {
+    /// Stable action key returned to the emitting application.
+    pub id: NotificationActionId,
+    /// User-visible action label.
+    pub label: String,
+}
+
+impl NotificationAction {
+    /// Create a notification action with a non-empty label.
+    pub fn new(id: NotificationActionId, label: impl Into<String>) -> NotificationResult<Self> {
+        let label = label.into();
+        if label.trim().is_empty() {
+            return Err(NotificationError::InvalidRequest(
+                "action labels must not be empty",
+            ));
+        }
+        Ok(Self { id, label })
+    }
+}
+
+/// Typed request sent by an application to a notification service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationRequest {
+    /// Durable identity of the application that owns this notification.
+    pub app_id: AppId,
+    /// Concise, user-visible notification title.
+    pub summary: String,
+    /// Optional longer user-visible content.
+    pub body: Option<String>,
+    /// Presentation priority requested by the application.
+    pub urgency: NotificationUrgency,
+    /// User actions exposed by the notification center.
+    pub actions: Vec<NotificationAction>,
+    /// Existing notification to replace in place, if owned by `app_id`.
+    pub replaces: Option<NotificationId>,
+}
+
+impl NotificationRequest {
+    /// Create a notification request with normal urgency and no actions.
+    pub fn new(app_id: AppId, summary: impl Into<String>) -> NotificationResult<Self> {
+        let summary = summary.into();
+        if summary.trim().is_empty() {
+            return Err(NotificationError::InvalidRequest(
+                "notification summaries must not be empty",
+            ));
+        }
+        Ok(Self {
+            app_id,
+            summary,
+            body: None,
+            urgency: NotificationUrgency::Normal,
+            actions: Vec::new(),
+            replaces: None,
+        })
+    }
+
+    /// Attach optional longer content.
+    #[must_use]
+    pub fn with_body(mut self, body: impl Into<String>) -> Self {
+        self.body = Some(body.into());
+        self
+    }
+
+    /// Set the requested presentation urgency.
+    #[must_use]
+    pub fn with_urgency(mut self, urgency: NotificationUrgency) -> Self {
+        self.urgency = urgency;
+        self
+    }
+
+    /// Attach actions, rejecting duplicate action IDs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NotificationError::InvalidRequest`] when action IDs repeat.
+    pub fn with_actions(mut self, actions: Vec<NotificationAction>) -> NotificationResult<Self> {
+        let mut identifiers = HashSet::new();
+        if actions
+            .iter()
+            .any(|action| !identifiers.insert(action.id.clone()))
+        {
+            return Err(NotificationError::InvalidRequest(
+                "notification action IDs must be unique",
+            ));
+        }
+        self.actions = actions;
+        Ok(self)
+    }
+
+    /// Replace an existing notification emitted by the same application.
+    #[must_use]
+    pub fn replacing(mut self, notification: NotificationId) -> Self {
+        self.replaces = Some(notification);
+        self
+    }
+}
+
+/// The lifecycle state of a notification record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationLifecycle {
+    /// Available to transient notification presentation and the notification center.
+    Active,
+    /// Removed from active presentation but retained for history queries.
+    Dismissed(NotificationDismissReason),
+}
+
+/// Why a notification left its active state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationDismissReason {
+    /// The user dismissed it from a notification surface.
+    User,
+    /// Its originating application withdrew it.
+    Application,
+    /// Service policy expired the notification.
+    Expired,
+}
+
+/// One notification stored by the service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationRecord {
+    /// Daemon-assigned ID.
+    pub id: NotificationId,
+    /// Typed request and application attribution.
+    pub notification: NotificationRequest,
+    /// Current lifecycle state.
+    pub lifecycle: NotificationLifecycle,
+    /// Monotonic service sequence used for deterministic ordering.
+    pub sequence: u64,
+}
+
+/// Query accepted by [`NotificationApi::query`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationQuery {
+    /// Active notifications from every application, newest first.
+    Active,
+    /// All retained notification history, newest first.
+    History,
+    /// Notifications emitted by one application, optionally including dismissed history.
+    ForApp {
+        /// Application whose notifications are requested.
+        app_id: AppId,
+        /// Whether dismissed records are included.
+        include_dismissed: bool,
+    },
+}
+
+/// Event returned when a notification center invokes an action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationActionInvocation {
+    /// Notification owning the action.
+    pub notification_id: NotificationId,
+    /// Application that receives the action callback.
+    pub app_id: AppId,
+    /// The invoked application-local action ID.
+    pub action_id: NotificationActionId,
+}
+
+/// Small stable boundary between applications, notificationd, and the Shell.
+///
+/// A future D-Bus proxy implements this trait.  Shell notification-center UI
+/// can query records and invoke actions without observing the daemon's store.
+pub trait NotificationApi: Send + Sync {
+    /// Publish a new notification or replace an existing owned notification.
+    fn publish(&self, request: NotificationRequest) -> NotificationResult<NotificationRecord>;
+
+    /// Dismiss an active notification while retaining it for history.
+    fn dismiss(
+        &self,
+        id: NotificationId,
+        reason: NotificationDismissReason,
+    ) -> NotificationResult<NotificationRecord>;
+
+    /// Return notification records matching a typed query.
+    fn query(&self, query: NotificationQuery) -> NotificationResult<Vec<NotificationRecord>>;
+
+    /// Validate and return a notification action invocation for delivery.
+    fn invoke_action(
+        &self,
+        id: NotificationId,
+        action_id: NotificationActionId,
+    ) -> NotificationResult<NotificationActionInvocation>;
 }
 
 #[cfg(test)]

@@ -3737,6 +3737,9 @@ dependencies = [
 [[package]]
 name = "sol-notificationd"
 version = "0.1.0"
+dependencies = [
+ "sol-system",
+]
 
 [[package]]
 name = "sol-portal"
@@ -3770,6 +3773,9 @@ dependencies = [
 [[package]]
 name = "sol-system"
 version = "0.1.0"
+dependencies = [
+ "sol-app",
+]
 
 [[package]]
 name = "sol-terminal"

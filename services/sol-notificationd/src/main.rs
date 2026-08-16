@@ -1,3 +1,8 @@
+use sol_notificationd::{MemoryNotificationStore, NotificationDaemon};
+
 fn main() {
-    println!("sol-notificationd: Phase 0 scaffold, not yet implemented");
+    match NotificationDaemon::new(MemoryNotificationStore::new()) {
+        Ok(_) => println!("sol-notificationd: typed notification service ready"),
+        Err(error) => eprintln!("sol-notificationd: failed to initialize: {error}"),
+    }
 }
