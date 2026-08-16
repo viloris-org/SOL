@@ -353,6 +353,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [ ] **Native notification surface:** D-Bus proxy, layer-shell presentation,
         user policy, and real application action callback delivery.
 - [ ] **Quick Settings** (wired to `sol-settingsd`)
+  - [x] **Renderer-neutral quick settings core:** typed volume/mute with
+        `SystemActionApi` authorization, appearance/accessibility preferences,
+        keyboard/accessibility semantics, and fixture-backed adapters.
+  - [ ] **System adapters:** settingsd D-Bus proxy plus typed network,
+        Bluetooth, and audio-device services; unavailable states remain
+        intentional until those APIs exist.
 - [ ] **Touchpad gestures (§13 / §4.4):** four-finger workspace switching etc.,
       gesture progress → UI progress
 - [x] **Search & Launcher (§28) foundation:** private local application catalog,

@@ -17,6 +17,7 @@ mod client;
 pub mod launcher;
 pub mod notification_center;
 pub mod overview;
+pub mod quick_settings;
 pub mod topbar;
 
 use std::{
