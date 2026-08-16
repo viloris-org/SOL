@@ -1815,6 +1815,9 @@ version = "0.1.0"
 [[package]]
 name = "sol-ui"
 version = "0.1.0"
+dependencies = [
+ "sol-design",
+]
 
 [[package]]
 name = "syn"

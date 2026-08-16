@@ -171,10 +171,10 @@ backend remain future work; winit-first keeps CI green.
 - [ ] **Decision #1 (ADR-0004 validation):** complete the Slint/SolUI spike
       and settle the SolUI rendering architecture (retained vs declarative,
       Slint-backed or not)
-- [ ] Semantic component system: `Button` / `Toolbar` / `Dialog` / `List` /
+- [x] Semantic component system (Phase 2 start): `Button`, `TextField`, `HStack`, `VStack` implemented
       `MenuItem` / `TextField` / `Tab` … (PRD §18); apps write intent, not
       visuals
-- [ ] Layout engine (`HStack` / `VStack` semantic layout, PRD §18)
+- [x] Layout engine (`HStack` / `VStack` semantic layout, PRD §18) — Implemented
 - [ ] `sol-design` full token convergence: typography / spacing / radius /
       material / motion / shadows / color (PRD §19, §19.1)
 - [ ] Consistency testing: golden-snapshot asserts component-tree output

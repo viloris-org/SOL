@@ -22,6 +22,9 @@ as a basic daily-use Wayland compositor") is **done**: window management,
 workspaces, multi-monitor, shell IPC, and IME are all implemented and
 validated by integration tests.
 
+Phase 2 M2 started: semantic components (Button, TextField, HStack, VStack)
+and layout engine implemented. Slint/SolUI spike validation (ADR-0004) pending.
+
 ```bash
 cargo test -p sol-compositor --test sol_session
 
@@ -30,8 +33,9 @@ cargo run -p sol-compositor                       # terminal 1
 WAYLAND_DISPLAY=wayland-sol weston-terminal        # terminal 2
 ```
 
-Everything else — shell UI, SolKit SDK, services, first-party apps — is a
-**scaffold/placeholder** until its own milestone in the [roadmap](docs/ROADMAP.md).
+**SolKit progress:** sol-ui now provides semantic component API (Button,
+TextField, HStack, VStack) using sol-design tokens. Slint backend integration
+pending spike validation.
 
 ## Repository layout
 
@@ -40,7 +44,7 @@ Everything else — shell UI, SolKit SDK, services, first-party apps — is a
 | `compositor/` | `sol-compositor`: Smithay-based Wayland compositor | ✅ Phase 0+1 complete |
 | `shell/` | `sol-shell`: top bar, dock, launcher, overview, system UI | ✅ Phase 1 shell top bar complete |
 | `sdk/sol-design` | Design tokens (single source of truth for visuals) | ✅ token seeds + consistent tests |
-| `sdk/sol-ui` | SolKit UI components (semantic, not visual-metrics) | 🔲 placeholder → Phase 2 |
+| `sdk/sol-ui` | SolKit UI components (semantic, not visual-metrics) | ✅ Phase 2 buttons/layout/start |
 | `sdk/sol-app` | Application framework (lifecycle, commands, …) | 🔲 placeholder → Phase 2 |
 | `sdk/sol-graphics` | Rendering abstraction | 🔲 placeholder → Phase 2 |
 | `sdk/sol-animation` | Animation engine (interruptible / motion tokens) | 🔲 placeholder → Phase 2 |

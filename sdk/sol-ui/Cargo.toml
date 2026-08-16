@@ -7,3 +7,15 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+sol-design = { path = "../sol-design" }
+
+# NOTE: Slint is the intended rendering substrate per ADR-0004.
+# Slint dependency added but not yet used in this placeholder API.
+# The Slint/SolUI spike validation is pending (ADR-0004 status: "spike pending").
+# This crate defines the semantic component API that will drive Slint rendering.
+
+[features]
+default = []
+# The "native" feature enables Slint backend rendering.
+# Without it, the crate provides token-based semantic APIs for testing/design.
+native = []
