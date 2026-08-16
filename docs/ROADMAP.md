@@ -336,8 +336,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       gesture progress → UI progress
 - [ ] **Search & Launcher (§28):** default `Super+Space`; Applications / Files /
       Settings / Commands / Calculator to start
-- [ ] **Command / Action API (§21):** typed action + permission layer shared by
-      search / automation / accessibility
+- [x] **Command / Action API (§21):** typed action + permission layer shared by
+      search / automation / accessibility. **API contract accepted in
+      ADR-0013:** caller-attributed action catalog, default-deny grants, trusted
+      consent boundary, and audit are covered by deterministic fixtures;
+      concrete portal/polkit/system-service adapters remain deferred.
 - [ ] **System overlays:** screen-recording indicator, IME candidate window, etc.
 - [ ] Layer-shell popup integration validation (ADR-0004 validation point #1)
 
@@ -349,7 +352,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > interactions.
 
 > **Decision gate (PRD §41):** #10 global menu, #11 tiling product model
-> (if not already settled), #16 search index, #17 System Action API.
+> (if not already settled), #16 search index, #17 System Action API. **#17 is
+> settled at the API-contract level by ADR-0013; production adapters and
+> desktop-session validation remain follow-on work.**
 
 ---
 

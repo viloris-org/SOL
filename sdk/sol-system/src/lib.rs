@@ -5,6 +5,17 @@
 //! crate while `sol-settingsd` remains free to use an in-memory store in tests,
 //! a file today, and an IPC-backed implementation later.
 
+mod actions;
+
+pub use actions::{
+    ActionAuditRecord, ActionAuditStore, ActionAuthorization, ActionDenial, ActionError,
+    ActionKind, ActionRequestId, ActionResult, ActionSource, ConsentDecision, ConsentId,
+    DefaultDenyPolicy, MemoryActionAuditStore, MemoryPermissionStore, PermissionDecision,
+    PermissionGrant, PermissionKey, PermissionPolicy, PermissionStore, PolicyDecision,
+    SystemAction, SystemActionApi, SystemActionCatalog, SystemActionRequest, SystemActionResult,
+    SystemActionService, SystemCapability, UserConsentRequest,
+};
+
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
