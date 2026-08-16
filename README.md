@@ -22,8 +22,9 @@ as a basic daily-use Wayland compositor") is **done**: window management,
 workspaces, multi-monitor, shell IPC, and IME are all implemented and
 validated by integration tests.
 
-Phase 2 M2 started: semantic components (Button, TextField, HStack, VStack)
-and layout engine implemented. Slint/SolUI spike validation (ADR-0004) pending.
+Phase 2 M2 started: semantic components (Button, TextField, Toolbar, TabBar,
+Tab, HStack, VStack) and layout engine implemented. Slint/SolUI spike
+validation (ADR-0004) pending network access for dependency resolution.
 
 ```bash
 cargo test -p sol-compositor --test sol_session
@@ -33,9 +34,9 @@ cargo run -p sol-compositor                       # terminal 1
 WAYLAND_DISPLAY=wayland-sol weston-terminal        # terminal 2
 ```
 
-**SolKit progress:** sol-ui now provides semantic component API (Button,
-TextField, HStack, VStack) using sol-design tokens. Slint backend integration
-pending spike validation.
+**SolKit progress:** sol-ui provides semantic component API (Button,
+TextField, Toolbar, TabBar, Tab, HStack, VStack) using sol-design
+tokens. Slint backend integration pending spike validation.
 
 ## Repository layout
 
