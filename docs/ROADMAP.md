@@ -24,6 +24,14 @@
 | 4 | Shell Experience | Complete desktop interaction model | SOL forms a complete, coherent desktop interaction model | ⏳ In progress |
 | 5 | Daily Driver | Long-term daily use | Developers can use SOL as their primary desktop long-term | ⏳ In progress (foundations) |
 | 6 | Developer Platform | Ecosystem & SDK stability | Third-party devs build high-quality native apps without knowing SOL internals | ⏳ In progress |
+| 7 | OS Foundation | Bootable and recoverable SOL system | Failed boot/recovery/deployment trials retain a firmware-visible known-good path | 🔲 Planned |
+| 8 | Native App Platform | Transactional `.app`, explicit permission, and managed account platform | Compatible app resolution and coordinator-atomic grants survive rollback/crash without authority or data rollback | 🔲 Planned |
+| 9 | Runtime & Ecosystem | Compact apps and coherent adaptive materials | External apps use major/revision/feature runtime contracts without weakening isolation or accessibility | 🔲 Planned |
+
+> **OS rebaseline (2026-08-22):** Phases 0–6 describe the desktop substrate and
+> remain useful engineering history. SOL is now a complete Linux-kernel OS.
+> Phases 7–9 add the boot, image, package, security, and stable runtime work
+> required by that product boundary. See [OS Platform Definition](os-platform.md).
 
 **Do-not-defer-to-the-end themes across phases** (PRD §33): Multi-monitor,
 Fractional Scaling, Suspend/Resume, NVIDIA, Touchpad, Display Hotplug, IME.
@@ -186,6 +194,11 @@ real-hardware DRM/GBM smoke validation remains a hardware follow-up.
 - [x] Layout engine (`HStack` / `VStack` semantic layout, PRD §18) — Implemented
 - [x] `sol-design` full token convergence: typography, spacing, radius,
       material, motion, shadows, color (PRD §19, §19.1)
+- [x] **SOL Fluid Material token foundation (ADR-0023):** semantic
+      `Content/Chrome/Panel/Floating/Control/Sidebar/Dock/Capsule` roles resolve
+      to bounded blur, tint, saturation, edge, shadow, grain, and refraction tokens; reduced
+      transparency and high contrast resolve to solid, non-refractive specs.
+      Real compositor backdrop sampling/refraction remains Phase 4/9 work.
 - [x] Consistency testing: golden-snapshot asserts component-tree output
       contains only token values (tests in sol-design) (§19.1)
 
@@ -348,6 +361,15 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       deterministic app catalog, typed launch / activate / close requests, and
       SolUI keyboard/accessibility navigation. Real compositor activation and
       close adapters remain unimplemented and explicitly report unavailable.
+  - [ ] **Native SOL Dock surface:** bottom-centered `Material::Dock`, Launcher
+        entry, pinned/running/focused state, badges, drag ordering, optional
+        auto-hide, active-output behavior, and compositor activation/minimize.
+  - [ ] **Application Launcher surface:** authenticated `.app` grid/library,
+        Dock-anchored interruptible presentation, `Super+A`, keyboard/a11y,
+        fractional scaling, and reduced-motion/transparency behavior.
+  - [ ] **Left-side window controls:** native and server-side decorations use
+        Close / Minimize / Maximize-Restore; GTK/Qt adapter conformance and
+        generic CSD fallback remain explicit compatibility work.
 - [ ] **Overview / Workspace:** workspace overview, visual switching
   - [x] **Renderer-neutral overview core:** typed workspace/window snapshots,
         accessibility and keyboard model, switch/move-window intents, and a
@@ -365,6 +387,27 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       intents. Read-only NetworkManager/PipeWire/UPower status adapters are
       validated; compositor activation and write-capable system adapters remain
       deferred.
+- [ ] **Top-bar spatial contract (ADR-0025):** foreground app identity/global
+      menu fixed at upper-left; Live Capsule, typed status items, Notification
+      Center, and system status fixed at upper-right across narrow, localized,
+      scaled, and multi-display layouts.
+- [ ] **Global application menu:** compositor-focus-authenticated App ID,
+      atomic command snapshots, overflow, keyboard/accessibility, SolKit command
+      export, and GTK/Qt public menu/action adapters.
+- [ ] **Typed application status/tray registry:** authenticated declarative
+      icons/state/actions, Shell-owned rendering/overflow/rate limits, and a
+      constrained legacy bridge with no embedded arbitrary client windows.
+- [ ] **Live Capsule service and surface:** one upper-right anchor multiplexing
+      leased declarative live activities; typed Open/Pause/Resume/Stop/End
+      actions; privacy-first ordering; crash/expiry cleanup; keyboard/a11y;
+      `Material::Capsule` and anchored interruptible expansion.
+  - [ ] **Broker-authoritative privacy capsules:** microphone, camera, screen
+        capture, location, and remote-control state comes from real capability
+        leases, cannot be hidden/replaced by apps, and Stop/Revoke terminates
+        the underlying broker session.
+  - [ ] **Application registration:** declared `shell.live-activity` plus
+        explicit atomic permission; registration grants presentation only and
+        cannot acquire media/capture/background authority.
 - [x] **Notification service foundation:** typed `NotificationApi` +
       `sol-notificationd` lifecycle, replacement, action, query, and storage
       boundary, including a Shell-consumed `NotificationDbusProxy` adapter
@@ -452,15 +495,16 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 ### M4 success criterion
 
 > "SOL forms a complete, coherent desktop interaction model." Judged by: dock /
-> launcher / overview / notifications / quick settings / touchpad gestures
-> working under one animation + token system, with interruptible and reversible
-> interactions.
+> launcher / global menu / right-side status and Live Capsule / overview /
+> notifications / quick settings / touchpad gestures working under one
+> animation + token system, with interruptible and reversible interactions and
+> broker-authoritative privacy indicators.
 
-> **Decision gate (PRD §41):** #10 global menu, #11 tiling product model
-> (if not already settled), #16 search index, #17 System Action API. **#16 is
-> settled by ADR-0014's local/private application catalog; #17 is settled at
-> the API-contract level by ADR-0013. Production adapters and desktop-session
-> validation remain follow-on work.**
+> **Decision gate (PRD §41):** #10 global menu existence/placement is settled
+> by ADR-0025; its IPC schema remains implementation work. #11 tiling remains
+> open. #16 search is settled by ADR-0014; #17 System Action is settled at the
+> API-contract level by ADR-0013. Production adapters and desktop-session
+> validation remain follow-on work.
 
 ---
 
@@ -588,9 +632,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [x] **Authorization audit persistence foundation:** `FileActionAuditStore`
       durably preserves typed authorization decisions in private atomically
       replaced files with strict round-trip validation.
-- [ ] **Production permission model (§31):** trusted consent UI, polkit/portal
-      policy, and explicit authorization for recording, camera, microphone,
-      location, secrets, and system settings remain.
+- [ ] **Production permission model (§31 / ADR-0021):** trusted consent UI,
+      kernel/broker policy, minimum-scope permission atoms, and one durable
+      grant + audit + lease/consumption transaction remain. The current
+      separate stores are intentionally not considered production-atomic.
   - [x] **Trusted consent surface foundation:** a renderer-neutral Shell prompt
         presents the exact caller, source, capability, typed action, and policy
         rationale; SolUI keyboard/accessibility choices resolve allow-once,
@@ -605,11 +650,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > external desktop or laptop, suspend/resume, NVIDIA or AMD), with IME and
 > share/record available.
 
-> **Production gate:** by the end of this Phase, installable packages for the
-> official SOL Arch repos (`[sol-core]` / `[sol-apps]` / `[sol-sdk]`) should
-> exist, and the `sol-desktop` meta package should install with a single
-> `pacman -S` (PRD §7 / §30). **The Flatpak sandbox decision (§41 #12)
-> settles here.**
+> **Historical gate:** the former Arch-repository installation target is
+> retained as a transitional build check only. ADR-0019 through ADR-0023 move
+> production boot, packages, and sandbox enforcement into Phases 7–9.
 
 ---
 
@@ -649,8 +692,8 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [x] **SDK environment doctor:** `scripts/solkit-doctor.sh` validates the
         toolchain, a locked Cargo manifest, starter copy-out behavior, and an
         optional full workspace check without modifying the target project.
-- [ ] **Packaging polish:** pacman/AUR integration, signed-repo trust chain
-      (AUR not in the official trust chain, §30)
+- [ ] **Transitional packaging polish:** preserve pacman build/install checks
+      for developer bootstrap while the native OS image and `.app` path is built
   - [x] **Isolated local split-package build:**
         `packaging/arch/validate-local-build.sh` archives the current Git
         revision with the required `sol-0.1.0/` prefix, runs
@@ -659,9 +702,8 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         package. This is not a claim of a public license or repository URL,
         published archive/checksum, signing, repository publication, or real
         pacman installation validation.
-- [x] **Store backend (§41 #15, optional):** ADR-0018 settles pacman/AUR as
-      the package backend; a future store may wrap it but cannot create a
-      second package or trust path.
+- [x] **Historical Store backend decision:** ADR-0018 recorded the former
+      pacman/AUR direction; ADR-0020 supersedes it for the OS rebaseline.
 - [x] **SDK permission tiers (§23):** ADR-0017 formalizes Public, Restricted,
       and Private contracts and their dependency direction.
 - [x] **Monorepo review (§39):** ADR-0017 retains the monorepo until a public
@@ -672,12 +714,145 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 
 > "Third-party developers can build high-quality native apps without
 > understanding SOL internals." Judged by: an external developer uses SolKit
-> templates + docs to independently build and distribute an app into
-> pacman/AUR.
+> templates + docs to independently build an app with the currently available
+> SDK workflow. Native `.app` delivery is the Phase 9 production gate.
 
-> **Non-goals (PRD §37, at any phase):** self-built kernel / init / audio /
-> network stacks, full app store, full AI assistant, mobile support, office
-> suite, a full immutable OS, or early third-party SDK stability promises.
+> **Non-goals:** self-built kernel / init / audio / network stacks, commercial
+> store/payments, full AI assistant, mobile support, office suite, or premature
+> multi-major runtime support.
+
+---
+
+## Phase 7 — OS Foundation
+
+> **Goal:** boot, update, validate, roll back, and recover a SOL-owned system
+> image on supported x86-64 UEFI hardware.
+
+### Milestone M7 deliverables
+
+- [ ] `sol-image`: reproducible deployment manifests binding each slot's kernel,
+      initrd, root-image digest, runtime descriptors, and generation.
+- [ ] `sol-boot`: redundant signed UEFI copies, artifact verification, A/B
+      deployment selection, bounded retry, and firmware-visible fallback.
+- [ ] Two-phase `sol-boot`/recovery update: inactive-copy write and verification,
+      one-shot trial, promotion, and automatic return to the retained copy.
+- [ ] Early userspace boot-success protocol with authenticated slot/version.
+- [ ] Recovery image that verifies, repairs, or reinstalls without the Shell.
+- [ ] Installer with explicit disk-layout, encryption, key enrollment, and
+      recovery behavior for the first hardware target.
+- [ ] Hardware CI: clean install; interrupted EFI/recovery/deployment update;
+      corrupted image; failed trial boot; firmware-variable failure; power loss;
+      automatic fallback; manual recovery; and user-data preservation.
+
+### M7 success criterion
+
+> A failed staged EFI, recovery, or system-deployment update cannot strand the
+> machine: firmware can still reach a retained `sol-boot`, `sol-boot` can still
+> reach a signed known-good deployment and independent recovery, and user data
+> is unchanged.
+
+---
+
+## Phase 8 — Native Application Platform
+
+> **Goal:** make `.app` the signed, isolated, transactional unit of native SOL
+> application installation and execution.
+
+### Milestone M8 deliverables
+
+- [ ] Canonical `.app` manifest and deterministic container encoding, including
+      runtime major, minimum contract revision, and required features.
+- [ ] `sol-bundle` build/lint/inspect/sign/verify tools with SBOM/provenance.
+- [ ] `sol-pkg` client and privileged `sol-packaged` transaction service.
+- [ ] Signed repository metadata, publisher trust, revocation, offline
+      verification, and content-addressed machine-wide store.
+- [ ] Atomic install/update/remove/rollback with interrupted-transaction tests.
+- [ ] Per-deployment app compatibility resolver: first non-revoked compatible
+      hash in the recorded preferred/fallback chain, or explicit unavailable
+      state; no boot or app-data rollback and no display-version ordering.
+- [ ] Preferred/effective state tests: update prepends, explicit app rollback
+      truncates newer resolution candidates, OS rollback never rewrites the
+      preferred pointer, and reinstall creates a fresh chain.
+- [ ] Garbage-collection protection for a compatible app version for each
+      retained known-good deployment when one was previously installed.
+- [ ] `sol-securityd`: authenticated App ID, isolated data, default-deny
+      sandbox, grant persistence, revocation, and bounded audit.
+- [ ] Unified atomic permission ledger: explicit grant, audit record, and
+      capability lease (or allow-once consumption) commit together or not at
+      all; unrelated permissions retain separate controls and revocation.
+- [ ] Durable/release identity policy: same-lineage update/rollback retains
+      grants but refreshes handles; new capabilities and publisher discontinuity
+      inherit nothing; uninstall/reinstall requires new consent.
+- [ ] Kernel enforcement through namespaces/cgroups/seccomp plus selected
+      Landlock/LSM policy; direct-service bypass tests.
+- [ ] File/device/media/secret portals with trusted point-of-use Shell consent.
+- [ ] `sol-securityd` participant coordinator: transaction IDs, authoritative
+      grant/audit ledger, commit proofs, authorization generations, recovery.
+- [ ] `sol-accountsd`: device/connected account metadata, provider adapters,
+      lifecycle, and prepared app × account × scope associations.
+- [ ] `sol-vaultd`: encrypted credentials, hardware-backed sealing where
+      available, recovery keys, commit-proof-bound scoped leases, and
+      generation-fenced removal.
+
+### M8 success criterion
+
+> Two `.app` bundles with conflicting private dependencies run side by side; an
+> interrupted update leaves the old version active; OS rollback resolves an
+> older compatible app or an explicit unavailable state; undeclared, implicit,
+> partially committed, stale-generation, or revoked authority fails at the
+> broker boundary; and an app cannot enumerate an account or retain its durable
+> credential without an explicit coordinator-committed account-scoped grant.
+
+---
+
+## Phase 9 — Runtime and Ecosystem
+
+> **Goal:** let external developers ship compact native apps by sharing only a
+> stable SOL platform while keeping every other dependency private.
+
+### Milestone M9 deliverables
+
+- [ ] Define and publish the `sol-runtime-1` signed descriptor: stable ABI,
+      monotonically increasing contract revision, named features, and versioned
+      IPC protocols; explicitly exclude internal Rust ABI.
+- [ ] SolKit language bindings, compatibility tests, API reference, migration
+      guide, and lifecycle policy for runtime major slots.
+- [ ] `.app` templates, reproducible release pipeline, signing workflow,
+      permission linting, local sandbox runner, and repository publishing.
+- [ ] Framework coverage for UI, lifecycle, accessibility, localization,
+      settings, storage, notifications, documents, and capability brokers.
+- [ ] Compatibility recipes for Wayland-native GTK, Qt, SDL, Flutter, and
+      Electron apps that vendor their own non-SOL runtime.
+- [ ] `sol-gtk` and `sol-qt` adapters, bundled at toolkit-compatible versions,
+      for lifecycle, documents, notifications, atomic permissions, accounts,
+      appearance, accessibility, windowing, and semantic material roles.
+- [ ] Native / Integrated / Compatible conformance suite: identical sandbox,
+      denial, account, update, and rollback semantics across support levels;
+      no host toolkit/plugin resolution or global theme injection.
+- [ ] Constrained semantic-material Wayland protocol prototype: clients request
+      roles/regions only; compositor returns no pixels and can consolidate,
+      reject, or use a solid fallback.
+- [ ] Software catalog as a client of `sol-packaged`, with no alternate trust
+      or installation path.
+- [ ] Side-by-side runtime-major tests plus system-rollback compatibility tests
+      proving newest-compatible app selection, unavailable-state behavior,
+      protected retention, and app-data preservation.
+- [ ] Compositor-backed SOL Fluid Material: secure backdrop groups, adaptive
+      contrast, interruptible materialization, nested-glass limits, reduced-
+      transparency/high-contrast fallbacks, and GPU/power frame-budget gates.
+
+### M9 success criterion
+
+> An external developer builds, signs, installs, runs, updates, and rolls back
+> a `.app` that carries only app-specific/non-SOL dependencies and accesses
+> protected resources/accounts solely through explicitly granted SOL framework
+> capabilities, while system materials preserve hierarchy, accessibility, and
+> frame budgets on supported and fallback render paths. GTK/Qt apps with
+> incompatible private runtimes coexist and retain the same security/system-
+> capability guarantees as SolKit apps. Rolling the OS back deterministically
+> selects the first non-revoked retained runtime-compatible hash from the
+> preferred release's fallback chain or exposes an
+> explicit per-app unavailable state without blocking boot or changing app data.
 
 ---
 
@@ -689,31 +864,63 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 | Consistency CI (golden snapshot) | Phase 2 | Turn "consistency" into a continuously verifiable mechanism (§19.1) |
 | App identity format | Phase 2/3 | Prerequisite for launcher/commands/notifications/store (§41 #7) |
 | Permission layer (typed action) | Phase 4 | Shared by search/automation/accessibility/AI (§21/§29) |
-| Security model | Phase 4–6 | Reuse polkit + portal + Secret Service; sandbox settles in Phase 5 |
+| Security model | Phase 4–8 | Typed action foundation evolves into ADR-0021 kernel/broker enforcement |
+| Atomic permissions | Phase 8 | Each grant is one user/app/capability/resource/duration; grant + audit + lease is one commit |
+| Managed accounts | Phase 8 | `sol-accountsd`/`sol-vaultd`; apps receive scoped handles, not durable credentials |
+| Fluid material | Phase 2/4/9 | Semantic tokens now; protected compositor effects and fallback QA later |
+| Shell spatial grammar | Phase 4 | ADR-0025 fixes Dock/menu/window-control/right-zone placement and Live Capsule trust |
+| Toolkit compatibility | Phase 9 | Bundled private runtime + optional official adapter; capability equality, not pixel-identical widgets |
+| Boot / deployment trust | Phase 7 | Redundant EFI/recovery trial state, slot-bound signed deployments, boot success, and fallback are one contract |
+| Package identity | Phase 8 | `.app` App ID/publisher/hash must remain correlated from repository to process |
+| Runtime compatibility | Phase 9 | Stable major slots; C-compatible ABI + versioned IPC, never internal Rust ABI |
 | Hardware test matrix | throughout | AMD → Intel → NVIDIA; laptop/desktop; single/multi-display; HiDPI (§33) |
 
-## Long-term platform direction (after Phase 6, PRD §42)
+## Long-term platform direction (after Phase 9, PRD §42)
 
 ```text
 Linux
   ↓
-SOL Desktop Runtime
+SOL Boot + System Image
+  ↓
+SOL Security + Package Services
+  ↓
+SOL Framework Runtime
   ↓
 SolKit
   ↓
 SOL Applications → Third-party Applications
 ```
 
-- **Technical-asset focus:** Compositor + Desktop Runtime + Application
-  Framework + Design System + First-party Applications.
+- **Technical-asset focus:** Boot + System Image + Package Manager + Security +
+  Compositor + Framework Runtime + Design System + Applications.
 - **Direction call:** users should not perceive underlying complexity because
-  of Linux / Wayland / pacman — what they see is *SOL*.
-- **Ongoing evaluation:** decoupling SOL Desktop and SOL OS by layer
-  (PRD §3); long-term ARM64 support (§32).
+  of Linux / Wayland — what they see is *SOL*.
+- **Ongoing evaluation:** long-term ARM64 support (§32), after the x86-64 boot
+  and recovery contract is proven.
 
 ---
 
 ## Revision history
+
+- **2026-08-22** — Rebased SOL from an Arch-installable desktop platform to a
+  complete Linux-kernel OS. Added Phases 7–9 for redundant trial-updated
+  `sol-boot`/recovery, slot-bound signed A/B deployments,
+  `sol-pkg`/`sol-packaged`, self-contained `.app` bundles, default-deny sandbox
+  permissions, and side-by-side SOL Runtime majors.
+
+- **2026-08-22** — Tightened the OS contract to minimum, explicit, atomic
+  permission grants; added system-managed accounts/credential vaults and the
+  SOL Fluid Material design contract with accessible solid fallbacks.
+
+- **2026-08-22** — Defined runtime major/revision/feature compatibility and
+  per-deployment app fallback, same-publisher grant continuity with fresh
+  handles, uninstall/reinstall re-consent, and `sol-securityd`-coordinated
+  account/vault participant transactions with generation-fenced revocation.
+
+- **2026-08-22** — Defined Native, Integrated, and Compatible application
+  levels. GTK/Qt and other toolkits bundle private runtimes and optional
+  toolkit-matching SOL adapters while retaining identical security, account,
+  update, and rollback guarantees.
 
 - **2026-08-15** — Phase 1 M1 shell + IME milestones implemented and validated
   via CI. ADR-0006 accepts D-Bus for compositor↔shell IPC. layer-shell +

@@ -22,7 +22,7 @@ sol-design
 ├── typography/  named sizes (Body/Title/Label/Display + weight)
 ├── spacing/     spacing scale (Xs/Sm/Md/Lg/Xl)
 ├── radius/      corner-radius scale (None/Sm/Md/Full)
-├── material/    surface hierarchy (Base/Panel/Floating → shadow/blur)
+├── material/    SOL fluid roles + accessibility-aware render specifications
 ├── motion/      motion tiers (Fast/Panel/Window/Workspace → duration+curve)
 └── shadows/     shadow specs
 ```
@@ -36,7 +36,14 @@ sol-design
 
 ## Status
 
-**Phase 0 seed present.** `color.rs` / `motion.rs` / `spacing.rs` / `radius.rs`
-/ `material.rs` / `typography.rs` provide placeholder-but-constrained tokens;
-theme colors are not finished design work. `sol-files` (Phase 3) will be the
-dogfooding baseline that polishes the token shape.
+**Token foundation present.** `material.rs` defines `Content`, `Chrome`,
+`Panel`, `Floating`, `Control`, `Sidebar`, `Dock`, and `Capsule` fluid-material
+roles with solid reduced-transparency/high-contrast fallbacks. The values are
+renderer-neutral design contracts; compositor-backed sampling, adaptive
+luminance, refraction, and hardware performance validation remain future work.
+Theme colors are not finished design work. `sol-files` remains the dogfooding
+baseline.
+
+Material rules come from [ADR-0023](../../docs/decisions/0023-sol-fluid-material.md):
+dense content stays solid, glass expresses functional hierarchy, nested light
+glass consolidates, and applications never receive backdrop pixels.

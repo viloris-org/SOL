@@ -1,10 +1,14 @@
 # ADR-0018: Package backend for SOL applications
 
-- **Status:** Accepted (Phase 6 decision)
+- **Status:** Superseded by ADR-0020
 - **Date:** 2026-08-16
 - **Target phase:** Phase 6
 
 ## Context
+
+> Historical decision: the 2026-08-22 OS rebaseline replaced this backend with
+> the native `sol-pkg` / `.app` architecture. This file remains as decision
+> history and must not be treated as current direction.
 
 The PRD describes pacman and AUR as SOL's system and desktop application
 delivery mechanisms. The roadmap leaves a store backend as an optional

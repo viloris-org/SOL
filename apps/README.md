@@ -40,8 +40,8 @@ All applications benefit
 
 ## See also
 
-- [PRD §24 First-party applications](../PRD.md#24-first-party-applications)
-- [PRD §25 Files](../PRD.md#25-files)
-- [PRD §26 Settings](../PRD.md#26-settings)
-- [PRD §27 Terminal](../PRD.md#27-terminal)
-- [Roadmap →](../ROADMAP.md)
+- [PRD §24 First-party applications](../docs/PRD.md#24-first-party-applications)
+- [PRD §25 Files](../docs/PRD.md#25-files)
+- [PRD §26 Settings](../docs/PRD.md#26-settings)
+- [PRD §27 Terminal](../docs/PRD.md#27-terminal)
+- [Roadmap →](../docs/ROADMAP.md)

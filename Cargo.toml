@@ -26,6 +26,7 @@ version = "0.1.0"
 edition = "2024"
 repository = "https://example.invalid/sol"
 homepage = "https://example.invalid/sol"
+license = "BSD-3-Clause"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

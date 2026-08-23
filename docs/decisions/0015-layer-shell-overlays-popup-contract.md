@@ -59,3 +59,10 @@ candidate-window and recording-indicator producers.
   policy per overlay.
 - This enables, but does not deliver, notification, quick-settings, IME, and
   recording UI.
+
+## Shell spatial addendum
+
+ADR-0025 applies this trusted popup boundary to the upper-left global menu,
+upper-right status/Live Capsule, and their anchored expansion surfaces. Apps
+provide attributed declarative state; the Shell remains the renderer/input
+owner.

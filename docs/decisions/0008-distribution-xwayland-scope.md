@@ -1,6 +1,6 @@
 # 8. Distribution and X11 scope: pacman/AUR-first, drop XWayland
 
-- **Status:** Accepted
+- **Status:** Partially superseded by ADR-0019 and ADR-0020 (X11 decision remains accepted)
 - **Date:** 2026-08-15
 - **Target phase:** Phase 1+ (Distribution throughout)
 
@@ -10,6 +10,10 @@ Two related scope decisions were folded into the PRD on 2026-08-15 and are
 recorded here so the first-party install / compatibility story is explicit.
 
 ## Distribution
+
+> Historical distribution decision: ADR-0019 and ADR-0020 supersede this
+> section after SOL became a complete OS. The X11/XWayland section below
+> remains current.
 
 SOL desktop applications distribute via **pacman / AUR**, not Flatpak-first
 (PRD §30, §5). SOL maintains its own Arch repositories:

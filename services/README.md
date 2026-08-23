@@ -25,7 +25,7 @@ protocols to the compositor, shell, and apps.
 
 ## See also
 
-- [PRD §26 Settings](../../PRD.md#26-settings)
-- [PRD §21.1 IME](../../PRD.md#211-input-method-ime)
+- [PRD §26 Settings](../docs/PRD.md#26-settings)
+- [PRD §21.1 IME](../docs/PRD.md#211-input-method-ime)
 - [ADR-0007 IME decision](../docs/decisions/0007-ime-frontend-fcitx5-engine.md)
-- [Roadmap →](../ROADMAP.md)
+- [Roadmap →](../docs/ROADMAP.md)

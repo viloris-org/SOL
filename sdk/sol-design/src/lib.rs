@@ -46,7 +46,7 @@ mod consistency_tests {
             color::Color::HoverOverlay,
             color::Color::Error,
         ];
-        
+
         for c in colors {
             let rgba = c.rgba();
             assert!(rgba.0 >= 0.0 && rgba.0 <= 1.0);
@@ -66,7 +66,7 @@ mod consistency_tests {
             spacing::Spacing::Lg,
             spacing::Spacing::Xl,
         ];
-        
+
         for s in spacings {
             assert!(s.px() > 0.0);
         }
@@ -81,7 +81,7 @@ mod consistency_tests {
             radius::Radius::Md,
             radius::Radius::Full,
         ];
-        
+
         for r in radii {
             assert!(r.px() >= 0.0);
         }
@@ -97,7 +97,7 @@ mod consistency_tests {
             motion::Motion::Window,
             motion::Motion::Workspace,
         ];
-        
+
         for m in motions {
             let spec = m.spec();
             assert!(spec.duration_ms <= 1000);
@@ -116,12 +116,44 @@ mod consistency_tests {
             material::Elevation::Panel,
             material::Elevation::Floating,
         ];
-        
+
         for e in elevations {
             let shadow = e.shadow();
             assert!(shadow.blur >= 0.0);
             assert!(shadow.offset_y >= 0.0);
             assert!(shadow.opacity >= 0.0 && shadow.opacity <= 1.0);
+        }
+    }
+
+    /// Fluid material tokens stay bounded and accessibility modes remove
+    /// backdrop-dependent effects.
+    #[test]
+    fn material_tokens_are_bounded_and_have_solid_fallbacks() {
+        let materials = [
+            material::Material::Content,
+            material::Material::Chrome,
+            material::Material::Panel,
+            material::Material::Floating,
+            material::Material::Control,
+            material::Material::Sidebar,
+            material::Material::Dock,
+            material::Material::Capsule,
+        ];
+
+        for material in materials {
+            let fluid = material.spec(material::MaterialMode::Fluid);
+            assert!(fluid.backdrop_blur >= 0.0);
+            assert!(fluid.saturation >= 1.0);
+            assert!((0.0..=1.0).contains(&fluid.tint_opacity));
+            assert!((0.0..=1.0).contains(&fluid.edge_highlight_opacity));
+            assert!((0.0..=1.0).contains(&fluid.shadow_opacity));
+            assert!((0.0..=1.0).contains(&fluid.refraction));
+            assert!((0.0..=1.0).contains(&fluid.grain_opacity));
+
+            let reduced = material.spec(material::MaterialMode::ReducedTransparency);
+            assert_eq!(reduced.backdrop_blur, 0.0);
+            assert_eq!(reduced.refraction, 0.0);
+            assert_eq!(reduced.tint_opacity, 1.0);
         }
     }
 
@@ -134,14 +166,16 @@ mod consistency_tests {
             typography::FontStyle::Label,
             typography::FontStyle::Display,
         ];
-        
+
         for s in styles {
             let spec = s.spec(1.0);
             assert!(spec.pixels > 0.0);
-            assert!(spec.weight == typography::FontWeight::Regular ||
-                    spec.weight == typography::FontWeight::Medium ||
-                    spec.weight == typography::FontWeight::SemiBold ||
-                    spec.weight == typography::FontWeight::Bold);
+            assert!(
+                spec.weight == typography::FontWeight::Regular
+                    || spec.weight == typography::FontWeight::Medium
+                    || spec.weight == typography::FontWeight::SemiBold
+                    || spec.weight == typography::FontWeight::Bold
+            );
         }
     }
 }

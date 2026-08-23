@@ -35,4 +35,4 @@ cargo test -p sol-compositor --test sol_session
 As things stabilize, `tests/` grows suites that combine multiple components:
 compositor + shell over typed IPC, compositor + a SolKit app, services
 (`notificationd` / `settingsd`) talking to the shell, and end-to-end IME.
-See [docs/ROADMAP.md](../../docs/ROADMAP.md).
+See [docs/ROADMAP.md](../docs/ROADMAP.md).

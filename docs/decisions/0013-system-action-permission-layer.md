@@ -7,6 +7,15 @@
   boundary for policy prompts; persist an audit decision before handing an
   authorization to a system adapter.
 
+> **OS rebaseline addendum (2026-08-22):** ADR-0021 keeps this typed API as a
+> request/consent foundation and adds the production enforcement boundary:
+> authenticated `.app` identity, pre-execution sandbox construction,
+> kernel/LSM policy, capability brokers, revocation, and audit. An
+> `Authorized` result here is never sufficient on its own to weaken that
+> enforcement. `sol-securityd` is the authoritative transaction coordinator;
+> same-lineage updates may retain durable grants but receive fresh handles,
+> while uninstall/reinstall and publisher discontinuity inherit no authority.
+
 ## Context
 
 Search, shell launcher, Quick Settings, notifications, portals, automation,

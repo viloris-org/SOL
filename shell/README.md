@@ -1,8 +1,12 @@
 # sol-shell
 
 SOL's desktop shell: top bar, dock, launcher, overview, notification center,
-quick settings, and system overlays. (PRD §11; ADR-0003 explicitly rules out
-Quickshell.)
+quick settings, global application menu, typed application status, Live
+Capsule, and system overlays. (PRD §11; ADR-0003 explicitly rules out
+Quickshell; ADR-0025 fixes the spatial/trust contract.)
+
+See [Shell Spatial and Live Activity Contract](../docs/shell-experience.md) for
+the normative layout and behavior.
 
 ## Position in the architecture
 
@@ -21,12 +25,27 @@ sol-shell
 
 ## Status
 
-**Phase 0 scaffold** (`main.rs` only prints a notice; nothing implemented).
+**Phase 4 foundations in progress.** The repository contains renderer-neutral
+Dock/Launcher, top-bar, overview, notifications, Quick Settings, consent, and
+overlay models. Native compositor-backed surfaces remain incomplete.
 
 - The first shell surface (layer-shell top bar) is a **Phase 1** Milestone M1
   deliverable.
 - The full desktop interaction model (Dock / Launcher / Overview / notifications /
-  quick settings / touchpad gestures) is **Phase 4**.
+  quick settings / global menu / Live Capsule / touchpad gestures) is **Phase 4**.
+
+## Fixed shell geography
+
+- Bottom center: SOL Dock and Application Launcher.
+- Window upper-left: Close, Minimize, Maximize/Restore.
+- Screen upper-left: compositor-authenticated foreground app menu.
+- Screen upper-right: Live Capsule, typed app status items, Notification Center,
+  and system status/Quick Settings.
+- Application navigation: `Material::Sidebar`; dense content stays solid.
+
+Live Capsule is Shell-rendered from attributed declarative registrations.
+Microphone, camera, capture, location, and remote-control indicators come from
+the capability broker and cannot be hidden by an app.
 
 ## Key dependencies
 

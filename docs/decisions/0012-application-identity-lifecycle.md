@@ -5,6 +5,13 @@
 - **Decision date:** 2026-08-16
 - **Target phase:** Phase 2; consumed by Phase 3 apps and Phase 4 shell/services
 
+> **OS security addendum (2026-08-22):** `AppId` remains the durable product
+> identifier across releases. ADR-0021 defines the stronger security identity as
+> `AppId` plus verified publisher lineage, while bundle hash and process
+> generation identify a particular release/instance. Same-lineage updates may
+> retain durable grants but never live handles; publisher discontinuity and
+> uninstall/reinstall inherit no authority.
+
 ## Context
 
 PRD §20 gives SolApp ownership of application lifecycle, while PRD §21 and

@@ -6,6 +6,7 @@
 
 use crate::{
     color::{Color, Rgba},
+    material::{Material, MaterialMode, MaterialSpec},
     motion::{Motion, MotionSpec},
     typography::{FontSpec, FontStyle},
 };
@@ -37,6 +38,16 @@ pub enum MotionPreference {
     #[default]
     Full,
     /// Remove non-essential transition time and spring motion.
+    Reduced,
+}
+
+/// Transparency preference selected by the user or accessibility service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransparencyPreference {
+    /// Use adaptive SOL fluid materials where the semantic role permits them.
+    #[default]
+    Fluid,
+    /// Replace translucent materials with solid surfaces.
     Reduced,
 }
 
@@ -78,6 +89,8 @@ pub struct TokenMode {
     pub contrast: Contrast,
     /// Requested full or reduced motion.
     pub motion: MotionPreference,
+    /// Requested fluid or reduced-transparency materials.
+    pub transparency: TransparencyPreference,
     /// Requested named text scale.
     pub text_scale: TextScale,
 }
@@ -89,6 +102,7 @@ impl TokenMode {
             theme: Theme::Light,
             contrast: Contrast::Standard,
             motion: MotionPreference::Full,
+            transparency: TransparencyPreference::Fluid,
             text_scale: TextScale::Default,
         }
     }
@@ -110,6 +124,12 @@ impl TokenMode {
     /// Turn on reduced motion without changing other preferences.
     pub const fn reduced_motion(mut self) -> Self {
         self.motion = MotionPreference::Reduced;
+        self
+    }
+
+    /// Replace translucent materials with solid, non-refractive surfaces.
+    pub const fn reduced_transparency(mut self) -> Self {
+        self.transparency = TransparencyPreference::Reduced;
         self
     }
 
@@ -169,6 +189,16 @@ impl TokenMode {
         }
     }
 
+    /// Resolve a semantic material under transparency and contrast settings.
+    pub const fn material_spec(self, material: Material) -> MaterialSpec {
+        let mode = match (self.contrast, self.transparency) {
+            (Contrast::High, _) => MaterialMode::HighContrast,
+            (_, TransparencyPreference::Reduced) => MaterialMode::ReducedTransparency,
+            _ => MaterialMode::Fluid,
+        };
+        material.spec(mode)
+    }
+
     /// Resolve named typography under the selected text-scale preference.
     pub fn typography(self, style: FontStyle) -> FontSpec {
         style.spec(self.text_scale.factor())
@@ -211,5 +241,24 @@ mod tests {
             .with_text_scale(TextScale::Large)
             .typography(FontStyle::Body);
         assert!(enlarged.pixels > normal.pixels);
+    }
+
+    #[test]
+    fn reduced_transparency_removes_blur_and_refraction() {
+        let spec = TokenMode::light()
+            .reduced_transparency()
+            .material_spec(Material::Panel);
+        assert_eq!(spec.backdrop_blur, 0.0);
+        assert_eq!(spec.refraction, 0.0);
+        assert_eq!(spec.tint_opacity, 1.0);
+    }
+
+    #[test]
+    fn high_contrast_forces_a_solid_bounded_material() {
+        let spec = TokenMode::dark()
+            .high_contrast()
+            .material_spec(Material::Floating);
+        assert_eq!(spec.backdrop_blur, 0.0);
+        assert!(spec.explicit_boundary);
     }
 }

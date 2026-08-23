@@ -1,4 +1,9 @@
-use sol_design::{color::Color, motion::Motion, spacing::Spacing};
+use sol_design::{
+    color::Color,
+    material::{Material, MaterialMode},
+    motion::Motion,
+    spacing::Spacing,
+};
 
 #[test]
 fn spacing_scale_is_monotonic() {
@@ -38,4 +43,25 @@ fn motion_has_progressive_duration() {
     assert!(d(Motion::Fast) < d(Motion::Panel));
     assert!(d(Motion::Panel) < d(Motion::Window));
     assert!(d(Motion::Window) < d(Motion::Workspace));
+}
+
+#[test]
+fn fluid_materials_have_solid_accessibility_fallbacks() {
+    for material in [
+        Material::Content,
+        Material::Chrome,
+        Material::Panel,
+        Material::Floating,
+        Material::Control,
+        Material::Sidebar,
+        Material::Dock,
+        Material::Capsule,
+    ] {
+        let fluid = material.spec(MaterialMode::Fluid);
+        let reduced = material.spec(MaterialMode::ReducedTransparency);
+        assert!((0.0..=1.0).contains(&fluid.tint_opacity));
+        assert_eq!(reduced.backdrop_blur, 0.0);
+        assert_eq!(reduced.refraction, 0.0);
+        assert_eq!(reduced.tint_opacity, 1.0);
+    }
 }

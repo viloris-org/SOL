@@ -20,7 +20,7 @@ through Smithay's built-in handling — nothing custom was needed.
 
 Decorations policy (server-side vs client-side), `layer-shell` integration
 for the shell, screencopy for recording, and the IPC schema are all Phase 1
-work (see [roadmap →](../../docs/ROADMAP.md)).
+work (see [roadmap →](../docs/ROADMAP.md)).
 
 ## Landing a protocol here
 

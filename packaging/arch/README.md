@@ -1,8 +1,15 @@
-# Arch packaging
+# Transitional Arch packaging
 
-This directory is the source-package foundation for SOL's official Arch
-repositories. It produces the currently buildable executable packages from one
-versioned SOL source archive:
+> **OS rebaseline:** this directory is retained for developer bootstrap and
+> historical split-package validation. It is not the target SOL OS package
+> manager, native application format, or production trust path. The current
+> direction is `sol-pkg`/`sol-packaged`, signed system images, and signed
+> self-contained `.app` bundles; see
+> [OS Platform Definition](../../docs/os-platform.md) and ADR-0020.
+
+This directory was the source-package foundation for the former official Arch
+repository direction. It still produces the currently buildable executable
+packages from one versioned SOL source archive:
 
 | Repository | Packages currently represented |
 |---|---|
@@ -31,8 +38,8 @@ recipe independent of an unpublished source host while making the required
 release artifact and verification step explicit.
 
 The current workspace repository URL is a deliberate placeholder and there is
-no signed release archive or public license declaration yet. Consequently this
-directory does **not** claim that source retrieval, source verification,
+no signed release archive yet. The source is licensed under BSD-3-Clause, but
+this directory does **not** claim that source retrieval, source verification,
 signed repositories, AUR publication, or installation has been validated.
 
 ## Isolated local build validation
@@ -50,9 +57,9 @@ all split package archives, their executable payloads, the installed Wayland
 session file, and the intentionally empty `sol-desktop` meta-package payload.
 It neither installs packages nor changes pacman configuration.
 
-This is only a local source-archive build proof. It does not provide a public
-license, canonical repository URL, published archive/checksum, signing trust
-chain, repository publication, or a real pacman installation validation.
+This is only a local source-archive build proof. It does not provide a
+canonical repository URL, published archive/checksum, signing trust chain,
+repository publication, or a real pacman installation validation.
 
 For a prepared release archive, run from this directory:
 
@@ -78,10 +85,10 @@ release archive that has not yet been published.
 
 ## Scope
 
-SOL distributes through pacman rather than Flatpak-first (PRD section 30 and
-ADR-0008). The official trust chain is planned around signed `[sol-core]`,
-`[sol-apps]`, and `[sol-sdk]` repositories. AUR packages are community
-maintained and are not part of that trust chain.
+Pacman packages are useful for current development environments and may remain
+inputs to system-image construction. They do not install native `.app` bundles,
+construct the application sandbox, or commit production SOL system updates.
 
-See [ADR-0008](../../docs/decisions/0008-distribution-xwayland-scope.md) and
-the [roadmap](../../docs/ROADMAP.md).
+See [ADR-0019](../../docs/decisions/0019-os-product-and-boot-boundary.md),
+[ADR-0020](../../docs/decisions/0020-sol-package-app-runtime.md), and the
+[roadmap](../../docs/ROADMAP.md).

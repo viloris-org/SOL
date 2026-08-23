@@ -1,20 +1,25 @@
 # SOL
 
-![status: concept/pre-alpha](https://img.shields.io/badge/status-concept%2Fpre--alpha-%23e9c46a) ![phase: 1-desktop-core](https://img.shields.io/badge/phase-1%20desktop%20core-%23a8dadc)
+![status: concept/pre-alpha](https://img.shields.io/badge/status-concept%2Fpre--alpha-%23e9c46a) ![scope: operating-system](https://img.shields.io/badge/scope-operating%20system-%23a8dadc)
 
-> A modern Linux desktop platform built on Arch Linux.
+> A modern, application-first operating system built on the Linux kernel.
 
-SOL is a **desktop platform, not a distribution**. It is architected and
-engineered from the *platform layer* up — its own Wayland compositor, desktop
-shell, application SDK (SolKit), design system, system services, and
-first-party applications — while reusing proven Linux infrastructure (kernel,
-systemd, PipeWire, NetworkManager, BlueZ, Mesa, polkit, udisks2).
+SOL is a **complete operating system**, not a desktop layer installed on an
+arbitrary host distribution. It owns the boot experience, system image and
+updates, package manager, application bundle format, atomic permission policy,
+system-managed accounts, Wayland compositor, shell, system services,
+application framework, and visual material language.
 
-> Don't reinvent Linux — redesign the Linux desktop.
+SOL still reuses proven Linux components where they are implementation
+building blocks. Owning an OS boundary does not mean rewriting the kernel,
+drivers, Mesa, PipeWire, or every protocol.
+
+> Reuse Linux. Own the operating-system contract.
 
 ## Status
 
-**Concept / Pre-Alpha — Phase 0 (Foundation) ✅ complete, Phase 1 (Desktop Core) ✅ complete, Phase 2 (SolKit) in progress.**
+**Concept / Pre-Alpha — the desktop substrate exists; the OS foundation is now
+the active product direction.**
 
 The Phase 0 milestone ("start a standalone SOL Wayland session and run
 standard Wayland applications") is **done**. Phase 1 M1 ("SOL can be used
@@ -26,6 +31,27 @@ present; the fcitx5 transport remains a post-M1 follow-on.
 Phase 2 M2 started: semantic components (Button, TextField, Toolbar, TabBar,
 Tab, HStack, VStack) and layout engine implemented. Slint/SolUI spike
 validation (ADR-0004) pending network access for dependency resolution.
+
+The OS rebaseline adds these system foundations:
+
+- `sol-boot`: redundant signed UEFI/recovery paths with trial activation and
+  verified slot-bound A/B system deployments.
+- `sol-pkg` + `sol-packaged`: one transactional manager for boot/recovery
+  copies, system deployments, and signed `.app` bundles.
+- `sol-securityd`: application identity, sandbox construction, capability
+  grants, atomic consent/lease transactions, revocation, and audit.
+- `sol-accountsd` + `sol-vaultd`: system-managed accounts and encrypted
+  credentials exposed to apps only through explicit scoped handles.
+- SOL Framework Runtime: major + minimum contract revision + named-feature
+  descriptors, with compatible app resolution across OS rollback, so third-party
+  apps vendor non-SOL dependencies without bundling the whole platform runtime.
+- SOL Fluid Material: typed adaptive glass roles with compositor-owned effects
+  and solid accessibility/performance fallbacks.
+- `sol-gtk` / `sol-qt`: planned bundled adapters that give non-native toolkits
+  the same portals, accounts, permissions, accessibility, and lifecycle APIs
+  without injecting host libraries.
+
+See [OS Platform Definition](docs/os-platform.md) for the normative boundary.
 
 ```bash
 cargo test -p sol-compositor --test sol_session
@@ -54,7 +80,12 @@ tokens. Slint backend integration pending spike validation.
 | `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🟡 scaffolds; `sol-ime` has Phase 1 protocol/frontend seams, while fcitx5 transport and UI rendering remain pending |
 | `apps/` | First-party apps: Files, Terminal, Settings | 🔲 placeholders → Phase 3 |
 | `protocols/` | Wayland protocol XML + IPC schemas | 🔲 no stable protocol yet |
-| `packaging/arch/` | Pacman packaging for `[sol-core]`/`[sol-apps]`/`[sol-sdk]` | 🔲 early |
+| `packaging/arch/` | Transitional Arch bootstrap/build packaging | 🟡 historical/transition |
+| `boot/` | Target home of `sol-boot`, recovery, and verified-slot policy | 🔲 planned |
+| `packaging/sol/` | Target home of `.app` tooling and `sol-pkg` contracts | 🔲 planned |
+| `security/` | Target home of sandbox, permission, consent, and audit services | 🔲 planned |
+| `accounts/` | Target home of system accounts, credential vault, and provider brokers | 🔲 planned |
+| `compat/` | Target home of GTK/Qt adapters and generic Wayland compatibility contracts | 🔲 planned |
 | `tests/` | Cross-component integration tests | ✅ Phase 0/1 integration tests |
 | `docs/` | PRD, ROADMAP, engineering decisions | 🟡 living |
 
@@ -63,8 +94,10 @@ tokens. Slint backend integration pending spike validation.
 | Doc | What it is |
 |---|---|
 | [Product Requirements Document](docs/PRD.md) | What SOL is and why (§1–42); core principles, architecture, MVP, phases |
+| [OS Platform Definition](docs/os-platform.md) | Normative OS boundary, `.app`, atomic permissions, accounts, materials, and runtime contracts |
+| [Shell Experience](docs/shell-experience.md) | Dock, Launcher, global menu, window controls, status zone, tray, and Live Capsule contracts |
 | [Roadmap](docs/ROADMAP.md) | Engineering execution view of the PRD phases, with deliverables & acceptance |
-| [Decision log](docs/decisions/README.md) | ADRs (monorepo, workspace, Quickshell, Slint/SolUI, dev path, IPC, IME, distribution) |
+| [Decision log](docs/decisions/README.md) | ADRs for boot, packages, security, runtime, compositor, SDK, IPC, and distribution |
 | [Docs index](docs/README.md) | How the docs fit together + pointers |
 | Component READMEs | `compositor/`, `sdk/*`, `services/*`, `apps/*`, `protocols/`, `packaging/arch/` |
 
@@ -90,12 +123,39 @@ compatible system `libdisplay-info`).
 - **Wayland Native** — no X11 session, no XWayland (§4.2).
 - **Framework First** — behavior comes from SolKit, not from per-app
   conventions (§4.3).
+- **Transactional System** — boot, update, activation, rollback, and recovery
+  are one coherent lifecycle.
+- **Self-contained Applications** — each `.app` vendors its non-SOL
+  dependencies and receives system access only through declared capabilities.
+- **Explicit Minimum Authority** — each protected access is a smallest-scope,
+  atomic, independently revocable grant; declaration and installation grant
+  nothing.
+- **Defined Authority Continuity** — verified same-publisher updates may retain
+  durable grants but never live handles; uninstall/reinstall and discontinuous
+  publishers inherit no authority.
+- **System-managed Accounts** — applications receive scoped account handles,
+  never ownership of the account database or durable credentials.
+- **Stable Platform Runtime** — versioned SOL frameworks let applications
+  avoid carrying common platform runtimes without depending on arbitrary host
+  libraries.
 - **Interactive Motion** — interruptible, gesture-driven, spring-based
   animation as part of the interaction model, not decoration (§4.4).
-- **Linux Compatibility** — GTK/Qt/SDL/Flutter/Electron supported, Flatpak as
-  a third-party runtime (§4.5).
+- **Linux Compatibility** — Wayland-native GTK/Qt/SDL/Flutter/Electron apps can
+  be packaged as `.app`; compatibility does not weaken the SOL trust model.
+- **Capability Equality** — native, integrated GTK/Qt, and generic Wayland apps
+  share the same security and system-service guarantees; only visual fidelity
+  differs by integration level.
+- **Fluid Material** — adaptive translucent system chrome communicates depth,
+  with solid reduced-transparency/high-contrast fallbacks.
+- **Stable Shell Geography** — Dock at the bottom, foreground app menu at the
+  upper-left, and trusted information/status/Live Capsule surfaces at the
+  upper-right.
 
 ## Also see
 
 - [ROADMAP](docs/ROADMAP.md) — where SOL is going, phase by phase.
 - [Compositor README](compositor/README.md) — how to run/extend the compositor.
+
+## License
+
+SOL is licensed under the [BSD 3-Clause License](LICENSE).
