@@ -806,6 +806,13 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       boot/recovery trial records, slot state, boot-success reports, and
       revocation metadata, using the implemented deployment manifest as the
       first foundation.
+- [x] Define allocation-free format-1 deployment state and boot-success
+      encodings with strict canonical parsing, monotonic redundant-copy
+      sequencing, CRC32 torn-write detection, and byte-stable migration
+      fixtures. Boot/recovery authority and revocation schemas remain open.
+- [x] Extend the installed deployment schema for the ADR-0026 UKI digest,
+      logical kernel/initrd identities, dm-verity root hash, and slot-specific
+      root identity without reinterpreting manifest format 1.
 - [x] `sol-image` manifest foundation: reproducible deployment manifests bind
       each slot and generation to the kernel, initrd, root-image SHA-256
       digest/length, and sorted runtime major/revision/feature descriptors.
@@ -820,10 +827,22 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] Implement the `resolve → fetch → verify → stage → validate → commit`
       transaction with the inactive slot written first and its manifest
       committed last.
+- [x] `sol-boot-core` policy foundation: firmware-independent strong types and
+      deterministic A/B selection consume each bounded trial attempt before
+      transfer, bind promotion to the exact slot/generation/attempt, retain a
+      known-good fallback, and select non-graphical recovery when required.
+      The durable deployment schema and exhaustive torn-write host harness are
+      implemented; adapter integration and authority-copy trials remain open.
 - [ ] `sol-boot` verifies artifacts, selects only a complete signed deployment,
       enforces bounded retry, and falls back to a retained known-good slot.
+- [ ] `sol-boot` selects an exact EDID-preferred GOP mode when available,
+      renders one bounded static SOL frame, and invokes the selected signed UKI
+      without clearing or changing the mode again.
 - [ ] Early userspace reports authenticated slot, generation, and system version;
       a verified image becomes known-good only after the health gate succeeds.
+- [ ] An initrd DRM splash preserves the boot surface until the native driver
+      and compositor have prepared a complete replacement frame; routine boot
+      logs never take over the graphical console.
 - [ ] Power loss, partial download/write, signature failure, corrupt manifest,
       failed health gate, and stale/replayed boot-success reports leave the
       previous deployment selected and user data unchanged.
@@ -855,6 +874,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       update; corrupt image; failed trial boot; firmware-variable failure; power
       loss at every commit boundary; automatic fallback; manual recovery; and
       user-data preservation.
+- [ ] Certified graphics fixtures record GOP/EDID selection and native-driver
+      takeover. After the first SOL frame, resolution remains stable and the
+      compositor first attempts a same-content atomic framebuffer replacement
+      without allowing a modeset; degraded hardware records the fallback.
 - [ ] Publish a signed release-evidence manifest recording artifacts, test matrix,
       hardware/firmware identifiers, failures, waivers, and retained fallbacks.
 

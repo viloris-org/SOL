@@ -17,7 +17,44 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Current development deployment-manifest schema.
-pub const MANIFEST_FORMAT: u32 = 1;
+pub const MANIFEST_FORMAT_V1: u32 = 1;
+/// UKI-aware deployment-manifest schema (M7.1).
+pub const MANIFEST_FORMAT_V2: u32 = 2;
+
+/// Supported manifest schema versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ManifestFormat {
+    /// Original schema: kernel/initrd/root-image SHA-256 + slot/generation/version + runtime descriptors.
+    V1,
+    /// UKI-aware schema: adds UKI digest/length, component identities, dm-verity root hash, and slot-specific root identity.
+    V2,
+}
+
+impl ManifestFormat {
+    /// Returns the numeric schema identifier.
+    #[must_use]
+    pub const fn as_u32(self) -> u32 {
+        match self {
+            Self::V1 => MANIFEST_FORMAT_V1,
+            Self::V2 => MANIFEST_FORMAT_V2,
+        }
+    }
+
+    /// Parses a numeric format identifier.
+    #[must_use]
+    pub const fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            MANIFEST_FORMAT_V1 => Some(Self::V1),
+            MANIFEST_FORMAT_V2 => Some(Self::V2),
+            _ => None,
+        }
+    }
+}
+
+/// Original development deployment-manifest schema.
+///
+/// Kept as a compatibility alias for callers that predate format 2.
+pub const MANIFEST_FORMAT: u32 = MANIFEST_FORMAT_V1;
 
 /// Result returned by image-manifest operations.
 pub type ImageResult<T> = Result<T, ImageError>;
@@ -252,6 +289,257 @@ impl ArtifactBinding {
     }
 }
 
+/// A canonical stable identifier for a logical kernel or initrd component within
+/// a deployed system image.
+///
+/// The identity is scoped to a slot and generation so the same component
+/// digest can be independently present in both A and B slots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentIdentity {
+    /// Slot-scoped component logical identifier, e.g. `kernel-x86_64-6.9`.
+    name: String,
+    /// Slot-specific component identity string, e.g.
+    /// `slot-B-gen-42-root-abc123`.
+    slot_identity: String,
+}
+
+impl ComponentIdentity {
+    /// Creates a validated component identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImageError::InvalidField`] when either identifier is empty or
+    /// exceeds 256 characters or contains disallowed characters.
+    pub fn new(name: impl Into<String>, slot_identity: impl Into<String>) -> ImageResult<Self> {
+        let name = name.into();
+        let slot_identity = slot_identity.into();
+        validate_identifier(&name, "component.name")?;
+        validate_identifier(&slot_identity, "component.slot_identity")?;
+        Ok(Self {
+            name,
+            slot_identity,
+        })
+    }
+
+    /// Returns the stable component name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the slot-specific identity string.
+    #[must_use]
+    pub fn slot_identity(&self) -> &str {
+        &self.slot_identity
+    }
+
+    fn validate(&self) -> ImageResult<()> {
+        validate_identifier(&self.name, "component.name")?;
+        validate_identifier(&self.slot_identity, "component.slot_identity")
+    }
+}
+
+/// Digest and byte length of the complete Unified Kernel Image (UKI) installed
+/// in a slot.
+///
+/// The UKI contains the Linux EFI stub, kernel, initrd, immutable command line,
+/// and release metadata. Its digest is independent of the individual kernel and
+/// initrd component digests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UkiBinding {
+    sha256: Sha256Digest,
+    size: u64,
+}
+
+impl UkiBinding {
+    /// Computes a UKI binding directly from a UKI file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the path cannot be read, is not a regular file,
+    /// is empty, or exceeds the supported length.
+    pub fn from_path(path: impl AsRef<Path>) -> ImageResult<Self> {
+        let path = path.as_ref();
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| ImageError::Io(format!("{}: {error}", path.display())))?;
+        if !metadata.file_type().is_file() {
+            return Err(ImageError::InvalidField {
+                field: "uki",
+                reason: format!("{} is not a regular file", path.display()),
+            });
+        }
+        let file = File::open(path)
+            .map_err(|error| ImageError::Io(format!("{}: {error}", path.display())))?;
+        let (sha256, size) = Sha256Digest::from_reader(file)?;
+        if size == 0 {
+            return Err(ImageError::InvalidField {
+                field: "uki.size",
+                reason: format!("{} is empty", path.display()),
+            });
+        }
+        Ok(Self { sha256, size })
+    }
+
+    /// Returns the UKI SHA-256 digest.
+    #[must_use]
+    pub const fn sha256(&self) -> Sha256Digest {
+        self.sha256
+    }
+
+    /// Returns the exact UKI length in bytes.
+    #[must_use]
+    pub const fn size(&self) -> u64 {
+        self.size
+    }
+
+    fn validate(&self) -> ImageResult<()> {
+        if self.size == 0 {
+            return Err(ImageError::InvalidField {
+                field: "uki.size",
+                reason: "UKI must not be empty".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// dm-verity root hash and slot-specific root identity for a booted system
+/// deployment.
+///
+/// The root hash is the hash tree root used by the kernel's dm-verity driver to
+/// authenticate every block of the read-only root image. The slot identity
+/// distinguishes the same hash tree across A/B slots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DmVerityBinding {
+    /// Hex-encoded SHA-256 root hash of the dm-verity hash tree.
+    root_hash: String,
+    /// Slot-specific root identity, e.g. `slot-B-root-abc123`.
+    slot_root_identity: String,
+}
+
+impl DmVerityBinding {
+    /// Creates a validated dm-verity binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImageError::InvalidField`] when the root hash is not 64 lowercase
+    /// hexadecimal characters or the slot identity is empty or too long.
+    pub fn new(
+        root_hash: impl Into<String>,
+        slot_root_identity: impl Into<String>,
+    ) -> ImageResult<Self> {
+        let root_hash = root_hash.into();
+        let slot_root_identity = slot_root_identity.into();
+        if root_hash.len() != 64
+            || !root_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(ImageError::InvalidField {
+                field: "dm_verity.root_hash",
+                reason: "expected 64 lowercase hexadecimal characters".to_owned(),
+            });
+        }
+        validate_identifier(&slot_root_identity, "dm_verity.slot_root_identity")?;
+        Ok(Self {
+            root_hash,
+            slot_root_identity,
+        })
+    }
+
+    /// Returns the hex-encoded dm-verity root hash.
+    #[must_use]
+    pub fn root_hash(&self) -> &str {
+        &self.root_hash
+    }
+
+    /// Returns the slot-specific root identity.
+    #[must_use]
+    pub fn slot_root_identity(&self) -> &str {
+        &self.slot_root_identity
+    }
+
+    fn validate(&self) -> ImageResult<()> {
+        if self.root_hash.len() != 64
+            || !self
+                .root_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(ImageError::InvalidField {
+                field: "dm_verity.root_hash",
+                reason: "expected 64 lowercase hexadecimal characters".to_owned(),
+            });
+        }
+        validate_identifier(&self.slot_root_identity, "dm_verity.slot_root_identity")?;
+        Ok(())
+    }
+}
+
+/// UKI-aware fields added by deployment-manifest format 2.
+///
+/// Grouping these values ensures callers cannot accidentally construct a V2
+/// manifest with only part of its UKI or dm-verity identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UkiDeploymentBinding {
+    uki: UkiBinding,
+    kernel_component: ComponentIdentity,
+    initrd_component: ComponentIdentity,
+    dm_verity: DmVerityBinding,
+}
+
+impl UkiDeploymentBinding {
+    /// Binds the complete UKI file and its logical component/root identities.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the UKI cannot be bound as a non-empty regular
+    /// file or any supplied identity is invalid.
+    pub fn from_path(
+        uki_path: impl AsRef<Path>,
+        kernel_component: ComponentIdentity,
+        initrd_component: ComponentIdentity,
+        dm_verity: DmVerityBinding,
+    ) -> ImageResult<Self> {
+        let binding = Self {
+            uki: UkiBinding::from_path(uki_path)?,
+            kernel_component,
+            initrd_component,
+            dm_verity,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
+    fn validate(&self) -> ImageResult<()> {
+        self.uki.validate()?;
+        self.kernel_component.validate()?;
+        self.initrd_component.validate()?;
+        self.dm_verity.validate()
+    }
+}
+
+fn validate_identifier(value: &str, field: &'static str) -> ImageResult<()> {
+    if value.is_empty() || value.len() > 256 {
+        return Err(ImageError::InvalidField {
+            field,
+            reason: format!("must be 1-256 characters, got {value:?}"),
+        });
+    }
+    if !value.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'_')
+    }) {
+        return Err(ImageError::InvalidField {
+            field,
+            reason: format!("{value:?} contains disallowed characters"),
+        });
+    }
+    Ok(())
+}
+
 /// The three immutable artifacts that form a bootable system deployment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -393,9 +681,16 @@ impl RuntimeDescriptor {
 }
 
 /// Complete immutable system-deployment identity consumed by `sol-boot`.
+///
+/// The `format` field selects the schema version. Format 1 carries the
+/// original kernel/initrd/root-image bindings. Format 2 additionally binds the
+/// UKI digest/length, kernel/initrd component identities, and dm-verity root
+/// hash. The two formats are not silently reinterpreted: a V1 manifest cannot
+/// carry V2 fields and a V2 manifest must supply all V2 fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentManifest {
+    /// Schema version: 1 (original) or 2 (UKI-aware).
     format: u32,
     architecture: Architecture,
     slot: DeploymentSlot,
@@ -403,10 +698,23 @@ pub struct DeploymentManifest {
     system_version: String,
     artifacts: DeploymentArtifacts,
     runtimes: Vec<RuntimeDescriptor>,
+    /// V2-only: complete UKI digest and byte length.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uki: Option<UkiBinding>,
+    /// V2-only: logical identities for the kernel and initrd components used to
+    /// compose the UKI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kernel_component: Option<ComponentIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    initrd_component: Option<ComponentIdentity>,
+    /// V2-only: dm-verity root hash and slot-specific root identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dm_verity: Option<DmVerityBinding>,
 }
 
 impl DeploymentManifest {
-    /// Builds a manifest and canonicalizes runtime ordering by major.
+    /// Format 1 constructor: builds a V1 manifest with the original artifact
+    /// bindings and no UKI or dm-verity fields.
     ///
     /// # Errors
     ///
@@ -446,14 +754,82 @@ impl DeploymentManifest {
         }
 
         Ok(Self {
-            format: MANIFEST_FORMAT,
+            format: MANIFEST_FORMAT_V1,
             architecture: Architecture::X86_64,
             slot,
             generation,
             system_version,
             artifacts,
             runtimes,
+            uki: None,
+            kernel_component: None,
+            initrd_component: None,
+            dm_verity: None,
         })
+    }
+
+    /// Format 2 constructor: builds a UKI-aware V2 manifest.
+    ///
+    /// All V2 fields are required. The `format` field is set automatically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for the same reasons as [`Self::new`] plus any invalid
+    /// V2 field.
+    pub fn new_v2(
+        slot: DeploymentSlot,
+        generation: u64,
+        system_version: impl Into<String>,
+        artifacts: DeploymentArtifacts,
+        runtimes: Vec<RuntimeDescriptor>,
+        uki_deployment: UkiDeploymentBinding,
+    ) -> ImageResult<Self> {
+        uki_deployment.validate()?;
+        let manifest = Self::new(slot, generation, system_version, artifacts, runtimes)?;
+        Ok(Self {
+            format: MANIFEST_FORMAT_V2,
+            uki: Some(uki_deployment.uki),
+            kernel_component: Some(uki_deployment.kernel_component),
+            initrd_component: Some(uki_deployment.initrd_component),
+            dm_verity: Some(uki_deployment.dm_verity),
+            ..manifest
+        })
+    }
+
+    /// Returns the manifest schema version.
+    #[must_use]
+    pub const fn format_version(&self) -> u32 {
+        self.format
+    }
+
+    /// Returns the schema as a typed [`ManifestFormat`].
+    #[must_use]
+    pub const fn manifest_format(&self) -> Option<ManifestFormat> {
+        ManifestFormat::from_u32(self.format)
+    }
+
+    /// Returns the UKI binding for V2 manifests, or `None` for V1.
+    #[must_use]
+    pub const fn uki(&self) -> Option<&UkiBinding> {
+        self.uki.as_ref()
+    }
+
+    /// Returns the kernel component identity for V2 manifests, or `None` for V1.
+    #[must_use]
+    pub const fn kernel_component(&self) -> Option<&ComponentIdentity> {
+        self.kernel_component.as_ref()
+    }
+
+    /// Returns the initrd component identity for V2 manifests, or `None` for V1.
+    #[must_use]
+    pub const fn initrd_component(&self) -> Option<&ComponentIdentity> {
+        self.initrd_component.as_ref()
+    }
+
+    /// Returns the dm-verity binding for V2 manifests, or `None` for V1.
+    #[must_use]
+    pub const fn dm_verity(&self) -> Option<&DmVerityBinding> {
+        self.dm_verity.as_ref()
     }
 
     /// Encodes the single canonical JSON representation, ending in a newline.
@@ -523,11 +899,18 @@ impl DeploymentManifest {
 
     /// Re-hashes every artifact and rejects any content or length mismatch.
     ///
+    /// Format 2 requires `uki_path`; omitting it is an error because partial
+    /// verification must never be reported as a verified deployment.
+    ///
     /// # Errors
     ///
     /// Returns an error if the manifest is invalid, an artifact cannot be
     /// read, or any artifact differs from its recorded binding.
-    pub fn verify_artifacts(&self, paths: &ArtifactPaths) -> ImageResult<()> {
+    pub fn verify_artifacts(
+        &self,
+        paths: &ArtifactPaths,
+        uki_path: Option<&Path>,
+    ) -> ImageResult<()> {
         self.validate()?;
         let actual = DeploymentArtifacts::from_paths(paths)?;
         if actual.kernel != self.artifacts.kernel {
@@ -538,6 +921,26 @@ impl DeploymentManifest {
         }
         if actual.root_image != self.artifacts.root_image {
             return Err(ImageError::ArtifactMismatch("root image"));
+        }
+        match (&self.uki, uki_path) {
+            (Some(expected), Some(path)) => {
+                if UkiBinding::from_path(path)? != *expected {
+                    return Err(ImageError::ArtifactMismatch("UKI"));
+                }
+            }
+            (Some(_), None) => {
+                return Err(ImageError::InvalidField {
+                    field: "uki path",
+                    reason: "format 2 verification requires the complete UKI".to_owned(),
+                });
+            }
+            (None, Some(_)) => {
+                return Err(ImageError::InvalidField {
+                    field: "uki path",
+                    reason: "format 1 does not bind a UKI".to_owned(),
+                });
+            }
+            (None, None) => {}
         }
         Ok(())
     }
@@ -573,7 +976,7 @@ impl DeploymentManifest {
     }
 
     fn validate(&self) -> ImageResult<()> {
-        if self.format != MANIFEST_FORMAT {
+        if self.format != MANIFEST_FORMAT_V1 && self.format != MANIFEST_FORMAT_V2 {
             return Err(ImageError::UnsupportedFormat(self.format));
         }
         if self.generation == 0 {
@@ -600,6 +1003,43 @@ impl DeploymentManifest {
                 });
             }
             previous_major = Some(major);
+        }
+        if self.format == MANIFEST_FORMAT_V2 {
+            let uki_deployment = UkiDeploymentBinding {
+                uki: self.uki.clone().ok_or_else(|| ImageError::InvalidField {
+                    field: "uki",
+                    reason: "format 2 requires a UKI binding".to_owned(),
+                })?,
+                kernel_component: self.kernel_component.clone().ok_or_else(|| {
+                    ImageError::InvalidField {
+                        field: "kernel_component",
+                        reason: "format 2 requires a kernel component identity".to_owned(),
+                    }
+                })?,
+                initrd_component: self.initrd_component.clone().ok_or_else(|| {
+                    ImageError::InvalidField {
+                        field: "initrd_component",
+                        reason: "format 2 requires an initrd component identity".to_owned(),
+                    }
+                })?,
+                dm_verity: self
+                    .dm_verity
+                    .clone()
+                    .ok_or_else(|| ImageError::InvalidField {
+                        field: "dm_verity",
+                        reason: "format 2 requires a dm-verity binding".to_owned(),
+                    })?,
+            };
+            uki_deployment.validate()?;
+        } else if self.uki.is_some()
+            || self.kernel_component.is_some()
+            || self.initrd_component.is_some()
+            || self.dm_verity.is_some()
+        {
+            return Err(ImageError::InvalidField {
+                field: "format",
+                reason: "V1 manifest must not carry UKI or dm-verity fields".to_owned(),
+            });
         }
         Ok(())
     }
@@ -640,6 +1080,30 @@ pub fn build_manifest(
         system_version,
         DeploymentArtifacts::from_paths(paths)?,
         runtimes,
+    )
+}
+
+/// Hashes artifact paths plus a UKI and constructs a UKI-aware V2 manifest.
+///
+/// # Errors
+///
+/// Returns an error if an artifact or the UKI cannot be bound or a manifest
+/// input fails validation.
+pub fn build_manifest_v2(
+    slot: DeploymentSlot,
+    generation: u64,
+    system_version: impl Into<String>,
+    paths: &ArtifactPaths,
+    runtimes: Vec<RuntimeDescriptor>,
+    uki_deployment: UkiDeploymentBinding,
+) -> ImageResult<DeploymentManifest> {
+    DeploymentManifest::new_v2(
+        slot,
+        generation,
+        system_version,
+        DeploymentArtifacts::from_paths(paths)?,
+        runtimes,
+        uki_deployment,
     )
 }
 
@@ -811,7 +1275,7 @@ mod tests {
         )
         .expect("manifest");
         manifest
-            .verify_artifacts(&paths)
+            .verify_artifacts(&paths, None)
             .expect("original artifacts");
 
         for (path, expected) in [
@@ -822,7 +1286,7 @@ mod tests {
             let original = fs::read(path).expect("fixture contents");
             fs::write(path, b"tampered").expect("tamper fixture");
             assert_eq!(
-                manifest.verify_artifacts(&paths),
+                manifest.verify_artifacts(&paths, None),
                 Err(ImageError::ArtifactMismatch(expected))
             );
             fs::write(path, original).expect("restore fixture");
@@ -912,5 +1376,191 @@ mod tests {
             DeploymentManifest::from_canonical_bytes(&bytes).expect("decode"),
             manifest
         );
+    }
+
+    fn v2_fixture_paths() -> (tempfile::TempDir, ArtifactPaths) {
+        let directory = tempdir().expect("fixture directory");
+        let paths = ArtifactPaths {
+            kernel: directory.path().join("vmlinuz"),
+            initrd: directory.path().join("initrd"),
+            root_image: directory.path().join("root.img"),
+        };
+        fs::write(&paths.kernel, b"kernel-v2").expect("kernel fixture");
+        fs::write(&paths.initrd, b"initrd-v2").expect("initrd fixture");
+        fs::write(&paths.root_image, b"immutable-root-v2").expect("root fixture");
+        fs::write(directory.path().join("uki.efi"), b"uki-contents-v2").expect("uki fixture");
+        (directory, paths)
+    }
+
+    fn v2_binding(directory: &Path) -> UkiDeploymentBinding {
+        UkiDeploymentBinding::from_path(
+            directory.join("uki.efi"),
+            ComponentIdentity::new("kernel-x86_64-6.9", "slot-b-gen-42-kernel-abc123")
+                .expect("kernel component"),
+            ComponentIdentity::new("initrd-base-2026", "slot-b-gen-42-initrd-def456")
+                .expect("initrd component"),
+            DmVerityBinding::new("a".repeat(64), "slot-b-root-abc123").expect("dm-verity binding"),
+        )
+        .expect("UKI deployment binding")
+    }
+
+    #[test]
+    fn v2_manifest_round_trips_exactly() {
+        let (directory, paths) = v2_fixture_paths();
+        let uki_path = directory.path().join("uki.efi");
+
+        let manifest = build_manifest_v2(
+            DeploymentSlot::B,
+            42,
+            "0.3.0-dev",
+            &paths,
+            vec![runtime_one(&["documents.v2"])],
+            v2_binding(directory.path()),
+        )
+        .expect("V2 manifest");
+        let bytes = manifest.canonical_bytes().expect("canonical bytes");
+
+        assert_eq!(manifest.format_version(), MANIFEST_FORMAT_V2);
+        assert_eq!(manifest.manifest_format(), Some(ManifestFormat::V2));
+        assert!(manifest.uki().is_some());
+        assert!(manifest.kernel_component().is_some());
+        assert!(manifest.initrd_component().is_some());
+        assert!(manifest.dm_verity().is_some());
+
+        let decoded = DeploymentManifest::from_canonical_bytes(&bytes).expect("decode V2 manifest");
+        assert_eq!(decoded, manifest);
+        decoded
+            .verify_artifacts(&paths, Some(&uki_path))
+            .expect("complete V2 artifacts");
+    }
+
+    #[test]
+    fn v1_and_v2_produce_distinct_bytes() {
+        let (directory, paths) = v2_fixture_paths();
+
+        let v1 = build_manifest(
+            DeploymentSlot::B,
+            42,
+            "0.3.0-dev",
+            &paths,
+            vec![runtime_one(&["documents.v2"])],
+        )
+        .expect("V1 manifest");
+        let v2 = build_manifest_v2(
+            DeploymentSlot::B,
+            42,
+            "0.3.0-dev",
+            &paths,
+            vec![runtime_one(&["documents.v2"])],
+            v2_binding(directory.path()),
+        )
+        .expect("V2 manifest");
+
+        assert_ne!(
+            v1.canonical_bytes().expect("V1 bytes"),
+            v2.canonical_bytes().expect("V2 bytes")
+        );
+    }
+
+    #[test]
+    fn v2_verification_requires_and_checks_the_complete_uki() {
+        let (directory, paths) = v2_fixture_paths();
+        let uki_path = directory.path().join("uki.efi");
+
+        let manifest = build_manifest_v2(
+            DeploymentSlot::B,
+            42,
+            "0.3.0-dev",
+            &paths,
+            vec![runtime_one(&["documents.v2"])],
+            v2_binding(directory.path()),
+        )
+        .expect("V2 manifest");
+
+        assert!(matches!(
+            manifest.verify_artifacts(&paths, None),
+            Err(ImageError::InvalidField {
+                field: "uki path",
+                ..
+            })
+        ));
+        fs::write(&uki_path, b"tampered-uki").expect("tamper UKI");
+        assert_eq!(
+            manifest.verify_artifacts(&paths, Some(&uki_path)),
+            Err(ImageError::ArtifactMismatch("UKI"))
+        );
+    }
+
+    #[test]
+    fn v2_decode_rejects_missing_or_invalid_fields() {
+        let (directory, paths) = v2_fixture_paths();
+        let manifest = build_manifest_v2(
+            DeploymentSlot::B,
+            42,
+            "0.3.0-dev",
+            &paths,
+            vec![runtime_one(&[])],
+            v2_binding(directory.path()),
+        )
+        .expect("V2 manifest");
+        let mut value = serde_json::to_value(&manifest).expect("manifest JSON");
+        value
+            .as_object_mut()
+            .expect("manifest object")
+            .remove("dm_verity");
+        let mut missing = serde_json::to_vec(&value).expect("missing-field JSON");
+        missing.push(b'\n');
+        assert!(matches!(
+            DeploymentManifest::from_canonical_bytes(&missing),
+            Err(ImageError::InvalidField {
+                field: "dm_verity",
+                ..
+            })
+        ));
+
+        let object = value.as_object_mut().expect("manifest object");
+        object.insert(
+            "dm_verity".to_owned(),
+            serde_json::json!({
+                "root_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "slot_root_identity": "slot-b-root-abc123"
+            }),
+        );
+        object
+            .get_mut("kernel_component")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("kernel component")
+            .insert("name".to_owned(), serde_json::json!("Bad Name"));
+        let mut invalid = serde_json::to_vec(&value).expect("invalid-field JSON");
+        invalid.push(b'\n');
+        assert!(matches!(
+            DeploymentManifest::from_canonical_bytes(&invalid),
+            Err(ImageError::InvalidField {
+                field: "component.name",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn component_identity_validates() {
+        assert!(ComponentIdentity::new("", "slot-b-kernel").is_err());
+        assert!(ComponentIdentity::new("ok", "").is_err());
+        assert!(ComponentIdentity::new("Bad Name", "slot-b-kernel").is_err());
+        let good =
+            ComponentIdentity::new("kernel-x86_64", "slot-b-kernel-abc").expect("valid component");
+        assert_eq!(good.name(), "kernel-x86_64");
+        assert_eq!(good.slot_identity(), "slot-b-kernel-abc");
+    }
+
+    #[test]
+    fn dm_verity_binding_validates() {
+        assert!(DmVerityBinding::new("", "slot-b-root").is_err());
+        assert!(DmVerityBinding::new("g".repeat(64), "").is_err());
+        assert!(DmVerityBinding::new("ZZ".repeat(32), "slot-b-root").is_err());
+        let good =
+            DmVerityBinding::new("a".repeat(64), "slot-b-root-abc123").expect("valid dm-verity");
+        assert_eq!(good.root_hash(), "a".repeat(64).as_str());
+        assert_eq!(good.slot_root_identity(), "slot-b-root-abc123");
     }
 }

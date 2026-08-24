@@ -40,6 +40,7 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 21 | SOL fluid material system | Accepted (design contract) | Phases 2/4/9 | [0023](0023-sol-fluid-material.md) |
 | 22 | GTK, Qt, and non-native toolkit compatibility | Accepted (architecture) | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
 | 23 | Shell spatial grammar, global menu, and Live Capsule | Accepted (product/architecture) | Phases 4/9 | [0025](0025-shell-spatial-menu-live-capsule.md) |
+| 24 | SOL boot execution, UKI, and seamless graphics handoff | Accepted (architecture) | Phase 7 | [0026](0026-sol-boot-uki-and-graphics-handoff.md) |
 
 ## Decision register (PRD §41)
 
@@ -68,7 +69,7 @@ accepted decision remain open implementation or product work.
 | 19 | IME engine/frontend integration boundary | Phase 1 | fcitx5 addon coverage; sol-ime frontend owns candidate-window UI; engine upgrade strategy; when a custom engine is ever considered |
 | 20 | `.app` container encoding and compression | Phase 8 | Identity, signed manifest, contents, and transaction semantics are fixed by ADR-0020 |
 | 21 | Runtime ABI/schema tooling | Phase 9 | Major + monotonic contract revision + named features are fixed; generator, registry encoding, and IPC schema tools remain open |
-| 22 | Boot measurement, key enrollment, and EFI encoding | Phase 7 | Redundant boot/recovery copies, slot-bound deployments, trial activation, and fallback are fixed by ADR-0019 |
+| 22 | Boot measurement, key enrollment, and EFI encoding | **Partially accepted (Phase 7)** | [ADR-0026](0026-sol-boot-uki-and-graphics-handoff.md) fixes the x86-64 UEFI/UKI execution and graphics-handoff architecture; key enrollment, measurement, and revocation remain open |
 | 23 | System-image filesystem and delta encoding | Phase 7 | Read-only signed images and atomic slot activation are fixed by ADR-0019 |
 | 24 | Account vault storage and hardware sealing | Phase 8 | System ownership and scoped handles are fixed by ADR-0022; backend/TPM API remains open |
 | 25 | Fluid-material compositor path | Phase 4/9 | Roles/fallbacks are fixed by ADR-0023; sampling/refraction implementation remains open |

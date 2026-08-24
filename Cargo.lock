@@ -4015,6 +4015,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sol-boot-core"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+]
+
+[[package]]
 name = "sol-compositor"
 version = "0.1.0"
 dependencies = [

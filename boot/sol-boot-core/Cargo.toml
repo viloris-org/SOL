@@ -1,0 +1,14 @@
+[package]
+name = "sol-boot-core"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+crc32fast = { version = "1.5", default-features = false }
+
+[lints]
+workspace = true

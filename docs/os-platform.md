@@ -124,6 +124,16 @@ but the boot UI, verification policy, slot state machine, rollback behavior, and
 recovery contract belong to SOL. “Custom bootloader” does not mean custom
 firmware, filesystem drivers, or cryptography.
 
+The x86-64 boot execution path uses a signed SOL UEFI application to verify and
+select a slot-specific signed UKI. `sol-boot` selects an EDID-preferred physical
+resolution only when firmware exposes that exact GOP mode, renders one bounded
+static SOL frame, and leaves the framebuffer intact for Linux. Early userspace
+and `sol-compositor` preserve that mode and visual content through a
+mode-preserving DRM handoff when the native driver supports it. Graphics
+failure never changes verification, fallback, or recovery policy, and generic
+hardware is not promised a flicker-free native-driver takeover. The complete
+contract and qualification requirements are fixed by ADR-0026.
+
 ## 4. Package manager
 
 `sol-pkg` is the user/admin command-line client. `sol-packaged` is the single

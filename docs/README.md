@@ -25,7 +25,7 @@ Documentation is organized by audience and lifecycle:
 
 The OS rebaseline supersedes older statements that call SOL only a desktop
 platform or use pacman/AUR as the native installed-system package authority.
-For those topics, `os-platform.md` and ADR-0019 through ADR-0025 are the source
+For those topics, `os-platform.md` and ADR-0019 through ADR-0026 are the source
 of truth.
 
 ## Quick status
@@ -38,7 +38,7 @@ of truth.
 | Services | Scaffolds — `sol-ime` has Phase 1 protocol/frontend seams; fcitx5 transport and candidate-window rendering remain pending |
 | Apps | Scaffolds — Files/Terminal/Settings in Phase 3 |
 | Protocols / packaging | Early — no stable protocol; PKGBUILDs follow milestone completion |
-| OS boot / image | Planned — redundant trial-updated `sol-boot`/recovery and slot-bound A/B deployments are Phase 7 |
+| OS boot / image | Foundations — UKI-aware deployment manifests and deterministic A/B trial policy are implemented; signed UEFI execution, redundant boot/recovery authorities, durable state, and graphics handoff remain Phase 7 work |
 | Native app platform | Planned — `.app`, `sol-pkg`, sandbox enforcement, and major/revision/feature runtime compatibility are Phases 8–9 |
 | Accounts | Planned — `sol-securityd`-coordinated account grants, system-owned metadata, encrypted credentials, and generation-fenced leases |
 | Material | Token foundation implemented — compositor-backed adaptive glass and hardware QA remain |

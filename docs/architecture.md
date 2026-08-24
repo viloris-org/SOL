@@ -23,7 +23,7 @@ Shell         (shell/)      dock · launcher · global menu · status · capsule
 Compositor    (compositor/) Smithay · Wayland · scene · WM · input
 ─────────────
 System image  (foundation)  sol-image manifest · planned read-only A/B slots
-Boot          (planned)     signed sol-boot UEFI executable and slot policy
+Boot          (foundation)  sol-boot core · planned signed UEFI/UKI · GOP handoff
 ─────────────
 Upstream                    Linux · systemd · Mesa · PipeWire · drivers · etc.
 ```
@@ -58,6 +58,7 @@ operation rewinds user data.
 | Boundary | Rule | Basis |
 |---|---|---|
 | Firmware → boot | Redundant `sol-boot`/recovery copies use trial activation and a retained firmware-visible fallback | ADR-0019 |
+| Boot graphics → Linux/DRM | Select an exact EDID/GOP mode at most once, preserve the SOL frame through early boot, and prefer a mode-preserving compositor commit | ADR-0026 |
 | Boot → deployment | A signed manifest binds a slot's kernel, initrd, root-image digest, runtime descriptors, and generation | ADR-0019 |
 | System image → mutable state | Executable system content is read-only and versioned; user/machine data is outside the slots | ADR-0019 |
 | Repository → install | Only `sol-packaged` commits verified boot/recovery/system/app transactions; CLI and Software are clients | ADR-0019, ADR-0020 |
