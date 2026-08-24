@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "boot/sol-boot-core",
+    "boot/sol-boot",
     "boot/sol-image",
     "compositor",
     "shell",

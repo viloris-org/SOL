@@ -41,8 +41,11 @@ policy: firmware-independent A/B trials, consume-before-transfer attempt
 ordering, exact success-report promotion, known-good fallback, and recovery
 selection.
 
-There is no UEFI adapter yet. Deployment state and success reports now have a
-versioned fixed-size durable encoding plus redundant-copy/torn-write fixtures.
-The next persistence boundary is the generic boot/recovery authority-copy trial
-record. GOP mode selection and the bounded static renderer should remain
-separately testable policy/rendering units before connection to the adapter.
+[`sol-boot`](sol-boot/README.md) now provides the x86-64 UEFI adapter and
+release-key signed deployment envelope. It reads the conventional ESP layout,
+verifies complete manifests and UKIs, commits redundant state with exact
+read-back, renders a bounded static GOP frame, and starts verified UKIs or
+independent recovery images. It has been cross-built as a PE32+ EFI application
+and executed under OVMF. TPM-backed success-report authentication, EDID Active
+protocol wiring, recovery/boot-authority self-update trials, and hardware
+seamless-handoff qualification remain release work.

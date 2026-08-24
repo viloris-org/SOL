@@ -6,8 +6,13 @@ known-good fallback, recovery selection, and exact success-report binding.
 
 The crate intentionally has no filesystem, UEFI, GOP, clock, rendering, or
 cryptography dependency. Its inputs are already-validated deployment
-observations. A future `sol-boot` adapter remains responsible for verification,
-durable state storage, diagnostics, and UKI execution.
+observations. The `sol-boot` adapter is responsible for verification, durable
+state storage, diagnostics, and UKI execution.
+
+It also defines the canonical 168-byte signed deployment record used between
+`sol-image` and `sol-boot`: a 104-byte payload binds x86-64 slot/generation and
+the complete manifest/UKI lengths and SHA-256 digests, followed by a 64-byte
+Ed25519 signature. Cryptographic verification stays in the adapter.
 
 Trial booting is explicitly two-phase: `prepare_boot` returns a
 `BootPlan::PersistTrial` containing the next state, and exposes the trial boot

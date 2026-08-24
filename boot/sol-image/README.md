@@ -1,7 +1,7 @@
 # sol-image
 
 `sol-image` creates the deterministic deployment manifest consumed by the
-future `sol-boot` verifier and A/B slot state machine. A manifest binds one
+`sol-boot` verifier and A/B slot state machine. A manifest binds one
 physical slot and generation to the exact SHA-256 digest and byte length of its
 kernel, initrd, and immutable root image, plus the runtime major/revision/
 feature contracts exposed by that deployment.
@@ -63,8 +63,9 @@ slot-specific root identity. Verification of format 2 always re-hashes the UKI;
 omitting `--uki` fails instead of reporting partial verification. Versioned
 fixtures in `tests/fixtures/` protect both encodings.
 
-This is the deployment identity and artifact-verification foundation, not a
-claim of a signed or bootable OS image. The signature envelope, filesystem,
-key enrollment, root-image composition, and `sol-boot` implementation remain
-Phase 7 work under
-[ADR-0026](../../docs/decisions/0026-sol-boot-uki-and-graphics-handoff.md).
+For bootable development images, the CLI also signs the canonical format-2
+manifest/UKI binding (`boot-descriptor`), initializes redundant state
+(`init-boot-state`), stages an inactive-slot trial (`stage-boot-trial`), emits
+the exact health report (`success-report`), and derives the build-time public
+key (`release-public-key`). See the [sol-boot deployment
+guide](../sol-boot/README.md) for the complete ESP workflow.

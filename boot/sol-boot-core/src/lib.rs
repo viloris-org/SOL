@@ -10,10 +10,15 @@ use core::error::Error;
 use core::fmt;
 
 mod codec;
+mod deployment;
 
 pub use codec::{
     BOOT_STATE_FORMAT_V1, BOOT_STATE_V1_SIZE, BOOT_SUCCESS_FORMAT_V1, BOOT_SUCCESS_V1_SIZE,
     CodecError, DurableBootState, DurableStateCopy, SelectedDurableState, select_redundant_state,
+};
+pub use deployment::{
+    ArtifactBinding, DEPLOYMENT_FORMAT_V1, DEPLOYMENT_SIGNED_V1_SIZE, DEPLOYMENT_V1_PAYLOAD_SIZE,
+    DeploymentDescriptor, DeploymentDescriptorError, SignedDeploymentDescriptor,
 };
 
 /// Physical A/B system deployment slot.

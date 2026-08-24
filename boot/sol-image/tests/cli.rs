@@ -1,5 +1,10 @@
 #![allow(clippy::expect_used)]
 
+use ed25519_dalek::{SigningKey, Verifier};
+use sol_boot_core::{
+    BootSuccessReport, DeploymentSlot, DeploymentStatus, DurableBootState,
+    SignedDeploymentDescriptor, select_redundant_state,
+};
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
@@ -236,4 +241,200 @@ fn cli_rejects_incomplete_v2_flags() {
         String::from_utf8_lossy(&incomplete.stderr)
     );
     assert!(String::from_utf8_lossy(&incomplete.stderr).contains("kernel-component is required"));
+}
+
+#[test]
+fn cli_manages_release_key_and_redundant_boot_lifecycle_files() {
+    let directory = tempdir().expect("fixture directory");
+    let key = directory.path().join("release.key");
+    let state_a = directory.path().join("state/state-a.bin");
+    let state_b = directory.path().join("state/state-b.bin");
+    let report = directory.path().join("state/success.bin");
+    fs::write(&key, [7_u8; 32]).expect("release key");
+
+    let public_key = Command::new(env!("CARGO_BIN_EXE_sol-image"))
+        .args(["release-public-key", "--signing-key"])
+        .arg(&key)
+        .output()
+        .expect("derive release public key");
+    assert!(public_key.status.success());
+    assert_eq!(String::from_utf8_lossy(&public_key.stdout).trim().len(), 64);
+
+    let initialized = Command::new(env!("CARGO_BIN_EXE_sol-image"))
+        .args([
+            "init-boot-state",
+            "--slot",
+            "A",
+            "--generation",
+            "1",
+            "--state-a",
+        ])
+        .arg(&state_a)
+        .arg("--state-b")
+        .arg(&state_b)
+        .output()
+        .expect("initialize state");
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let staged = Command::new(env!("CARGO_BIN_EXE_sol-image"))
+        .args([
+            "stage-boot-trial",
+            "--slot",
+            "B",
+            "--generation",
+            "2",
+            "--attempts",
+            "3",
+            "--state-a",
+        ])
+        .arg(&state_a)
+        .arg("--state-b")
+        .arg(&state_b)
+        .output()
+        .expect("stage state");
+    assert!(
+        staged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    let a = fs::read(&state_a).expect("state A");
+    let b = fs::read(&state_b).expect("state B");
+    let selected = select_redundant_state(Some(&a), Some(&b)).expect("select staged state");
+    assert_eq!(selected.envelope().sequence(), 2);
+    assert!(matches!(
+        selected
+            .envelope()
+            .state()
+            .record(DeploymentSlot::B)
+            .map(sol_boot_core::DeploymentRecord::status),
+        Some(DeploymentStatus::Trial {
+            remaining_attempts: 3,
+            pending_attempt: None
+        })
+    ));
+    assert_eq!(
+        DurableBootState::from_canonical_bytes(&a).expect("decode A"),
+        DurableBootState::from_canonical_bytes(&b).expect("decode B")
+    );
+
+    let reported = Command::new(env!("CARGO_BIN_EXE_sol-image"))
+        .args([
+            "success-report",
+            "--slot",
+            "B",
+            "--generation",
+            "2",
+            "--attempt",
+            "1",
+            "--output",
+        ])
+        .arg(&report)
+        .output()
+        .expect("write success report");
+    assert!(reported.status.success());
+    let decoded =
+        BootSuccessReport::from_canonical_bytes(&fs::read(report).expect("success report bytes"))
+            .expect("decode report");
+    assert_eq!(decoded.deployment.slot(), DeploymentSlot::B);
+    assert_eq!(decoded.deployment.generation(), 2);
+    assert_eq!(decoded.attempt.get(), 1);
+}
+
+#[test]
+fn cli_signs_a_format_two_manifest_and_uki_binding() {
+    let directory = tempdir().expect("fixture directory");
+    let kernel = directory.path().join("vmlinuz");
+    let initrd = directory.path().join("initrd.img");
+    let root = directory.path().join("root.img");
+    let uki = directory.path().join("system.efi");
+    let manifest = directory.path().join("manifest.json");
+    let key = directory.path().join("release.key");
+    let descriptor = directory.path().join("deployment.bin");
+    fs::write(&kernel, b"kernel").expect("kernel");
+    fs::write(&initrd, b"initrd").expect("initrd");
+    fs::write(&root, b"root").expect("root");
+    fs::write(&uki, b"UKI PE bytes").expect("UKI");
+    fs::write(&key, [9_u8; 32]).expect("key");
+
+    let manifest_result = Command::new(env!("CARGO_BIN_EXE_sol-image"))
+        .args([
+            "manifest",
+            "--slot",
+            "A",
+            "--generation",
+            "7",
+            "--version",
+            "0.7.0",
+            "--kernel",
+        ])
+        .arg(&kernel)
+        .arg("--initrd")
+        .arg(&initrd)
+        .arg("--root-image")
+        .arg(&root)
+        .arg("--uki")
+        .arg(&uki)
+        .args([
+            "--kernel-component",
+            "kernel:gen-7-kernel",
+            "--initrd-component",
+            "initrd:gen-7-initrd",
+            "--dm-verity-root-hash",
+            &"b".repeat(64),
+            "--dm-verity-slot-root",
+            "slot-a-gen-7-root",
+            "--runtime",
+            "sol-runtime-1:1",
+            "--output",
+        ])
+        .arg(&manifest)
+        .output()
+        .expect("create format 2 manifest");
+    assert!(
+        manifest_result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&manifest_result.stderr)
+    );
+
+    let signed_result = Command::new(env!("CARGO_BIN_EXE_sol-image"))
+        .args([
+            "boot-descriptor",
+            "--slot",
+            "A",
+            "--generation",
+            "7",
+            "--manifest",
+        ])
+        .arg(&manifest)
+        .arg("--uki")
+        .arg(&uki)
+        .arg("--signing-key")
+        .arg(&key)
+        .arg("--output")
+        .arg(&descriptor)
+        .output()
+        .expect("sign descriptor");
+    assert!(
+        signed_result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&signed_result.stderr)
+    );
+
+    let signed = SignedDeploymentDescriptor::from_canonical_bytes(
+        &fs::read(descriptor).expect("descriptor bytes"),
+    )
+    .expect("canonical signed descriptor");
+    assert_eq!(signed.descriptor().deployment().slot(), DeploymentSlot::A);
+    assert_eq!(signed.descriptor().deployment().generation(), 7);
+    let public = SigningKey::from_bytes(&[9_u8; 32]).verifying_key();
+    public
+        .verify(
+            &signed.descriptor().canonical_payload(),
+            &ed25519_dalek::Signature::from_bytes(&signed.signature()),
+        )
+        .expect("valid release signature");
 }
