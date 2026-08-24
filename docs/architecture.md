@@ -22,7 +22,7 @@ Packages      (planned)     sol-pkg · sol-packaged · sol-bundle · app store
 Shell         (shell/)      dock · launcher · global menu · status · capsule
 Compositor    (compositor/) Smithay · Wayland · scene · WM · input
 ─────────────
-System image  (planned)     sol-image · read-only A/B slots · recovery
+System image  (foundation)  sol-image manifest · planned read-only A/B slots
 Boot          (planned)     signed sol-boot UEFI executable and slot policy
 ─────────────
 Upstream                    Linux · systemd · Mesa · PipeWire · drivers · etc.

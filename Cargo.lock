@@ -4044,6 +4044,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sol-image"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "sol-ime"
 version = "0.1.0"
 dependencies = [

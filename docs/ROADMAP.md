@@ -1,15 +1,26 @@
 # SOL Roadmap
 
 > **Status:** Living document — this file is refined as each Phase closes.
+> **Last reviewed:** 2026-08-23, against the PRD, OS Platform Definition,
+> Shell contract, and accepted ADRs through ADR-0025.
 > **Basis:** [PRD §38 Development Phases](PRD.md) define the goal and success
 > criterion for each Phase.
-> **Related:** engineering decisions in [`docs/decisions/`](decisions/README.md);
-> product requirements in the [PRD](PRD.md).
+> **Related:** normative OS contracts in the
+> [OS Platform Definition](os-platform.md), Shell behavior in the
+> [Shell Spatial and Live Activity Contract](shell-experience.md), engineering
+> decisions in the [decision log](decisions/README.md), and product
+> requirements in the [PRD](PRD.md).
 >
 > This Roadmap is an **engineering execution view** of the PRD: it decomposes
 > each Phase into shippable work items, acceptance points, and milestones, and
 > flags dependencies and risks. Granularity can (and should) be refined as we
 > reach the corresponding Phase.
+
+When documents disagree, the PRD owns product scope, `os-platform.md` owns the
+OS trust/package/security/runtime contract, accepted ADRs own engineering
+decisions, and this file owns sequencing and closure evidence. Component
+READMEs and tests describe implementation evidence; they do not relax a
+normative acceptance gate.
 
 ---
 
@@ -32,6 +43,64 @@
 > remain useful engineering history. SOL is now a complete Linux-kernel OS.
 > Phases 7–9 add the boot, image, package, security, and stable runtime work
 > required by that product boundary. See [OS Platform Definition](os-platform.md).
+
+### Status and closure rules
+
+| Mark | Meaning |
+|---|---|
+| ✅ Complete | The Phase success criterion has evidence at the required boundary; remaining work is explicitly outside that Phase's closure gate. |
+| ⏳ In progress | At least one implementation slice exists, but one or more named closure gates remain open. |
+| 🔲 Planned | Architecture or product scope may be accepted, but no Phase-level implementation completion is claimed. |
+| `[x]` deliverable | That bounded item is evidenced. It does **not** imply its parent surface, integration, or Phase is complete. |
+| `[ ]` deliverable | Required for closure unless the PRD/ADR is explicitly revised. |
+
+A mock, renderer-neutral fixture, headless protocol round trip, isolated D-Bus
+test, or live-host probe is recorded as exactly that kind of evidence. A Phase
+that promises hardware, trusted UI, accessibility technology, rollback, or
+cross-process enforcement closes only with validation at that real boundary.
+
+### Current closure gates
+
+| Phase | Blocking closure evidence | Immediate unlock |
+|---|---|---|
+| 2 | Native renderer/input pacing plus a real AT-SPI/screen-reader session | Treat SolKit as a platform-validated app framework rather than a renderer-neutral contract |
+| 3 | Native Files/Terminal/Settings surfaces and Files desktop integrations | Three applications can serve as a real SolKit conformance suite |
+| 4 | Native Dock/Launcher/Overview/Notification surfaces, Shell IPC, live thumbnails, global menu/status/Live Capsule, and real gesture input | Complete desktop interaction model |
+| 5 | Physical hardware matrix, suspend/resume, display hotplug/scaling, native data transfer, capture, IME, and authorized system writes | Daily-driver claim |
+| 6 | Published/versioned SDK, external consumer build, migration/API docs, debugger and native `.app` packaging path | Independent third-party development claim |
+| 7 | Reproducible signed image plus fault-injected boot/update/recovery trials on the first hardware target | Recoverable OS image |
+| 8 | Transactional `.app` activation plus kernel/broker enforcement and coordinator-atomic permission/account tests | Native application trust boundary |
+| 9 | Stable runtime descriptor/ABI/IPC, external signed app proof, compatibility conformance, and material frame/accessibility gates | Runtime/ecosystem release |
+
+### Delivery tracks and dependency gates
+
+Phase numbers express product maturity, not a requirement to serialize all
+work. The following tracks may proceed in parallel, but may merge only at the
+named gate.
+
+| Track | Execution order | Merge gate |
+|---|---|---|
+| Desktop closure | Phase 2 → Phases 3/4 → Phase 5 → Phase 6 external proof | Phase 3/4 native surfaces use the same platform-validated SolKit and Shell contracts |
+| OS trust | M7.1 formats → M7.2 deployment state machine → M7.3 boot/recovery → M7.4 hardware release | No artifact is called known-good before an authenticated trial and health gate |
+| App trust | M8.1 bundle/store → M8.2 activation → M8.3 security → M8.4 accounts → M8.5 hardening | App ID, publisher, bundle hash, process generation, grants, and leases remain correlated end to end |
+| Runtime/ecosystem | M9.1 runtime contract → M9.2 SDK delivery → M9.3 compatibility; M9.4 material may proceed in parallel | M9.1 descriptor schema is required by M8.2 resolution; M8 security/package services are required by the external-app release proof |
+
+The OS MVP is the first integrated release slice. It joins the Phase 5 desktop
+baseline with M7 recovery, M8 package/security/account enforcement, and one
+`sol-runtime-1` external sample from M9. It is not reached merely by completing
+the phases in numeric order.
+
+### Normative traceability
+
+| Source contract | Roadmap execution owner |
+|---|---|
+| [PRD](PRD.md) §33, §38, §41 | Hardware themes, Phase goals/success criteria, and open decision gates across all phases |
+| [OS Platform Definition](os-platform.md) §3–4 | M7 boot, recovery, image, and transaction milestones |
+| [OS Platform Definition](os-platform.md) §5, §7–8 | M8 bundle, package, sandbox, atomic permission, account, and vault milestones |
+| [OS Platform Definition](os-platform.md) §6, §9, §11–12 | M9 runtime, compatibility, material, and integrated acceptance gates |
+| [Shell contract](shell-experience.md) §1–10 | Phase 4 native Shell surfaces and M9.3 stable external menu/status/Live Activity integration |
+| [ADR-0019–0025](decisions/README.md) | Accepted invariants and the remaining implementation/non-claim boundaries for M7–M9 |
+| [Architecture](architecture.md) | Repository ownership and dependency-direction checks for every implementation slice |
 
 **Do-not-defer-to-the-end themes across phases** (PRD §33): Multi-monitor,
 Fractional Scaling, Suspend/Resume, NVIDIA, Touchpad, Display Hotplug, IME.
@@ -728,21 +797,70 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > **Goal:** boot, update, validate, roll back, and recover a SOL-owned system
 > image on supported x86-64 UEFI hardware.
 
-### Milestone M7 deliverables
+### M7.1 — Formats, trust roots, and reproducibility
 
-- [ ] `sol-image`: reproducible deployment manifests binding each slot's kernel,
-      initrd, root-image digest, runtime descriptors, and generation.
-- [ ] `sol-boot`: redundant signed UEFI copies, artifact verification, A/B
-      deployment selection, bounded retry, and firmware-visible fallback.
-- [ ] Two-phase `sol-boot`/recovery update: inactive-copy write and verification,
-      one-shot trial, promotion, and automatic return to the retained copy.
-- [ ] Early userspace boot-success protocol with authenticated slot/version.
-- [ ] Recovery image that verifies, repairs, or reinstalls without the Shell.
-- [ ] Installer with explicit disk-layout, encryption, key enrollment, and
-      recovery behavior for the first hardware target.
-- [ ] Hardware CI: clean install; interrupted EFI/recovery/deployment update;
-      corrupted image; failed trial boot; firmware-variable failure; power loss;
-      automatic fallback; manual recovery; and user-data preservation.
+- [ ] Close PRD §41 decisions #13, #22, and #23 for release channels/upstream
+      cadence, boot measurement/key enrollment/EFI encoding, and system-image
+      filesystem/delta encoding without weakening ADR-0019 invariants.
+- [ ] Finish the versioned canonical schema set for deployment manifests,
+      boot/recovery trial records, slot state, boot-success reports, and
+      revocation metadata, using the implemented deployment manifest as the
+      first foundation.
+- [x] `sol-image` manifest foundation: reproducible deployment manifests bind
+      each slot and generation to the kernel, initrd, root-image SHA-256
+      digest/length, and sorted runtime major/revision/feature descriptors.
+      Canonical parsing, atomic output, and mutation fixtures reject drift in
+      every bound artifact; signing, final image/UEFI encoding, and composition
+      remain separate gates.
+- [ ] Produce an inspectable build manifest/SBOM and a reproducibility report
+      from two isolated builds; document any allowed non-deterministic fields.
+
+### M7.2 — System deployment transaction
+
+- [ ] Implement the `resolve → fetch → verify → stage → validate → commit`
+      transaction with the inactive slot written first and its manifest
+      committed last.
+- [ ] `sol-boot` verifies artifacts, selects only a complete signed deployment,
+      enforces bounded retry, and falls back to a retained known-good slot.
+- [ ] Early userspace reports authenticated slot, generation, and system version;
+      a verified image becomes known-good only after the health gate succeeds.
+- [ ] Power loss, partial download/write, signature failure, corrupt manifest,
+      failed health gate, and stale/replayed boot-success reports leave the
+      previous deployment selected and user data unchanged.
+
+### M7.3 — Redundant boot and recovery authority
+
+- [ ] Ship independently addressable current/fallback signed `sol-boot` copies
+      and independently addressable current/fallback recovery copies.
+- [ ] Implement two-phase boot/recovery updates: write inactive copy, verify,
+      register one-shot trial, then promote or return through a firmware-visible
+      path to the retained copy.
+- [ ] Recovery boots without the compositor or Shell and can verify, repair, or
+      reinstall a deployment while preserving or explicitly erasing user data.
+- [ ] Garbage collection retains an independent boot, recovery, and deployment
+      fallback until its replacement has passed the corresponding trial gate.
+
+### M7.4 — Installation and hardware release gate
+
+- [ ] Installer for the first x86-64 UEFI target with explicit disk layout,
+      encryption, Secure Boot/key enrollment, recovery-key, reinstall, and data
+      preservation behavior.
+- [ ] Hardware CI covers clean install; interrupted EFI/recovery/deployment
+      update; corrupt image; failed trial boot; firmware-variable failure; power
+      loss at every commit boundary; automatic fallback; manual recovery; and
+      user-data preservation.
+- [ ] Publish a signed release-evidence manifest recording artifacts, test matrix,
+      hardware/firmware identifiers, failures, waivers, and retained fallbacks.
+
+### M7 dependencies and non-claims
+
+- **Inputs:** ADR-0019 and `os-platform.md` §3–4; a frozen first hardware target,
+  trust-root/key-enrollment policy, disk layout, and image encoding are required
+  before M7.4 can close.
+- **Parallelism:** image composition and state-machine fault injection can run
+  without the graphical desktop; recovery UX must not depend on Phase 4.
+- **Non-claim:** a QEMU boot or signature check alone does not prove firmware
+  fallback, power-loss safety, known-good promotion, or data preservation.
 
 ### M7 success criterion
 
@@ -751,6 +869,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > reach a signed known-good deployment and independent recovery, and user data
 > is unchanged.
 
+**Required closure evidence:** one clean install, one successful update, and the
+full failure matrix above must pass on the first supported hardware target as
+well as in deterministic VM/fault-injection coverage.
+
 ---
 
 ## Phase 8 — Native Application Platform
@@ -758,41 +880,91 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > **Goal:** make `.app` the signed, isolated, transactional unit of native SOL
 > application installation and execution.
 
-### Milestone M8 deliverables
+### M8.1 — Bundle, repository, and content store
 
-- [ ] Canonical `.app` manifest and deterministic container encoding, including
-      runtime major, minimum contract revision, and required features.
-- [ ] `sol-bundle` build/lint/inspect/sign/verify tools with SBOM/provenance.
-- [ ] `sol-pkg` client and privileged `sol-packaged` transaction service.
-- [ ] Signed repository metadata, publisher trust, revocation, offline
-      verification, and content-addressed machine-wide store.
-- [ ] Atomic install/update/remove/rollback with interrupted-transaction tests.
-- [ ] Per-deployment app compatibility resolver: first non-revoked compatible
-      hash in the recorded preferred/fallback chain, or explicit unavailable
-      state; no boot or app-data rollback and no display-version ordering.
-- [ ] Preferred/effective state tests: update prepends, explicit app rollback
-      truncates newer resolution candidates, OS rollback never rewrites the
-      preferred pointer, and reinstall creates a fresh chain.
-- [ ] Garbage-collection protection for a compatible app version for each
-      retained known-good deployment when one was previously installed.
-- [ ] `sol-securityd`: authenticated App ID, isolated data, default-deny
-      sandbox, grant persistence, revocation, and bounded audit.
-- [ ] Unified atomic permission ledger: explicit grant, audit record, and
-      capability lease (or allow-once consumption) commit together or not at
-      all; unrelated permissions retain separate controls and revocation.
-- [ ] Durable/release identity policy: same-lineage update/rollback retains
-      grants but refreshes handles; new capabilities and publisher discontinuity
-      inherit nothing; uninstall/reinstall requires new consent.
-- [ ] Kernel enforcement through namespaces/cgroups/seccomp plus selected
-      Landlock/LSM policy; direct-service bypass tests.
-- [ ] File/device/media/secret portals with trusted point-of-use Shell consent.
-- [ ] `sol-securityd` participant coordinator: transaction IDs, authoritative
-      grant/audit ledger, commit proofs, authorization generations, recovery.
-- [ ] `sol-accountsd`: device/connected account metadata, provider adapters,
-      lifecycle, and prepared app × account × scope associations.
-- [ ] `sol-vaultd`: encrypted credentials, hardware-backed sealing where
-      available, recovery keys, commit-proof-bound scoped leases, and
-      generation-fenced removal.
+- [ ] Close PRD §41 decision #20 and define a canonical `.app` manifest plus
+      deterministic container encoding. Signature-covered fields include App ID,
+      publisher, executable/resource hashes, architecture, capabilities,
+      extensions, runtime major, minimum contract revision, and features.
+- [ ] `sol-bundle` build/lint/inspect/sign/verify tools emit SBOM/provenance and
+      reject non-canonical input, undeclared executable content, install hooks,
+      path traversal, ambiguous identity, and unsupported runtime requirements.
+- [ ] `sol-pkg` client and privileged `sol-packaged` service consume signed
+      repository metadata with publisher trust, revocation, rollout/channel
+      policy, transparency data, offline verification, and a content-addressed
+      machine-wide read-only store.
+- [ ] Correlate repository identity → bundle hash → installed record → launched
+      process; filenames, mutable URLs, desktop metadata, and app-supplied names
+      are never authentication.
+
+### M8.2 — Transactional lifecycle and compatibility resolution
+
+- [ ] Atomic install/update/remove/rollback preserves app data outside the
+      bundle and leaves the previous active version intact on interruption.
+- [ ] Maintain separate preferred and effective state. Resolve the first
+      non-revoked compatible hash from the recorded fallback chain against the
+      booted deployment's authenticated runtime descriptor, never by display
+      version ordering.
+- [ ] Test that update prepends, explicit app rollback truncates newer resolution
+      candidates, OS rollback never rewrites the preferred pointer, and fresh
+      reinstall creates a fresh chain and security identity relationship.
+- [ ] Expose an explicit per-app unavailable state when no compatible retained
+      hash exists; do not block boot, mutate app data, or silently select an
+      incompatible version.
+- [ ] Garbage collection retains a compatible app version for every known-good
+      deployment when one was previously installed and records the compatibility
+      matrix during system-update validation.
+
+### M8.3 — Process isolation, portals, and atomic authority
+
+- [ ] `sol-securityd` authenticates durable and release identities, creates
+      isolated data roots, and enforces default deny with namespaces, cgroups,
+      seccomp, Wayland mediation, and the selected Landlock/LSM composition.
+- [ ] Replace the Phase 5 grant/audit prototype stores with one authoritative
+      ledger where the minimum-scope grant, audit record, and lease or allow-once
+      consumption commit together or not at all.
+- [ ] Same-lineage update/rollback may retain eligible durable grants but always
+      refreshes release/process-bound handles. New capabilities and publisher
+      discontinuity inherit nothing; uninstall/reinstall requires new consent.
+- [ ] File, device, media, secret, and other protected capabilities use typed
+      brokers/portals and trusted point-of-use Shell consent. Direct service,
+      socket, filesystem, and Wayland-protocol bypass attempts fail closed.
+- [ ] Revocation invalidates authority before cleanup and remains effective
+      across app/security-service crashes, stale handles, replay, and offline use.
+
+### M8.4 — Managed accounts and credential vault
+
+- [ ] `sol-securityd` coordinates transaction IDs, prepare/commit/abort/recovery,
+      participant receipts, commit proofs, and monotonic authorization generations.
+- [ ] `sol-accountsd` owns device/connected account metadata, provider adapters,
+      lifecycle, and prepared app × account × scope associations that are not
+      enumerable before commit.
+- [ ] `sol-vaultd` owns encrypted credentials, hardware-backed sealing where
+      available, explicit recovery keys, commit-proof-bound scoped leases, and
+      generation-fenced removal. Apps never receive durable credentials.
+- [ ] Crash injection before/after every participant and coordinator boundary
+      converges idempotently: no partial grant, audit, association, or usable
+      credential survives an abort or reported revocation.
+
+### M8.5 — Cross-boundary security release gate
+
+- [ ] Threat model and conformance suite cover undeclared, implicit, bundled,
+      partially committed, stale-generation, cross-App-ID, revoked, and direct-
+      service authority, plus publisher discontinuity and reinstall semantics.
+- [ ] Two bundles with conflicting private dependencies run side by side without
+      host-library resolution, cross-app data access, or shared mutable package
+      state.
+- [ ] Publish transaction/fault-injection evidence for package, permission,
+      account, vault, portal, and service-restart boundaries.
+
+### M8 dependencies and non-claims
+
+- **Inputs:** ADR-0012/0013 and ADR-0020 through ADR-0022; M7 supplies the
+  authenticated deployment/runtime descriptor, while M9.1 freezes its schema.
+- **Trusted UI:** Phase 4's consent and privacy surfaces may be developed in
+  parallel, but M8 closes only when their decisions drive real broker authority.
+- **Non-claim:** persisted grants, a sandbox command line, or a consent mock by
+  itself does not prove atomic authorization or kernel/broker enforcement.
 
 ### M8 success criterion
 
@@ -803,6 +975,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > broker boundary; and an app cannot enumerate an account or retain its durable
 > credential without an explicit coordinator-committed account-scoped grant.
 
+**Required closure evidence:** end-to-end tests must start from a signed
+repository, launch the authenticated installed hash, exercise real enforcement,
+and repeat the update/rollback/revocation paths with crash injection.
+
 ---
 
 ## Phase 9 — Runtime and Ecosystem
@@ -810,36 +986,89 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > **Goal:** let external developers ship compact native apps by sharing only a
 > stable SOL platform while keeping every other dependency private.
 
-### Milestone M9 deliverables
+### M9.1 — Stable runtime contract
 
-- [ ] Define and publish the `sol-runtime-1` signed descriptor: stable ABI,
-      monotonically increasing contract revision, named features, and versioned
-      IPC protocols; explicitly exclude internal Rust ABI.
-- [ ] SolKit language bindings, compatibility tests, API reference, migration
-      guide, and lifecycle policy for runtime major slots.
-- [ ] `.app` templates, reproducible release pipeline, signing workflow,
-      permission linting, local sandbox runner, and repository publishing.
-- [ ] Framework coverage for UI, lifecycle, accessibility, localization,
-      settings, storage, notifications, documents, and capability brokers.
-- [ ] Compatibility recipes for Wayland-native GTK, Qt, SDL, Flutter, and
-      Electron apps that vendor their own non-SOL runtime.
-- [ ] `sol-gtk` and `sol-qt` adapters, bundled at toolkit-compatible versions,
-      for lifecycle, documents, notifications, atomic permissions, accounts,
-      appearance, accessibility, windowing, and semantic material roles.
-- [ ] Native / Integrated / Compatible conformance suite: identical sandbox,
-      denial, account, update, and rollback semantics across support levels;
-      no host toolkit/plugin resolution or global theme injection.
-- [ ] Constrained semantic-material Wayland protocol prototype: clients request
-      roles/regions only; compositor returns no pixels and can consolidate,
-      reject, or use a solid fallback.
-- [ ] Software catalog as a client of `sol-packaged`, with no alternate trust
-      or installation path.
-- [ ] Side-by-side runtime-major tests plus system-rollback compatibility tests
-      proving newest-compatible app selection, unavailable-state behavior,
-      protected retention, and app-data preservation.
-- [ ] Compositor-backed SOL Fluid Material: secure backdrop groups, adaptive
-      contrast, interruptible materialization, nested-glass limits, reduced-
-      transparency/high-contrast fallbacks, and GPU/power frame-budget gates.
+- [ ] Close PRD §41 decision #21 and publish a canonical signed
+      `sol-runtime-1` descriptor with stable C-compatible ABI where in-process
+      calls are required, versioned IPC, monotonic contract revision, named
+      features, architecture, and lifecycle/support policy. Internal Rust ABI is
+      explicitly excluded.
+- [ ] Generate or validate ABI/API/IPC schemas and compatibility fixtures;
+      compatible revisions add without removing old contracts, while breaking
+      changes install as side-by-side runtime majors.
+- [ ] Cover UI, lifecycle, accessibility, localization, settings, storage,
+      notifications, documents, commands, background work, accounts, and typed
+      capability-broker clients through stable runtime endpoints.
+- [ ] Freeze the descriptor/resolution schema shared with M7 deployment
+      manifests and M8 app activation before either compatibility gate closes.
+
+### M9.2 — External SDK and release workflow
+
+- [ ] Finish Phase 6 publication gates: versioned SolKit bindings, API reference,
+      migration guide, compatibility tests, and supported-language policy.
+- [ ] Ship `.app` project templates, reproducible release pipeline, signing and
+      verification workflow, permission/runtime linting, local sandbox runner,
+      repository publishing, and debugging/inspection tools.
+- [ ] An external developer, using only published docs and artifacts, builds and
+      signs the sample outside the monorepo, installs it through `sol-pkg`, and
+      exercises accessibility plus at least one document and one brokered
+      protected-capability flow.
+- [ ] Software catalog remains an unprivileged client of `sol-packaged`; CLI and
+      GUI installation share the same trust, transaction, and policy path.
+
+### M9.3 — Toolkit and Shell integration compatibility
+
+- [ ] Close PRD §41 decisions #26 and #27 for the adapter/protocol matrix and
+      Live Activity/menu/status IPC schema.
+- [ ] Publish compatibility recipes for Wayland-native GTK, Qt, SDL, Flutter,
+      and Electron bundles that vendor their tested non-SOL runtimes and plugins.
+- [ ] `sol-gtk` and `sol-qt` adapters map public toolkit APIs to lifecycle,
+      documents, notifications, atomic permissions, accounts, appearance,
+      accessibility, windowing/decorations, global menus, status items, Live
+      Capsule registration, and semantic material roles where representable.
+- [ ] Shell integrations are authenticated, declarative, leased/rate-limited,
+      removed on crash/replacement/expiry, and never grant their underlying
+      media, capture, device, or background authority.
+- [ ] Native / Integrated / Compatible conformance proves identical sandbox,
+      denial, account, update, rollback, and fresh-handle semantics; adapters
+      load no mutable host toolkit/plugin and fall back to baseline Wayland/
+      portal behavior when possible.
+
+### M9.4 — Compositor-backed Fluid Material
+
+- [ ] Close PRD §41 decision #25 and prototype a constrained semantic-material
+      Wayland protocol: clients request bounded roles/regions only; the
+      compositor returns no pixels and may consolidate, reject, or render solid.
+- [ ] Implement secure backdrop groups, adaptive contrast, bounded refraction/
+      grain/blur, interruptible materialization from live state, and nested-glass
+      depth limits for `Chrome/Panel/Floating/Control/Sidebar/Dock/Capsule`.
+- [ ] Reduced transparency and high contrast perform no backdrop sampling or
+      refraction; reduced motion, remote sessions, battery saving, unsupported
+      GPUs, and frame pressure preserve hierarchy and interaction through
+      deterministic fallbacks.
+- [ ] Adversarial-backdrop contrast, protected-content isolation, multi-output,
+      fractional-scale, GPU frame-time, memory, and power tests pass on the
+      supported hardware matrix.
+
+### M9.5 — Ecosystem compatibility release gate
+
+- [ ] Side-by-side runtime-major and system-rollback tests prove first-compatible
+      non-revoked hash selection, explicit unavailable state, protected
+      retention, and unchanged app data/preferred pointer.
+- [ ] Two GTK/Qt apps with incompatible private toolkit versions coexist with a
+      Native sample and receive equivalent system-capability/security behavior.
+- [ ] Publish signed runtime descriptors, SDK/tool versions, conformance results,
+      compatibility matrix, material performance evidence, and known limitations
+      as one release-evidence set.
+
+### M9 dependencies and non-claims
+
+- **Inputs:** Phase 2/6 supply the public framework/API discipline; M8 supplies
+  installation, identity, enforcement, permissions, accounts, and portals;
+  Phase 4 supplies the trusted Shell surfaces consumed by stable integrations.
+- **Non-claim:** an in-tree sample, an unpublished Rust crate, visual theme
+  similarity, or one successful toolkit launch does not establish a stable
+  runtime/ecosystem contract.
 
 ### M9 success criterion
 
@@ -853,6 +1082,11 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > selects the first non-revoked retained runtime-compatible hash from the
 > preferred release's fallback chain or exposes an
 > explicit per-app unavailable state without blocking boot or changing app data.
+
+**Required closure evidence:** repeat the external sample lifecycle against the
+current and retained known-good deployments, then run Native/Integrated/
+Compatible security and accessibility conformance on supported and fallback
+material render paths.
 
 ---
 
@@ -874,6 +1108,9 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 | Package identity | Phase 8 | `.app` App ID/publisher/hash must remain correlated from repository to process |
 | Runtime compatibility | Phase 9 | Stable major slots; C-compatible ABI + versioned IPC, never internal Rust ABI |
 | Hardware test matrix | throughout | AMD → Intel → NVIDIA; laptop/desktop; single/multi-display; HiDPI (§33) |
+| Fault injection | Phases 7–9 | Exercise every persistent transaction boundary, service restart, stale generation, and rollback path before release |
+| Release evidence | Phases 6–9 | Signed artifact inventory, exact test matrix, hardware/runtime identifiers, known failures, and explicit waivers |
+| Accessibility / localization | throughout | Real AT, keyboard, text scale, contrast, reduced motion/transparency, RTL internals, narrow/scaled/multi-output layouts |
 
 ## Long-term platform direction (after Phase 9, PRD §42)
 
@@ -901,6 +1138,12 @@ SOL Applications → Third-party Applications
 ---
 
 ## Revision history
+
+- **2026-08-23** — Clarified document precedence and closure semantics, added
+  current blockers and parallel delivery tracks, and decomposed Phases 7–9 into
+  executable sub-milestones with dependencies, non-claims, fault-injection
+  coverage, and release-evidence gates aligned to the PRD, OS Platform
+  Definition, Shell contract, and ADR-0019 through ADR-0025.
 
 - **2026-08-22** — Rebased SOL from an Arch-installable desktop platform to a
   complete Linux-kernel OS. Added Phases 7–9 for redundant trial-updated

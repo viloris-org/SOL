@@ -34,6 +34,8 @@ validation (ADR-0004) pending network access for dependency resolution.
 
 The OS rebaseline adds these system foundations:
 
+- `sol-image`: byte-reproducible, slot-bound deployment manifests with exact
+  kernel, initrd, root-image, generation, and runtime-contract verification.
 - `sol-boot`: redundant signed UEFI/recovery paths with trial activation and
   verified slot-bound A/B system deployments.
 - `sol-pkg` + `sol-packaged`: one transactional manager for boot/recovery
@@ -81,7 +83,7 @@ tokens. Slint backend integration pending spike validation.
 | `apps/` | First-party apps: Files, Terminal, Settings | 🔲 placeholders → Phase 3 |
 | `protocols/` | Wayland protocol XML + IPC schemas | 🔲 no stable protocol yet |
 | `packaging/arch/` | Transitional Arch bootstrap/build packaging | 🟡 historical/transition |
-| `boot/` | Target home of `sol-boot`, recovery, and verified-slot policy | 🔲 planned |
+| `boot/` | `sol-image` manifest tooling; target home of `sol-boot`, recovery, and verified-slot policy | 🟡 Phase 7 manifest foundation |
 | `packaging/sol/` | Target home of `.app` tooling and `sol-pkg` contracts | 🔲 planned |
 | `security/` | Target home of sandbox, permission, consent, and audit services | 🔲 planned |
 | `accounts/` | Target home of system accounts, credential vault, and provider brokers | 🔲 planned |
