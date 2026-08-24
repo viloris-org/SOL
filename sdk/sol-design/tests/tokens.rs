@@ -21,6 +21,7 @@ fn semantic_colors_resolve_with_alpha() {
         Color::Elevated.rgba(),
         Color::Accent.rgba(),
         Color::TextPrimary.rgba(),
+        Color::TextOnAccent.rgba(),
         Color::TextSecondary.rgba(),
         Color::Border.rgba(),
         Color::HoverOverlay.rgba(),

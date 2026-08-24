@@ -146,6 +146,7 @@ impl TokenMode {
             (Theme::Light, Contrast::Standard, Color::Elevated) => Rgba(1.0, 1.0, 1.0, 1.0),
             (Theme::Light, Contrast::Standard, Color::Accent) => Rgba(0.40, 0.55, 0.95, 1.0),
             (Theme::Light, Contrast::Standard, Color::TextPrimary) => Rgba(0.12, 0.12, 0.14, 1.0),
+            (Theme::Light, Contrast::Standard, Color::TextOnAccent) => Rgba(0.12, 0.12, 0.14, 1.0),
             (Theme::Light, Contrast::Standard, Color::TextSecondary) => Rgba(0.42, 0.42, 0.47, 1.0),
             (Theme::Light, Contrast::Standard, Color::Border) => Rgba(0.80, 0.80, 0.83, 1.0),
             (Theme::Light, Contrast::Standard, Color::HoverOverlay) => Rgba(0.0, 0.0, 0.0, 0.06),
@@ -154,6 +155,7 @@ impl TokenMode {
             (Theme::Dark, Contrast::Standard, Color::Elevated) => Rgba(0.16, 0.17, 0.20, 1.0),
             (Theme::Dark, Contrast::Standard, Color::Accent) => Rgba(0.50, 0.66, 1.0, 1.0),
             (Theme::Dark, Contrast::Standard, Color::TextPrimary) => Rgba(0.95, 0.96, 0.98, 1.0),
+            (Theme::Dark, Contrast::Standard, Color::TextOnAccent) => Rgba::BLACK,
             (Theme::Dark, Contrast::Standard, Color::TextSecondary) => Rgba(0.70, 0.72, 0.76, 1.0),
             (Theme::Dark, Contrast::Standard, Color::Border) => Rgba(0.34, 0.36, 0.40, 1.0),
             (Theme::Dark, Contrast::Standard, Color::HoverOverlay) => Rgba(1.0, 1.0, 1.0, 0.10),
@@ -162,6 +164,7 @@ impl TokenMode {
             (Theme::Light, Contrast::High, Color::Elevated) => Rgba::WHITE,
             (Theme::Light, Contrast::High, Color::Accent) => Rgba(0.0, 0.20, 0.75, 1.0),
             (Theme::Light, Contrast::High, Color::TextPrimary) => Rgba::BLACK,
+            (Theme::Light, Contrast::High, Color::TextOnAccent) => Rgba::WHITE,
             (Theme::Light, Contrast::High, Color::TextSecondary) => Rgba::BLACK,
             (Theme::Light, Contrast::High, Color::Border) => Rgba::BLACK,
             (Theme::Light, Contrast::High, Color::HoverOverlay) => Rgba(0.0, 0.0, 0.0, 0.18),
@@ -170,6 +173,7 @@ impl TokenMode {
             (Theme::Dark, Contrast::High, Color::Elevated) => Rgba::BLACK,
             (Theme::Dark, Contrast::High, Color::Accent) => Rgba(1.0, 0.90, 0.0, 1.0),
             (Theme::Dark, Contrast::High, Color::TextPrimary) => Rgba::WHITE,
+            (Theme::Dark, Contrast::High, Color::TextOnAccent) => Rgba::BLACK,
             (Theme::Dark, Contrast::High, Color::TextSecondary) => Rgba::WHITE,
             (Theme::Dark, Contrast::High, Color::Border) => Rgba::WHITE,
             (Theme::Dark, Contrast::High, Color::HoverOverlay) => Rgba(1.0, 1.0, 1.0, 0.22),
@@ -223,6 +227,51 @@ mod tests {
         assert_eq!(mode.color(Color::Surface), Rgba::BLACK);
         assert_eq!(mode.color(Color::TextPrimary), Rgba::WHITE);
         assert_eq!(mode.color(Color::Border), Rgba::WHITE);
+    }
+
+    #[test]
+    fn text_on_accent_switches_for_contrast_in_every_palette() {
+        assert_eq!(
+            TokenMode::light().color(Color::TextOnAccent),
+            Rgba(0.12, 0.12, 0.14, 1.0)
+        );
+        assert_eq!(TokenMode::dark().color(Color::TextOnAccent), Rgba::BLACK);
+        assert_eq!(
+            TokenMode::light()
+                .high_contrast()
+                .color(Color::TextOnAccent),
+            Rgba::WHITE
+        );
+        assert_eq!(
+            TokenMode::dark().high_contrast().color(Color::TextOnAccent),
+            Rgba::BLACK
+        );
+    }
+
+    #[test]
+    fn text_on_accent_meets_normal_text_contrast_in_every_palette() {
+        fn relative_luminance(color: Rgba) -> f32 {
+            let linear = |channel: f32| {
+                if channel <= 0.040_45 {
+                    channel / 12.92
+                } else {
+                    ((channel + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(color.0) + 0.7152 * linear(color.1) + 0.0722 * linear(color.2)
+        }
+
+        for mode in [
+            TokenMode::light(),
+            TokenMode::dark(),
+            TokenMode::light().high_contrast(),
+            TokenMode::dark().high_contrast(),
+        ] {
+            let accent = relative_luminance(mode.color(Color::Accent));
+            let foreground = relative_luminance(mode.color(Color::TextOnAccent));
+            let ratio = (accent.max(foreground) + 0.05) / (accent.min(foreground) + 0.05);
+            assert!(ratio >= 4.5, "accent contrast was only {ratio:.2}:1");
+        }
     }
 
     #[test]

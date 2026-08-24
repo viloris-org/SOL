@@ -1,0 +1,18 @@
+[package]
+name = "sol-installer"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sol-app = { path = "../../sdk/sol-app" }
+sol-design = { path = "../../sdk/sol-design" }
+sol-ui = { path = "../../sdk/sol-ui" }
+
+[features]
+default = []
+# Live images enable the private native SolUI adapter for the graphical page.
+native = ["sol-ui/native"]

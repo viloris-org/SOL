@@ -19,6 +19,7 @@ members = [
     "apps/sol-files",
     "apps/sol-terminal",
     "apps/sol-settings",
+    "apps/sol-installer",
     "examples/solkit-showcase",
 ]
 

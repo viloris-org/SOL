@@ -116,8 +116,9 @@ cargo run -p sol-compositor
 
 The compositor binds a `wayland-sol` listener socket (override with
 `SOL_WAYLAND_SOCKET`) and serves clients on it. The `udev` Cargo feature gates
-the real-hardware DRM/GBM/libinput/libseat backends (Phase 1+; requires
-compatible system `libdisplay-info`).
+the real-hardware DRM/GBM/EGL/libinput/libseat backend (Phase 1+). Run a build
+made with that feature as `sol-compositor --tty-udev` from a local VT or a
+display-manager session managed by logind/seatd.
 
 ## Principles (from PRD §4)
 

@@ -16,9 +16,10 @@ compositor that:
 - is integration-tested with real toplevel, layer-shell, and clipboard
   protocol round-trips.
 
-Window management (move/resize/focus, workspaces), the layer-shell top bar,
-XWayland, and the real DRM/udev session are **Phase 1** work. This crate
-deliberately stays at "minimal well-formed compositor" until those land.
+The `--tty-udev` backend now owns a libseat/logind session, acquires DRM
+devices, renders through GBM/EGL, submits KMS page flips, consumes libinput
+keyboard/pointer events, switches VTs, and pauses/reacquires devices with the
+session. Real-hardware validation still has to be performed from a local VT.
 
 ## Build & run
 
@@ -62,24 +63,24 @@ drag-and-drop behavior.
 - `src/state.rs` — `SolState`: the Smithay protocol state plus the `BufferHandler`,
   `CompositorHandler`, `ShmHandler`, `XdgShellHandler`, `SeatHandler`,
   `DataDeviceHandler` implementations.
-- `src/main.rs` — the `winit` backend event loop: render toplevel surfaces,
-  dispatch/flush client events, publish frame callbacks, accept new clients.
+- `src/main.rs` — winit/headless entry points and shared client helpers.
+- `src/udev_runtime.rs` — libseat/libinput session lifecycle and the
+  DRM/GBM/EGL/KMS event loop selected by `--tty-udev`.
 - `examples/test-client.rs` — the reference Wayland client used by the test.
 - `examples/clipboard-client.rs` — isolated data-source/data-offer transfer
   fixture.
 - `tests/sol_session.rs` — the end-to-end session test.
 
 The `udev` Cargo feature toggles the DRM/GBM/libinput/libseat backends for the
-real TTY session (Phase 1+). It is not enabled by default because the current
-dev environment's `libdisplay-info` (0.3.0) is too new for the upgraded
-`libdisplay-info-sys` pin — see the repo decision log ADR-0005.
+real TTY session (Phase 1+). It is not enabled by default because the winit
+backend is the non-disruptive development path.
 
 ## Features
 
 | Feature | Pulls in | Use |
 |---|---|---|
 | `default` = `winit` + `egl` | `smithay/backend_winit`, `backend_egl`, `renderer_gl`, `wayland_frontend` | Dev/CI: window on the current session |
-| `udev` | `smithay/backend_drm`, `backend_gbm`, `backend_libinput`, `backend_udev`, `backend_session_libseat` | Real hardware TTY session (Phase 1) |
+| `udev` | DRM, GBM/EGL, libinput, udev, libseat | Real hardware TTY session with KMS presentation and VT lifecycle |
 
 Headless operation is selected at runtime with `--headless`; it is not a Cargo
 feature.

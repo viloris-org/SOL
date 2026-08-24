@@ -34,6 +34,8 @@ pub enum Color {
     Accent,
     /// Foreground text on `Surface`.
     TextPrimary,
+    /// Foreground text and symbols placed on `Accent`.
+    TextOnAccent,
     /// Secondary / muted text and metadata.
     TextSecondary,
     /// Fine separators and outlines.
@@ -52,6 +54,7 @@ impl Color {
             Color::Elevated => Rgba(1.0, 1.0, 1.0, 1.0),
             Color::Accent => Rgba(0.40, 0.55, 0.95, 1.0),
             Color::TextPrimary => Rgba(0.12, 0.12, 0.14, 1.0),
+            Color::TextOnAccent => Rgba(0.12, 0.12, 0.14, 1.0),
             Color::TextSecondary => Rgba(0.42, 0.42, 0.47, 1.0),
             Color::Border => Rgba(0.80, 0.80, 0.83, 1.0),
             Color::HoverOverlay => Rgba(0.0, 0.0, 0.0, 0.06),

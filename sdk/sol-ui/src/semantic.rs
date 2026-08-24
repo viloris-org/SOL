@@ -124,7 +124,7 @@ impl Button {
     pub fn visual_tokens(&self) -> VisualTokenContract {
         VisualTokenContract {
             background: self.background(),
-            foreground: Color::TextPrimary,
+            foreground: self.foreground(),
             padding: self.padding_x(),
             radius: self.corner_radius(),
             metric: self.metric(),

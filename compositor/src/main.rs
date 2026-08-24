@@ -27,6 +27,8 @@ mod outputs;
 mod state;
 #[cfg(feature = "udev")]
 mod udev_output;
+#[cfg(feature = "udev")]
+mod udev_runtime;
 mod window;
 
 use outputs::OutputConfiguration;
@@ -100,88 +102,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Start the DRM connector discovery and udev hotplug path for a TTY session.
-///
-/// This owns the real kernel udev monitor and derives output globals from the
-/// real `/sys/class/drm` connector state. It intentionally does not pretend to
-/// be a hardware smoke test: opening a libseat session and presenting through
-/// DRM/GBM still require a local VT, device permissions, and connected displays.
+/// Start the real libseat/libinput/DRM/GBM TTY backend.
 #[cfg(feature = "udev")]
 pub fn run_udev(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
-        time::Duration,
-    };
-
-    use smithay::{backend::udev::UdevBackend, reexports::calloop::EventLoop};
-    use udev_output::{OutputTopology, SysfsDrmConnectorProbe};
-
-    let seat = std::env::var("XDG_SEAT").unwrap_or_else(|_| "seat0".into());
-    let udev = UdevBackend::new(&seat)?;
-    let devices = udev
-        .device_list()
-        .map(|(_, path)| path.to_path_buf())
-        .collect::<Vec<_>>();
-    tracing::info!(?devices, %seat, "enumerated DRM devices through udev");
-
-    let probe = SysfsDrmConnectorProbe::new();
-    let mut topology = OutputTopology::default();
-    topology.reconcile(probe.connected()?);
-    let initial_outputs = topology.configurations();
-    if initial_outputs.is_empty() {
-        return Err(
-            "no connected DRM connector with an advertised mode; hardware session not started"
-                .into(),
-        );
-    }
-
-    let mut display: Display<SolState> = Display::new()?;
-    let mut dh = display.handle();
-    let mut state = SolState::with_output_configurations(&dh, Some(&initial_outputs));
-    let socket_name = std::env::var("SOL_WAYLAND_SOCKET").unwrap_or_else(|_| "wayland-sol".into());
-    let listener = ListeningSocket::bind(&socket_name)?;
-    tracing::info!(socket = %socket_name, ?initial_outputs, "SOL udev output backend listening");
-
-    let mut event_loop: EventLoop<()> = EventLoop::try_new()?;
-    let rescan_requested = Arc::new(AtomicBool::new(false));
-    let rescan_callback = Arc::clone(&rescan_requested);
-    event_loop
-        .handle()
-        .insert_source(udev, move |_event, _, _| {
-            // Udev identifies a kernel DRM topology change; sysfs remains the
-            // authoritative source for the connector/mode snapshot.
-            rescan_callback.store(true, Ordering::Release);
-        })?;
-
-    spawn_client(&spawn);
-    loop {
-        event_loop.dispatch(Duration::from_millis(0), &mut ())?;
-        if rescan_requested.swap(false, Ordering::AcqRel) {
-            let changes = topology.reconcile(probe.connected()?);
-            let configurations = topology.configurations();
-            if configurations.is_empty() {
-                tracing::warn!(
-                    ?changes,
-                    "all DRM connectors disconnected; retaining last Wayland output set"
-                );
-            } else {
-                tracing::info!(
-                    ?changes,
-                    ?configurations,
-                    "reconciling DRM connector hotplug"
-                );
-                state.reconcile_outputs(&configurations, &dh);
-            }
-        }
-
-        accept_clients(&mut dh, &listener)?;
-        display.dispatch_clients(&mut state)?;
-        display.flush_clients()?;
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    udev_runtime::run(spawn)
 }
 
 /// Start the compositor on the winit backend (a window on the current session).

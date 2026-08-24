@@ -25,6 +25,7 @@ use sol_design::{
 };
 
 mod command_palette;
+mod guided_page;
 mod runtime;
 mod semantic;
 
@@ -38,6 +39,7 @@ pub use command_palette::{
     COMMAND_PALETTE_SHORTCUT, CommandPalette, CommandPaletteOutcome, CommandPaletteState,
     PaletteCommand,
 };
+pub use guided_page::{GuidedPage, GuidedPageFrame, GuidedPageStep, GuidedStepState};
 pub use runtime::{
     ButtonController, ButtonFrame, FixtureSurfaceHost, LogicalSize, RecordingRenderer, Renderer,
     SurfaceHost, present_button, present_button_for,
@@ -51,7 +53,7 @@ pub use semantic::{
 pub use atspi::{AtspiAction, AtspiBridge};
 
 #[cfg(feature = "native")]
-pub use slint_backend::NativeRenderer;
+pub use slint_backend::{GuidedPageAction, NativeGuidedPageRenderer, NativeRenderer};
 
 /// A semantic button component.
 ///
@@ -77,6 +79,18 @@ pub struct Button {
     pub state: ButtonState,
     /// The label text.
     pub label: &'static str,
+    /// Visual emphasis selected from the shared button roles.
+    pub role: ButtonRole,
+}
+
+/// Semantic emphasis for a button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ButtonRole {
+    /// A supporting or neutral action.
+    #[default]
+    Standard,
+    /// The single preferred action on a surface.
+    Primary,
 }
 
 /// Visual state of a button for consistent feedback.
@@ -100,6 +114,7 @@ impl Default for Button {
             enabled: true,
             state: ButtonState::Normal,
             label: "",
+            role: ButtonRole::Standard,
         }
     }
 }
@@ -113,6 +128,12 @@ impl Button {
     /// Configure the label text for the button.
     pub fn with_label(mut self, label: &'static str) -> Self {
         self.label = label;
+        self
+    }
+
+    /// Mark this as the preferred action on its surface.
+    pub fn primary(mut self) -> Self {
+        self.role = ButtonRole::Primary;
         self
     }
 
@@ -139,9 +160,22 @@ impl Button {
         }
         match self.state {
             ButtonState::Pressed => Color::Accent,
-            ButtonState::Hovered => Color::Elevated,
-            ButtonState::Normal => Color::Elevated,
+            ButtonState::Hovered | ButtonState::Normal
+                if matches!(self.role, ButtonRole::Primary) =>
+            {
+                Color::Accent
+            }
+            ButtonState::Hovered | ButtonState::Normal => Color::Elevated,
             ButtonState::Disabled => Color::Surface,
+        }
+    }
+
+    /// Get the foreground color for the resolved background role.
+    pub fn foreground(&self) -> Color {
+        if matches!(self.background(), Color::Accent) {
+            Color::TextOnAccent
+        } else {
+            Color::TextPrimary
         }
     }
 
@@ -398,6 +432,14 @@ mod tests {
         button.state = ButtonState::Pressed;
         let bg = button.background();
         assert!(matches!(bg, Color::Accent));
+    }
+
+    #[test]
+    fn primary_button_uses_accent_without_faking_pressed_state() {
+        let button = Button::new().primary();
+        assert!(matches!(button.state, ButtonState::Normal));
+        assert!(matches!(button.background(), Color::Accent));
+        assert!(matches!(button.foreground(), Color::TextOnAccent));
     }
 
     #[test]

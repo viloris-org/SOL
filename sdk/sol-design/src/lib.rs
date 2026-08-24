@@ -41,6 +41,7 @@ mod consistency_tests {
             color::Color::Elevated,
             color::Color::Accent,
             color::Color::TextPrimary,
+            color::Color::TextOnAccent,
             color::Color::TextSecondary,
             color::Color::Border,
             color::Color::HoverOverlay,

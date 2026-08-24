@@ -92,6 +92,8 @@ pub struct SolState {
     pub keyboard: KeyboardHandle<SolState>,
     /// Pointer device handle used by the interactive move/resize grabs.
     pub pointer: smithay::input::pointer::PointerHandle<SolState>,
+    /// Cursor selected by the focused client, rendered by hardware backends.
+    pub cursor_image: CursorImageStatus,
     /// Phase 1 window management: layout, hit-testing and focus.
     pub window_manager: window::WindowManager,
 }
@@ -140,6 +142,7 @@ impl SolState {
             seat,
             keyboard,
             pointer,
+            cursor_image: CursorImageStatus::default_named(),
             window_manager,
         }
     }
@@ -407,7 +410,9 @@ impl SeatHandler for SolState {
         let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client);
     }
-    fn cursor_image(&mut self, _seat: &Seat<SolState>, _image: CursorImageStatus) {}
+    fn cursor_image(&mut self, _seat: &Seat<SolState>, image: CursorImageStatus) {
+        self.cursor_image = image;
+    }
 }
 
 // Delegate the Wayland protocol handling to the types stored in `SolState`.

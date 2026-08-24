@@ -13,6 +13,7 @@ responsibility (PRD §24):
 | `sol-files` | `apps/sol-files/` | MVP — dogfood baseline | Phase 0 scaffold → Phase 3 |
 | `sol-terminal` | `apps/sol-terminal/` | MVP | Phase 0 scaffold → Phase 3 |
 | `sol-settings` | `apps/sol-settings/` | MVP | Phase 0 scaffold → Phase 3 |
+| `sol-installer` | `apps/sol-installer/` | OS release gate | Live welcome surface; installation backend pending → Phase 7 |
 | `sol-store` | — | After MVP | Phase 4+ |
 | `sol-viewer` | — | After MVP | Phase 4+ |
 | `sol-monitor` | — | After MVP | Phase 4+ |

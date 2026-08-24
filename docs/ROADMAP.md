@@ -845,6 +845,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [ ] Installer for the first x86-64 UEFI target with explicit disk layout,
       encryption, Secure Boot/key enrollment, recovery-key, reinstall, and data
       preservation behavior.
+  - [x] **Live-session welcome surface:** `sol-installer` provides a native,
+        token-resolved entry page with explicit Install / Keep exploring exits,
+        a truthful no-disk-changes message, an accessible semantic tree, and a
+        concise preview of disk, encryption/Secure Boot, and final-review
+        decisions. Disk discovery and the installation transaction remain
+        outside this bounded UI deliverable.
 - [ ] Hardware CI covers clean install; interrupted EFI/recovery/deployment
       update; corrupt image; failed trial boot; firmware-variable failure; power
       loss at every commit boundary; automatic fallback; manual recovery; and

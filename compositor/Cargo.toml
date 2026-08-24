@@ -21,6 +21,7 @@ wayland-protocols = "0.32"
 # wlr-layer-shell integration (PRD §11 / Phase 1 M1).
 wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["server"] }
 winit = { version = "0.30", default-features = false, features = ["wayland", "x11", "rwh_06"] }
+smithay-drm-extras = { version = "0.1", default-features = false, optional = true }
 
 [features]
 # Phase 0 default: the winit backend renders into a window on the surrounding
@@ -32,11 +33,21 @@ default = ["winit", "egl"]
 # Backends
 winit = ["smithay/backend_winit"]
 egl = ["smithay/backend_egl"]
-# Real-hardware session backend (Phase 1+). Requires compatible system
-# DRM/GBM/libinput/libseat dev packages. `smithay-drm-extras` is not part of
-# the backend and was unused; removing it avoids its stale libdisplay-info
-# (< 0.3.0) build constraint on current Arch hosts.
-udev = ["smithay/backend_udev", "smithay/backend_libinput", "smithay/backend_drm", "smithay/backend_gbm", "smithay/backend_session_libseat"]
+# Real-hardware session backend (Phase 1+). Requires system
+# DRM/GBM/EGL/libinput/libseat development packages. The connector scanner is
+# used without its optional libdisplay-info feature, avoiding version coupling
+# to the system's EDID parser.
+udev = [
+    "smithay/backend_udev",
+    "smithay/backend_libinput",
+    "smithay/backend_drm",
+    "smithay/backend_gbm",
+    "smithay/backend_egl",
+    "smithay/backend_session_libseat",
+    "smithay/renderer_gl",
+    "smithay/renderer_multi",
+    "dep:smithay-drm-extras",
+]
 # NOTE: there is intentionally no `headless` Cargo feature. Headless mode is a
 # runtime `--headless` flag (see main.rs): the protocol loop runs with no render
 # backend, and is used by the integration tests / CI.

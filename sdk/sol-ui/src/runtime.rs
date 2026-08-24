@@ -135,7 +135,7 @@ impl ButtonController {
         ButtonFrame {
             label: self.button.label.to_owned(),
             background: mode.color(self.button.background()),
-            foreground: mode.color(sol_design::color::Color::TextPrimary),
+            foreground: mode.color(self.button.foreground()),
             corner_radius: self.button.corner_radius().px(),
             font_size: mode.typography(FontStyle::Label).pixels,
             progress: self.progress,
