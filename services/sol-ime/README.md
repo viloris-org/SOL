@@ -35,8 +35,9 @@ Japanese / Korean as needed (fcitx5 supports these already).
 
 ## Status
 
-**Phase 1 transport complete.** `Fcitx5DbusTransport` is the real session-bus
-adapter, while `Fcitx5Transport` lets unit tests use a deterministic fake.
+**Phase 1 transport implementation slice.** `Fcitx5DbusTransport` is the real
+session-bus adapter, while `Fcitx5Transport` lets unit tests use a
+deterministic fake.
 The fake covers Chinese pinyin `shan → 山/闪/善 → 山`; an ignored smoke test
 can be run against a live fcitx5 session. Candidate-window UI rendering and
 the full Wayland input-method client surface remain follow-on work (see

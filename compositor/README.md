@@ -4,17 +4,24 @@ SOL's Wayland compositor, built on [Smithay].
 
 ## Status
 
-**Phase 0 (Foundation) milestone complete.** This is a functional Smithay
-compositor that:
+**Phase 1 reopened after an implementation/evidence audit.** The accepted
+foundation spike and current implementation slices can:
 
-- starts a standalone Wayland session on a fixed socket (`wayland-sol` by
+- start a standalone Wayland session on a fixed socket (`wayland-sol` by
   default),
-- serves standard Wayland clients (`wl_compositor`, `wl_shm`, `xdg_shell`,
-  seat, data-device),
-- follows keyboard focus for data-device selection offers,
-- renders client surfaces with the GL renderer and drives frame callbacks,
-- is integration-tested with real toplevel, layer-shell, and clipboard
-  protocol round-trips.
+- advertise the current core globals (`wl_compositor`, `wl_shm`, `xdg_shell`,
+  seat, output, data-device, fractional scale, layer-shell, text input, and
+  input method),
+- follow keyboard focus for data-device selection offers,
+- render client surfaces with the GL renderer and drive frame callbacks,
+- pass repository-owned headless toplevel, fractional-scale, layer-shell
+  configure/commit, and clipboard round trips.
+
+Those facts do not yet establish a basic daily-use compositor. Popup semantics,
+complete xdg state/lifecycle, layer-surface mapping/rendering, DnD, xdg-output,
+common compatibility protocols, compositor↔Shell D-Bus, end-to-end IME,
+multi-output behavior, and representative external-client validation remain
+open. See the [Roadmap] and [Wayland protocol matrix] for the closure gates.
 
 The `--tty-udev` backend now owns a libseat/logind session, acquires DRM
 devices, renders through GBM/EGL, submits KMS page flips, consumes libinput
@@ -49,8 +56,9 @@ cargo test -p sol-compositor --test sol_session
 
 The tests boot the compositor headlessly, wait for its socket, and assert the
 toplevel configure, Shell layer-surface, and UTF-8 data-device clipboard
-round-trips succeed. They do not touch the user's live clipboard or prove
-drag-and-drop behavior.
+round-trips succeed. They have no GPU or visible output; a committed Shell
+buffer is not proof that a layer surface was mapped and rendered. They do not
+touch the user's live clipboard or prove drag-and-drop behavior.
 
 ## Environment variables
 
@@ -86,3 +94,5 @@ Headless operation is selected at runtime with `--headless`; it is not a Cargo
 feature.
 
 [Smithay]: https://github.com/Smithay/smithay
+[Roadmap]: ../docs/ROADMAP.md
+[Wayland protocol matrix]: ../docs/status/wayland-protocol-matrix.md

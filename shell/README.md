@@ -12,7 +12,7 @@ the normative layout and behavior.
 
 ```
 sol-compositor
-       ↕  Typed IPC (transport undecided — decision #5 / ADR-0006)
+       ↕  Typed D-Bus IPC (selected by ADR-0006; adapter pending)
 sol-shell
 ```
 
@@ -25,12 +25,13 @@ sol-shell
 
 ## Status
 
-**Phase 4 foundations in progress.** The repository contains renderer-neutral
-Dock/Launcher, top-bar, overview, notifications, Quick Settings, consent, and
-overlay models. Native compositor-backed surfaces remain incomplete.
+**Phase 1/4 foundations in progress.** The repository contains a layer-shell
+top-bar configure/commit slice plus renderer-neutral Dock/Launcher, top-bar,
+overview, notifications, Quick Settings, consent, and overlay models. Native
+mapping/rendering and the compositor D-Bus service/proxy remain incomplete.
 
-- The first shell surface (layer-shell top bar) is a **Phase 1** Milestone M1
-  deliverable.
+- The first shell surface (layer-shell top bar) is an open **Phase 1** M1
+  deliverable until it is visibly mapped/rendered and survives restart/reconnect.
 - The full desktop interaction model (Dock / Launcher / Overview / notifications /
   quick settings / global menu / Live Capsule / touchpad gestures) is **Phase 4**.
 
@@ -49,8 +50,9 @@ the capability broker and cannot be hidden by an app.
 
 ## Key dependencies
 
-- Compositor `layer-shell` protocol integration (Phase 1)
-- Compositor↔shell typed IPC transport decision (decision #5)
+- Complete compositor layer-shell mapping, layout, input, and rendering (Phase 1)
+- Implement the ADR-0006 compositor↔Shell typed D-Bus schema, service, proxy,
+  signals, authentication, and reconnect behavior
 - SolKit maturity (Phase 2) — Phase 3/4 shell UI is built on it
 
 ## Positioning

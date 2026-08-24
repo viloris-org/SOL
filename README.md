@@ -18,19 +18,24 @@ drivers, Mesa, PipeWire, or every protocol.
 
 ## Status
 
-**Concept / Pre-Alpha — the desktop substrate exists; the OS foundation is now
-the active product direction.**
+**Concept / Pre-Alpha — foundation and implementation slices exist, but no
+daily-driver or release-ready desktop claim is made.**
 
-The Phase 0 milestone ("start a standalone SOL Wayland session and run
-standard Wayland applications") is **done**. Phase 1 M1 ("SOL can be used
-as a basic daily-use Wayland compositor") is **done**: window management,
-workspaces, multi-monitor, and shell IPC are implemented and covered by
-integration tests. IME protocol integration and the frontend scaffold are
-present; the fcitx5 transport remains a post-M1 follow-on.
+The Phase 0 work is retained as an accepted architecture spike: the compositor
+opens a Wayland socket, repository-owned clients complete selected headless
+round trips, and the winit development renderer runs. Phase 1 was reopened
+after an implementation/evidence audit. Window, output, layer-shell, transfer,
+IME, and hardware paths remain at different maturity stages; the typed
+compositor↔Shell D-Bus contract is selected but not implemented end to end.
 
-Phase 2 M2 started: semantic components (Button, TextField, Toolbar, TabBar,
-Tab, HStack, VStack) and layout engine implemented. Slint/SolUI spike
-validation (ADR-0004) pending network access for dependency resolution.
+See the [Roadmap](docs/ROADMAP.md) for the S0–S5 maturity model and the
+[Wayland protocol matrix](docs/status/wayland-protocol-matrix.md) for exact
+interface coverage and closure evidence.
+
+Phase 2 M2 is in progress: semantic components, layout, tokens, lifecycle,
+commands, graphics, motion, and a private Slint adapter have implementation
+evidence. Native renderer/input pacing and real assistive-technology validation
+remain closure gates.
 
 The OS rebaseline adds these system foundations:
 
@@ -65,30 +70,31 @@ WAYLAND_DISPLAY=wayland-sol weston-terminal        # terminal 2
 
 **SolKit progress:** sol-ui provides semantic component API (Button,
 TextField, Toolbar, TabBar, Tab, HStack, VStack) using sol-design
-tokens. Slint backend integration pending spike validation.
+tokens and a private Slint adapter. Native GPU/input pacing and real
+assistive-technology validation remain open.
 
 ## Repository layout
 
 | Path | Purpose | Status |
 |---|---|---|
-| `compositor/` | `sol-compositor`: Smithay-based Wayland compositor | ✅ Phase 0+1 complete |
-| `shell/` | `sol-shell`: top bar, dock, launcher, overview, system UI | ✅ Phase 1 shell top bar complete |
-| `sdk/sol-design` | Design tokens (single source of truth for visuals) | ✅ token seeds + consistent tests |
-| `sdk/sol-ui` | SolKit UI components (semantic, not visual-metrics) | ✅ Phase 2 buttons/layout/start |
-| `sdk/sol-app` | Application framework (lifecycle, commands, …) | ✅ Phase 2 lifecycle + command foundations |
-| `sdk/sol-graphics` | Rendering abstraction | ✅ Phase 2 abstraction foundations |
-| `sdk/sol-animation` | Animation engine (interruptible / motion tokens) | ✅ Phase 2 semantic motion foundations |
+| `compositor/` | `sol-compositor`: Smithay-based Wayland compositor | 🟡 Phase 1 reopened; protocol, integration, and hardware closure pending |
+| `shell/` | `sol-shell`: top bar, dock, launcher, overview, system UI | 🟡 top-bar configure/commit slice plus Phase 4 renderer-neutral foundations |
+| `sdk/sol-design` | Design tokens (single source of truth for visuals) | 🟡 S2 token foundation and consistency tests |
+| `sdk/sol-ui` | SolKit UI components (semantic, not visual-metrics) | 🟡 S2 component/layout/adapter foundations |
+| `sdk/sol-app` | Application framework (lifecycle, commands, …) | 🟡 S2 lifecycle and command foundations |
+| `sdk/sol-graphics` | Rendering abstraction | 🟡 S2 abstraction foundation |
+| `sdk/sol-animation` | Animation engine (interruptible / motion tokens) | 🟡 S2 semantic motion foundation |
 | `sdk/sol-system` | System API (restricted) | 🔲 placeholder → Phase 2 |
-| `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🟡 scaffolds; `sol-ime` has Phase 1 protocol/frontend seams, while fcitx5 transport and UI rendering remain pending |
+| `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🟡 mixed S1–S3 foundations; real adapters and product surfaces remain open |
 | `apps/` | First-party apps: Files, Terminal, Settings | 🔲 placeholders → Phase 3 |
-| `protocols/` | Wayland protocol XML + IPC schemas | 🔲 no stable protocol yet |
+| `protocols/` | SOL-owned protocol XML + IPC schemas | 🔲 no SOL-owned stable schema yet; standard-interface status is tracked separately |
 | `packaging/arch/` | Transitional Arch bootstrap/build packaging | 🟡 historical/transition |
 | `boot/` | `sol-image` manifest tooling; target home of `sol-boot`, recovery, and verified-slot policy | 🟡 Phase 7 manifest foundation |
 | `packaging/sol/` | Target home of `.app` tooling and `sol-pkg` contracts | 🔲 planned |
 | `security/` | Target home of sandbox, permission, consent, and audit services | 🔲 planned |
 | `accounts/` | Target home of system accounts, credential vault, and provider brokers | 🔲 planned |
 | `compat/` | Target home of GTK/Qt adapters and generic Wayland compatibility contracts | 🔲 planned |
-| `tests/` | Cross-component integration tests | ✅ Phase 0/1 integration tests |
+| `tests/` | Cross-component integration tests | 🟡 selected S3 headless/service boundaries; real-session matrix open |
 | `docs/` | PRD, ROADMAP, engineering decisions | 🟡 living |
 
 ## Documentation
@@ -99,6 +105,7 @@ tokens. Slint backend integration pending spike validation.
 | [OS Platform Definition](docs/os-platform.md) | Normative OS boundary, `.app`, atomic permissions, accounts, materials, and runtime contracts |
 | [Shell Experience](docs/shell-experience.md) | Dock, Launcher, global menu, window controls, status zone, tray, and Live Capsule contracts |
 | [Roadmap](docs/ROADMAP.md) | Engineering execution view of the PRD phases, with deliverables & acceptance |
+| [Wayland protocol matrix](docs/status/wayland-protocol-matrix.md) | Advertised interfaces, semantic maturity, missing behavior, and evidence gates |
 | [Decision log](docs/decisions/README.md) | ADRs for boot, packages, security, runtime, compositor, SDK, IPC, and distribution |
 | [Docs index](docs/README.md) | How the docs fit together + pointers |
 | Component READMEs | `compositor/`, `sdk/*`, `services/*`, `apps/*`, `protocols/`, `packaging/arch/` |

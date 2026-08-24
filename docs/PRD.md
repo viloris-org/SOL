@@ -1634,7 +1634,8 @@ Success criterion:
 
 ## Phase 1 — Desktop Core
 
-Completed deliverables:
+Required deliverables (Phase 1 reopened for integration and real-session
+closure; implementation status is owned by the Roadmap):
 
 ```text
 Window management

@@ -9,6 +9,7 @@ Documentation is organized by audience and lifecycle:
 | [Shell Spatial and Live Activity Contract](shell-experience.md) | Product / Shell / application engineering | Dock, Launcher, global menu, window controls, right-side status, tray, and Live Capsule |
 | [Contextual IME PRD](contextual-ime-prd.md) | Product / IME engineering | Proposal and staged requirements for local contextual candidate ranking over fcitx5 |
 | [ROADMAP](ROADMAP.md) | Engineering / product | Execution view of the PRD phases split into milestones, deliverables, and acceptance points |
+| [Wayland protocol matrix](status/wayland-protocol-matrix.md) | Compositor / Shell engineering | Per-interface advertisement, semantic maturity, missing behavior, and promotion evidence |
 | [Architecture](architecture.md) | Engineering | How the logical layers map to the monorepo, and boundary rules |
 | [SolKit getting started](solkit-getting-started.md) | Application developers | Start a renderer-independent native app from the SolKit starter template |
 | [Decision log](decisions/README.md) | Engineering | Architecture Decision Records (ADR) and the status-bearing decision register (PRD §41) |
@@ -20,8 +21,9 @@ Documentation is organized by audience and lifecycle:
 2. **PRD** — the broader "what and why."
 3. **Architecture** — the layer-to-code map and boundary rules.
 4. **ROADMAP** — the "what, in what order" engineering view mapped to code.
-5. **Decision log** — the "why this trade-off" records and what is still open.
-6. **Component READMEs** — the "current state" of a given crate.
+5. **Protocol matrix** — exact Wayland and compositor↔Shell maturity.
+6. **Decision log** — the "why this trade-off" records and what is still open.
+7. **Component READMEs** — the "current state" of a given crate.
 
 The OS rebaseline supersedes older statements that call SOL only a desktop
 platform or use pacman/AUR as the native installed-system package authority.
@@ -32,12 +34,12 @@ of truth.
 
 | Area | Status |
 |---|---|
-| Platform / compositor | Phase 0 and Phase 1 complete — the Smithay compositor runs a standalone Wayland session with desktop-core protocol integration |
-| Shell | Phase 1 top-bar layer-shell surface complete; broader shell experience is Phase 4 |
+| Platform / compositor | Phase 0 foundation spike accepted; Phase 1 reopened for protocol, integration, interoperability, and real DRM closure |
+| Shell | Top-bar configure/commit slice exists; layer mapping/rendering and compositor D-Bus remain Phase 1 gates; broader experience is Phase 4 |
 | SolKit SDK | Phase 2 in progress — token, semantic-component, layout, lifecycle/command, graphics, and motion foundations are implemented; rendering, accessibility, and keyboard work remain |
-| Services | Scaffolds — `sol-ime` has Phase 1 protocol/frontend seams; fcitx5 transport and candidate-window rendering remain pending |
+| Services | Mixed S1–S3 foundations — `sol-ime` has protocol/frontend seams and an fcitx5 transport slice; candidate rendering and end-to-end desktop input remain open |
 | Apps | Scaffolds — Files/Terminal/Settings in Phase 3 |
-| Protocols / packaging | Early — no stable protocol; PKGBUILDs follow milestone completion |
+| Protocols / packaging | Early — no SOL-owned stable schema; standard Wayland coverage is tracked per interface; PKGBUILDs follow milestone completion |
 | OS boot / image | Foundations — UKI-aware deployment manifests and deterministic A/B trial policy are implemented; signed UEFI execution, redundant boot/recovery authorities, durable state, and graphics handoff remain Phase 7 work |
 | Native app platform | Planned — `.app`, `sol-pkg`, sandbox enforcement, and major/revision/feature runtime compatibility are Phases 8–9 |
 | Accounts | Planned — `sol-securityd`-coordinated account grants, system-owned metadata, encrypted credentials, and generation-fenced leases |
@@ -48,6 +50,7 @@ of truth.
 ## Conventions
 
 - **Language:** documentation is written in standard American English.
-- **Status labels:** `Complete` / `In progress` / `Scaffold` / `Planned` map
-  to the [ROADMAP](ROADMAP.md) phases.
+- **Status labels:** deliverables use S0 Planned through S5 Release-ready as
+  defined by the [ROADMAP](ROADMAP.md); a phase is complete only when every
+  required closure item is S5.
 - **Link style:** relative links between docs in this repo.
