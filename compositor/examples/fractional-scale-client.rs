@@ -2,8 +2,8 @@
 
 use std::time::{Duration, Instant};
 
-use wayland_client::{Connection, Dispatch, QueueHandle, delegate_noop};
 use wayland_client::protocol::{wl_compositor, wl_registry, wl_surface};
+use wayland_client::{Connection, Dispatch, QueueHandle, delegate_noop};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
 };
@@ -56,13 +56,21 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        let wl_registry::Event::Global { name, interface, version } = event else {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        else {
             return;
         };
         match interface.as_str() {
             "wl_compositor" => {
                 let compositor = registry.bind::<wl_compositor::WlCompositor, _, _>(
-                    name, version.min(6), qh, (),
+                    name,
+                    version.min(6),
+                    qh,
+                    (),
                 );
                 state.surface = Some(compositor.create_surface(qh, ()));
                 if let (Some(manager), Some(surface)) = (&state.manager, &state.surface) {
@@ -71,11 +79,13 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 }
             }
             "wp_fractional_scale_manager_v1" => {
-                let manager = registry.bind::<
-                    wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
-                    _,
-                    _,
-                >(name, version.min(1), qh, ());
+                let manager = registry
+                    .bind::<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1, _, _>(
+                        name,
+                        version.min(1),
+                        qh,
+                        (),
+                    );
                 state.manager = Some(manager);
                 if let (Some(manager), Some(surface)) = (&state.manager, &state.surface) {
                     state.scale = Some(manager.get_fractional_scale(surface, qh, ()));

@@ -42,13 +42,19 @@ impl Renderbuffer {
 
     /// Create a renderbuffer with HiDPI scale.
     pub fn with_scale(width: u32, height: u32, scale: f32) -> Self {
-        Self { width, height, scale }
+        Self {
+            width,
+            height,
+            scale,
+        }
     }
 
     /// Get the pixel dimensions (scaled).
     pub fn pixel_size(&self) -> (u32, u32) {
-        ((self.width as f32 * self.scale) as u32, 
-         (self.height as f32 * self.scale) as u32)
+        (
+            (self.width as f32 * self.scale) as u32,
+            (self.height as f32 * self.scale) as u32,
+        )
     }
 }
 
@@ -147,7 +153,15 @@ impl GraphicsContext {
     }
 
     /// Draw rounded rectangle.
-    pub fn draw_rounded_rect(&self, x: f32, y: f32, width: f32, height: f32, radius: Radius, color: Color) {
+    pub fn draw_rounded_rect(
+        &self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radius: Radius,
+        color: Color,
+    ) {
         let _ = (x, y, width, height);
         let _ = (radius, color);
         // Rendered by backend

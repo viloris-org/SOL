@@ -295,9 +295,7 @@ mod tests {
 
     #[test]
     fn app_window_can_be_configured() {
-        let window = AppWindow::new("Test")
-            .with_size(1024.0, 768.0)
-            .maximized();
+        let window = AppWindow::new("Test").with_size(1024.0, 768.0).maximized();
         assert_eq!(window.title, "Test");
         assert_eq!(window.size, (1024.0, 768.0));
         assert!(window.maximized);

@@ -9,15 +9,19 @@ env:
    CARGO_TERM_COLOR: always
    RUSTFLAGS: "-D warnings"
 
+permissions:
+   contents: read
+
 jobs:
    fmt:
      name: Format
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v4
-       - name: Install Rust (stable-2024)
+       - uses: actions/checkout@v5
+       - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
+           toolchain: 1.98.0
            components: rustfmt
        - uses: Swatinem/rust-cache@v2
        - name: rustfmt check
@@ -27,7 +31,7 @@ jobs:
      name: Check
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v4
+       - uses: actions/checkout@v5
        - name: Install system libs (EGL/Wayland for the compositor winit backend)
          run: |
            sudo apt-get update
@@ -36,22 +40,22 @@ jobs:
              libwayland-dev libwayland-bin \
              libxkbcommon-dev \
              xwayland xvfb
-       - name: Install Rust (stable-2024)
+       - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
-           components: clippy
+           toolchain: 1.98.0
        - uses: Swatinem/rust-cache@v2
        # Default features only. The `udev` feature (DRM/GBM/libseat) requires a
        # host libdisplay-info < 0.3.0 and a real seat (ADR-0005); it is
        # exercised on hardware in Phase 1+, not in CI.
        - name: cargo check (workspace, default features)
-         run: cargo check --workspace
+         run: cargo check --workspace --locked
 
    clippy:
      name: Clippy
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v4
+       - uses: actions/checkout@v5
        - name: Install system libs
          run: |
            sudo apt-get update
@@ -59,13 +63,14 @@ jobs:
              libegl1 libgles2 libgbm1 libgl1-mesa-dri \
              libwayland-dev libwayland-bin \
              libxkbcommon-dev
-       - name: Install Rust (stable-2024)
+       - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
+           toolchain: 1.98.0
            components: clippy
        - uses: Swatinem/rust-cache@v2
        - name: cargo clippy (workspace, default features)
-         run: cargo clippy --workspace -- -D warnings
+         run: cargo clippy --workspace --locked -- -D warnings
 
    test:
      name: Test
@@ -80,7 +85,7 @@ jobs:
        # Required for tests: Wayland socket path resolution.
        XDG_RUNTIME_DIR: /tmp
      steps:
-       - uses: actions/checkout@v4
+       - uses: actions/checkout@v5
        - name: Install system libs
          run: |
            sudo apt-get update
@@ -88,10 +93,10 @@ jobs:
              libegl1 libgles2 libgbm1 libgl1-mesa-dri \
              libwayland-dev libwayland-bin \
              libxkbcommon-dev
-       - name: Install Rust (stable-2024)
+       - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
-           components: clippy
+           toolchain: 1.98.0
        - uses: Swatinem/rust-cache@v2
        - name: cargo test (workspace)
-         run: cargo test --workspace -- --nocapture
+         run: cargo test --workspace --locked -- --nocapture

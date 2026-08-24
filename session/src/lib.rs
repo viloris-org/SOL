@@ -139,10 +139,7 @@ impl<S: SessionCheckpointStore> SessionRestoreCoordinator<S> {
     }
 
     /// Capture validated surface state and persist it before suspend.
-    pub fn suspend(
-        &mut self,
-        checkpoint: SessionCheckpoint,
-    ) -> Result<(), SessionRestoreError> {
+    pub fn suspend(&mut self, checkpoint: SessionCheckpoint) -> Result<(), SessionRestoreError> {
         if self.phase != SessionPhase::Active {
             return Err(SessionRestoreError::InvalidPhase(self.phase));
         }

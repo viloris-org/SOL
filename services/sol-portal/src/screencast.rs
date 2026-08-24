@@ -98,14 +98,25 @@ pub enum ScreenCastError {
 impl fmt::Display for ScreenCastError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WrongAuthorization => formatter.write_str("authorization is not for screen capture"),
-            Self::UnknownSession(id) => write!(formatter, "unknown screen-cast session {}", id.get()),
+            Self::WrongAuthorization => {
+                formatter.write_str("authorization is not for screen capture")
+            }
+            Self::UnknownSession(id) => {
+                write!(formatter, "unknown screen-cast session {}", id.get())
+            }
             Self::InvalidState { expected, actual } => {
-                write!(formatter, "screen-cast state is {actual:?}, expected {expected:?}")
+                write!(
+                    formatter,
+                    "screen-cast state is {actual:?}, expected {expected:?}"
+                )
             }
             Self::EmptySources => formatter.write_str("screen-cast source selection is empty"),
-            Self::DuplicateSource(source) => write!(formatter, "duplicate screen-cast source {source:?}"),
-            Self::InvalidStream(message) => write!(formatter, "invalid screen-cast stream: {message}"),
+            Self::DuplicateSource(source) => {
+                write!(formatter, "duplicate screen-cast source {source:?}")
+            }
+            Self::InvalidStream(message) => {
+                write!(formatter, "invalid screen-cast stream: {message}")
+            }
             Self::Backend(message) => write!(formatter, "screen-cast backend: {message}"),
             Self::SessionIdExhausted => formatter.write_str("screen-cast session IDs exhausted"),
         }
@@ -252,18 +263,26 @@ fn validate_streams(
     sources: &[ScreenCastSource],
 ) -> Result<(), ScreenCastError> {
     if streams.is_empty() {
-        return Err(ScreenCastError::InvalidStream("backend returned no streams"));
+        return Err(ScreenCastError::InvalidStream(
+            "backend returned no streams",
+        ));
     }
     let mut node_ids = std::collections::BTreeSet::new();
     for stream in streams {
         if stream.node_id == 0 || !node_ids.insert(stream.node_id) {
-            return Err(ScreenCastError::InvalidStream("node IDs must be unique and non-zero"));
+            return Err(ScreenCastError::InvalidStream(
+                "node IDs must be unique and non-zero",
+            ));
         }
         if stream.size.0 == 0 || stream.size.1 == 0 {
-            return Err(ScreenCastError::InvalidStream("stream dimensions must be non-zero"));
+            return Err(ScreenCastError::InvalidStream(
+                "stream dimensions must be non-zero",
+            ));
         }
         if !sources.contains(&stream.source) {
-            return Err(ScreenCastError::InvalidStream("stream source was not selected"));
+            return Err(ScreenCastError::InvalidStream(
+                "stream source was not selected",
+            ));
         }
     }
     Ok(())
@@ -274,8 +293,8 @@ mod tests {
     use super::*;
     use crate::{PortalOutcome, PortalService};
     use sol_system::{
-        ActionResult, DefaultDenyPolicy, MemoryActionAuditStore, PermissionGrant,
-        PermissionKey, PermissionStore, SystemActionService, SystemCapability,
+        ActionResult, DefaultDenyPolicy, MemoryActionAuditStore, PermissionGrant, PermissionKey,
+        PermissionStore, SystemActionService, SystemCapability,
     };
 
     #[derive(Default)]
@@ -287,10 +306,14 @@ mod tests {
                 key.capability,
                 SystemCapability::ScreenCapture | SystemCapability::OpenDocuments
             ))
-                .then_some(PermissionGrant::Allow))
+            .then_some(PermissionGrant::Allow))
         }
-        fn set(&self, _: PermissionKey, _: PermissionGrant) -> ActionResult<()> { Ok(()) }
-        fn revoke(&self, _: &PermissionKey) -> ActionResult<bool> { Ok(false) }
+        fn set(&self, _: PermissionKey, _: PermissionGrant) -> ActionResult<()> {
+            Ok(())
+        }
+        fn revoke(&self, _: &PermissionKey) -> ActionResult<bool> {
+            Ok(false)
+        }
     }
 
     #[derive(Default)]
@@ -341,13 +364,18 @@ mod tests {
     #[test]
     fn authorized_session_follows_select_start_close_lifecycle() {
         let mut manager = ScreenCastManager::new(FixtureBackend::default());
-        let id = manager.create(authorization(PortalRequest::ScreenCapture)).unwrap();
+        let id = manager
+            .create(authorization(PortalRequest::ScreenCapture))
+            .unwrap();
         manager
             .select_sources(id, vec![ScreenCastSource::Monitor], CursorMode::Metadata)
             .unwrap();
         let streams = manager.start(id).unwrap();
         assert_eq!(streams[0].node_id, 42);
-        assert_eq!(manager.session(id).unwrap().state, ScreenCastState::Streaming);
+        assert_eq!(
+            manager.session(id).unwrap().state,
+            ScreenCastState::Streaming
+        );
         manager.close(id).unwrap();
         assert_eq!(manager.session(id).unwrap().state, ScreenCastState::Closed);
     }
@@ -361,7 +389,9 @@ mod tests {
             })),
             Err(ScreenCastError::WrongAuthorization)
         );
-        let id = manager.create(authorization(PortalRequest::ScreenCapture)).unwrap();
+        let id = manager
+            .create(authorization(PortalRequest::ScreenCapture))
+            .unwrap();
         assert!(matches!(
             manager.start(id),
             Err(ScreenCastError::InvalidState { .. })

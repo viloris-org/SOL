@@ -123,6 +123,9 @@ pub struct WindowCard {
     pub has_thumbnail: bool,
 }
 
+/// Workspace identity, label, logical rectangle, and selection state.
+pub type WorkspaceCard = (WorkspaceId, String, (f32, f32, f32, f32), bool);
+
 /// A complete native overview frame contract.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OverviewSurfaceContract {
@@ -134,7 +137,7 @@ pub struct OverviewSurfaceContract {
     pub border: Color,
     pub accent: Color,
     /// Workspace and window card layout.
-    pub workspaces: Vec<(WorkspaceId, String, (f32, f32, f32, f32), bool)>,
+    pub workspaces: Vec<WorkspaceCard>,
     pub windows: Vec<WindowCard>,
     /// Accessibility tree projected alongside the visual frame.
     pub accessibility: AccessibilityNode,
@@ -302,7 +305,7 @@ impl<B: WorkspaceBridge, T: ThumbnailProvider> OverviewSurface<B, T> {
             ));
         }
         let accessibility =
-            accessibility_tree(&snapshots, &self.model.focus(), &workspaces, &windows);
+            accessibility_tree(snapshots, &self.model.focus(), &workspaces, &windows);
         Ok(OverviewSurfaceContract {
             output: self.output.clone(),
             physical_size: self
@@ -357,7 +360,7 @@ fn layout_windows<T: ThumbnailProvider>(
 fn accessibility_tree(
     snapshots: &WorkspaceSnapshotSet,
     focus: &OverviewFocus,
-    workspaces: &[(WorkspaceId, String, (f32, f32, f32, f32), bool)],
+    workspaces: &[WorkspaceCard],
     windows: &[WindowCard],
 ) -> AccessibilityNode {
     let mut children = Vec::new();
@@ -443,7 +446,7 @@ fn fill(pixels: &mut [u8], width: u32, height: u32, color: sol_design::color::Rg
         (color.2 * 255.0) as u8,
         (color.3 * 255.0) as u8,
     ];
-    for chunk in pixels.chunks_exact_mut(4) {
+    for chunk in pixels.as_chunks_mut::<4>().0 {
         chunk.copy_from_slice(&value);
     }
     let _ = (width, height);

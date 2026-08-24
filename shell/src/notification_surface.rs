@@ -114,12 +114,10 @@ impl NotificationPolicy {
             ));
         }
         for lifetime in [self.low, self.normal, self.critical] {
-            if let NotificationLifetime::Timed(duration) = lifetime {
-                if duration.is_zero() {
-                    return Err(NotificationSurfaceError::InvalidPolicy(
-                        "timed lifetimes must be non-zero",
-                    ));
-                }
+            if matches!(lifetime, NotificationLifetime::Timed(duration) if duration.is_zero()) {
+                return Err(NotificationSurfaceError::InvalidPolicy(
+                    "timed lifetimes must be non-zero",
+                ));
             }
         }
         Ok(self)
@@ -332,9 +330,7 @@ impl<A: NotificationApi> NotificationSurface<A> {
             sink.deliver(invocation.clone())
                 .map_err(NotificationSurfaceError::ActionDelivery)?;
         }
-        if matches!(outcome, NotificationCenterOutcome::Dismissed(_)) {
-            self.present(host)?;
-        } else if !matches!(outcome, NotificationCenterOutcome::Ignored) {
+        if !matches!(outcome, NotificationCenterOutcome::Ignored) {
             self.present(host)?;
         }
         Ok(outcome)
@@ -512,7 +508,7 @@ fn fill(pixels: &mut [u8], color: sol_design::color::Rgba) {
         (color.2 * 255.0) as u8,
         (color.3 * 255.0) as u8,
     ];
-    for chunk in pixels.chunks_exact_mut(4) {
+    for chunk in pixels.as_chunks_mut::<4>().0 {
         chunk.copy_from_slice(&value);
     }
 }

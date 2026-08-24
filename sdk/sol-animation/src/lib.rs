@@ -31,13 +31,13 @@ use sol_design::motion::{Motion, MotionSpec};
 pub trait AnimationDriver {
     /// Start or update an animation with the given motion spec.
     fn animate(&mut self, spec: MotionSpec);
-    
+
     /// Interrupt the current animation and reverse it.
     fn reverse(&mut self);
-    
+
     /// Stop all current animations.
     fn stop(&mut self);
-    
+
     /// Check if an animation is currently running.
     fn is_animating(&self) -> bool;
 }
@@ -217,6 +217,9 @@ mod tests {
         assert!(matches!(AnimationEffect::fast().motion, Motion::Fast));
         assert!(matches!(AnimationEffect::panel().motion, Motion::Panel));
         assert!(matches!(AnimationEffect::window().motion, Motion::Window));
-        assert!(matches!(AnimationEffect::workspace().motion, Motion::Workspace));
+        assert!(matches!(
+            AnimationEffect::workspace().motion,
+            Motion::Workspace
+        ));
     }
 }

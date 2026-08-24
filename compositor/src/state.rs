@@ -97,10 +97,6 @@ pub struct SolState {
 }
 
 impl SolState {
-    pub fn new(display: &DisplayHandle) -> Self {
-        Self::with_output_configurations(display, None)
-    }
-
     /// Create compositor state with backend-provided output configurations.
     pub fn with_output_configurations(
         display: &DisplayHandle,
