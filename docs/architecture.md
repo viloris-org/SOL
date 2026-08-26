@@ -28,9 +28,7 @@ Boot          (foundation)  sol-boot core · planned signed UEFI/UKI · GOP hand
 Upstream                    Linux · systemd · Mesa · PipeWire · drivers · etc.
 ```
 
-Arch packaging under `packaging/arch/` is transitional build/bootstrap work.
-It is not the target installed-system package authority. The target native
-contracts are described in [OS Platform Definition](os-platform.md).
+The target native contracts are described in [OS Platform Definition](os-platform.md).
 
 ## Executable and data lifecycle
 

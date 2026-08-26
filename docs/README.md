@@ -13,7 +13,7 @@ Documentation is organized by audience and lifecycle:
 | [Architecture](architecture.md) | Engineering | How the logical layers map to the monorepo, and boundary rules |
 | [SolKit getting started](solkit-getting-started.md) | Application developers | Start a renderer-independent native app from the SolKit starter template |
 | [Decision log](decisions/README.md) | Engineering | Architecture Decision Records (ADR) and the status-bearing decision register (PRD §41) |
-| Component READMEs | Engineering | Per-crate docs (`compositor/`, `sdk/*`, `services/*`, `apps/*`, `shell/`, `protocols/`, `packaging/arch/`, `tests/`) |
+| Component READMEs | Engineering | Per-crate docs (`compositor/`, `sdk/*`, `services/*`, `apps/*`, `shell/`, `protocols/`, `packaging/sol/`, `tests/`) |
 
 ## Reading order
 

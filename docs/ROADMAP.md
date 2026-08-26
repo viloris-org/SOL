@@ -149,14 +149,14 @@ later implementation.
 
 ## Phase 0 — Foundation spike ⚠
 
-> **Goal:** set up the Arch development environment, Rust workspace, Smithay
+> **Goal:** set up the development environment, Rust workspace, Smithay
 > compositor, basic Wayland client, input, and basic rendering.
 
 ### Accepted evidence
 
 | Deliverable | Maturity | Evidence and limit |
 |---|---|---|
-| Arch dev environment / Rust workspace (monorepo, ADR-0001/0002) | S3 | Workspace builds and tests as an integrated repository; release reproducibility is owned by Phase 7. |
+| Dev environment / Rust workspace (monorepo, ADR-0001/0002) | S3 | Workspace builds and tests as an integrated repository; release reproducibility is owned by Phase 7. |
 | `sol-compositor` Smithay compositor (winit backend) | S3 | Starts a nested `wayland-sol` development session; this is not real DRM/session validation. |
 | Base Wayland protocols | S2–S3 by interface | Basic globals and selected round trips exist; exact status is normative in the [protocol matrix](status/wayland-protocol-matrix.md). |
 | GL rendering + frame-callback loop | S3 development backend | winit renders client buffers and sends frame callbacks; multi-window geometry, layer surfaces, damage/pacing, and hardware behavior remain Phase 1 gates. |
@@ -726,7 +726,7 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 > external desktop or laptop, suspend/resume, NVIDIA or AMD), with IME and
 > share/record available.
 
-> **Historical gate:** the former Arch-repository installation target is
+> **Historical gate:** the former package-repository installation target is
 > retained as a transitional build check only. ADR-0019 through ADR-0023 move
 > production boot, packages, and sandbox enforcement into Phases 7–9.
 
@@ -768,16 +768,6 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [S2] **SDK environment doctor:** `scripts/solkit-doctor.sh` validates the
         toolchain, a locked Cargo manifest, starter copy-out behavior, and an
         optional full workspace check without modifying the target project.
-- [S0] **Transitional packaging polish:** preserve pacman build/install checks
-      for developer bootstrap while the native OS image and `.app` path is built
-  - [S2] **Isolated local split-package build:**
-        `packaging/arch/validate-local-build.sh` archives the current Git
-        revision with the required `sol-0.1.0/` prefix, runs
-        `makepkg --nodeps --cleanbuild` in a temporary directory, and checks
-        every split archive's binary/session-file payload plus the empty meta
-        package. This is not a claim of a public license or repository URL,
-        published archive/checksum, signing, repository publication, or real
-        pacman installation validation.
 - [S2] **Historical Store backend decision:** ADR-0018 recorded the former
       pacman/AUR direction; ADR-0020 supersedes it for the OS rebaseline.
 - [S2] **SDK permission tiers (§23):** ADR-0017 formalizes Public, Restricted,
@@ -1188,7 +1178,7 @@ SOL Applications → Third-party Applications
   coverage, and release-evidence gates aligned to the PRD, OS Platform
   Definition, Shell contract, and ADR-0019 through ADR-0025.
 
-- **2026-08-22** — Rebased SOL from an Arch-installable desktop platform to a
+- **2026-08-22** — Rebased SOL from a desktop platform into a
   complete Linux-kernel OS. Added Phases 7–9 for redundant trial-updated
   `sol-boot`/recovery, slot-bound signed A/B deployments,
   `sol-pkg`/`sol-packaged`, self-contained `.app` bundles, default-deny sandbox

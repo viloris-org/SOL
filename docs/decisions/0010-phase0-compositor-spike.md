@@ -47,7 +47,7 @@ cargo test -p sol-compositor --test sol_session   # PASSES
   surfaces as a window on the surrounding Wayland session.
 - `features = ["udev"]` (DRM/GBM/libinput/libseat) currently does **not**
   build out-of-the-box: the crates' `libdisplay-info-sys` requires system
-  `libdisplay-info < 0.3.0`, while Arch packages `0.3.0`. See ADR-0005. This is
+  `libdisplay-info < 0.3.0`, while the host system packages `0.3.0`. See ADR-0005. This is
   deferred to the real-hardware session (Phase 1).
 
 ## Next steps

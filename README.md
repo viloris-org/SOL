@@ -88,7 +88,6 @@ assistive-technology validation remain open.
 | `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🟡 mixed S1–S3 foundations; real adapters and product surfaces remain open |
 | `apps/` | First-party apps: Files, Terminal, Settings | 🔲 placeholders → Phase 3 |
 | `protocols/` | SOL-owned protocol XML + IPC schemas | 🔲 no SOL-owned stable schema yet; standard-interface status is tracked separately |
-| `packaging/arch/` | Transitional Arch bootstrap/build packaging | 🟡 historical/transition |
 | `boot/` | `sol-image` manifest tooling; target home of `sol-boot`, recovery, and verified-slot policy | 🟡 Phase 7 manifest foundation |
 | `packaging/sol/` | Target home of `.app` tooling and `sol-pkg` contracts | 🔲 planned |
 | `security/` | Target home of sandbox, permission, consent, and audit services | 🔲 planned |
@@ -108,7 +107,7 @@ assistive-technology validation remain open.
 | [Wayland protocol matrix](docs/status/wayland-protocol-matrix.md) | Advertised interfaces, semantic maturity, missing behavior, and evidence gates |
 | [Decision log](docs/decisions/README.md) | ADRs for boot, packages, security, runtime, compositor, SDK, IPC, and distribution |
 | [Docs index](docs/README.md) | How the docs fit together + pointers |
-| Component READMEs | `compositor/`, `sdk/*`, `services/*`, `apps/*`, `protocols/`, `packaging/arch/` |
+| Component READMEs | `compositor/`, `sdk/*`, `services/*`, `apps/*`, `protocols/` |
 
 ## Build
 

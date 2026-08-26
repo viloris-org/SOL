@@ -24,7 +24,7 @@ The full `smithay` crate set with the `udev`/`backend_drm` path also pulls
 Package 'libdisplay-info' has version '0.3.0', required version is '< 0.3.0'
 ```
 
-Arch ships `libdisplay-info` 0.3.0; the 0.2.x ABI pin is upstream-smithay
+The host system ships `libdisplay-info` 0.3.0; the 0.2.x ABI pin is upstream-smithay
 specific. Pinning or patching would be brittle and not representative of the
 real hardware target.
 
@@ -48,7 +48,7 @@ backend implementation. Its default `display-info` feature pulled
 `libdisplay-info-sys` with the obsolete `< 0.3.0` pkg-config constraint.
 Removing that unused dependency leaves the Smithay DRM/GBM/libinput/libseat
 feature set intact and makes `cargo build -p sol-compositor --features udev`
-build on current Arch with `libdisplay-info` 0.3.0.
+build with current `libdisplay-info` 0.3.0.
 
 The udev runtime now creates Smithay's real `UdevBackend`, obtains its initial
 DRM-device list, reads connected connectors and modes from `/sys/class/drm`,
@@ -66,7 +66,7 @@ for future persisted per-monitor configuration. The udev path is selected with
 ## Consequences
 
 - `cargo check` / `cargo build` / `cargo test` for Phase 0 work on a plain
-  Arch dev box (or CI) with no root and no VT — the compositor renders into a
+  dev box (or CI) with no root and no VT — the compositor renders into a
   window on the surrounding session.
 - A `--headless` Cargo feature is reserved for future CI that runs the
   compositor socket-first (no window) and drives a headless client purely

@@ -78,9 +78,8 @@ SOL is:
 
 > A modern, application-first operating system built on the Linux kernel.
 
-SOL is not a desktop environment layered onto an arbitrary Arch installation.
-Arch may be used as an early build and bootstrap source, but the installed
-system is built, updated, secured, and recovered through SOL-owned contracts.
+SOL is not a desktop environment layered onto an arbitrary Linux distribution.
+The installed system is built, updated, secured, and recovered through SOL-owned contracts.
 
 The relationship is:
 
@@ -96,8 +95,7 @@ SOL Runtime / compositor / shell
 SOL and third-party .app applications
 ```
 
-The former “SOL Desktop installable on Arch” direction is superseded. Desktop
-components remain modular internally, but SOL OS is the shipped product.
+Desktop components remain modular internally, but SOL OS is the shipped product.
 
 ---
 
@@ -291,10 +289,7 @@ reduced transparency and high contrast always have solid alternatives.
 
 # 6. Base system and boot
 
-SOL builds a reproducible, signed system image around the Linux kernel. Arch
-may supply early upstream packages and the development environment, but SOL
-owns image composition, release channels, update policy, compatibility, and
-recovery.
+SOL builds a reproducible, signed system image around the Linux kernel.
 
 Priority upstream reuses:
 
@@ -1011,7 +1006,7 @@ fcitx5-ime / fcitx5-chinese-addons (pinyin and other mainstream language engines
 ### Language priorities
 
 - v0.1: **mainstream languages first** (Chinese pinyin, etc.), backed by
-  fcitx5 addons (`fcitx5-chinese-addons` etc., already present on Arch).
+  fcitx5 addons (e.g. `fcitx5-chinese-addons`).
 - Extend to Japanese (Anthy/KKC), Korean (Hangul), and others per fcitx5
   addon support.
 
@@ -1346,9 +1341,7 @@ version, and retained compatible versions can be reactivated without rolling
 back user data. Garbage collection protects a compatible version for every
 retained known-good system deployment when one has previously been installed.
 
-pacman/AUR may remain build inputs and developer-bootstrap tools during the
-transition. Flatpak may be a compatibility subsystem. None is the installed
-OS's native package, identity, permission, or trust authority.
+None is the installed OS's native package, identity, permission, or trust authority.
 
 ---
 
@@ -1618,7 +1611,7 @@ self-containment, or default-deny permission requirements.
 Goal:
 
 ```text
-Arch development environment
+Development environment
 Rust workspace
 Smithay compositor
 Basic Wayland client
@@ -1749,8 +1742,6 @@ Public SolKit
 Documentation
 Templates
 Developer tools
-Packaging
-Transitional Arch build packaging
 SDK stability
 ```
 
@@ -1875,7 +1866,7 @@ Currently settled:
 | Item | Decision |
 |---|---|
 | Product boundary | Complete Linux-kernel operating system |
-| Build inputs | Upstream projects; Arch permitted for bootstrap during transition |
+| Build inputs | Upstream projects |
 | Primary language | Rust |
 | Display protocol | Wayland |
 | Compositor framework | Smithay |

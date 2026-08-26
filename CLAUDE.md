@@ -71,7 +71,7 @@ Shell         (shell/)  sol-shell — top bar, dock, launcher, overview
 ─────────────
 Compositor    (compositor/) sol-compositor — SCP (SOL Compositor Protocol) only
 ─────────────
-Linux         Arch/systemd/kernel/etc.
+Linux Kernel  systemd/kernel/drivers
 ```
 
 ### Compositor (`compositor/`)

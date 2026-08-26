@@ -36,8 +36,8 @@ fcitx5-ime / fcitx5-chinese-addons (pinyin and other mainstream language engines
   v3` + `input-method v2`; SOL evaluates the newer staging protocols when
   Smithay supports them. This remains a **first-class** Phase 1 concern (not
   Phase 5/6).
-- **Mainstream languages first**: Chinese pinyin via `fcitx5-chinese-addons`
-  (already on Arch), then Japanese/Korean via existing fcitx5 addons.
+- **Mainstream languages first**: Chinese pinyin via `fcitx5-chinese-addons`,
+  then Japanese/Korean via existing fcitx5 addons.
 - SOL's differentiator is compositor + SDK + first-party visual consistency,
   not an IME research lab.
 

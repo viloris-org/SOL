@@ -38,6 +38,3 @@ Boundary rules:
   preferred pointer, blocks boot, or rewinds app data.
 - Garbage collection protects a compatible app version for every retained
   known-good system deployment when one has previously been installed.
-
-The existing `packaging/arch/` path remains transitional and must not be used
-to define new native package semantics.

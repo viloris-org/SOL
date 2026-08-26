@@ -12,7 +12,7 @@ SOL starts with tightly coupled compositor, SDK, shell, and first-party apps. PR
 Use a single Rust workspace in this repository. Top-level boundaries follow the PRD:
 
 ```text
-compositor/ shell/ sdk/ services/ apps/ protocols/ packaging/arch/ tests/ docs/
+compositor/ shell/ sdk/ services/ apps/ protocols/ packaging/sol/ tests/ docs/
 ```
 
 ## Consequences

@@ -20,7 +20,7 @@ wayland-protocols = "0.32"
 # WLR layer-shell protocol (used by the shell top bar / dock) via Smithay's
 # wlr-layer-shell integration (PRD §11 / Phase 1 M1).
 wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["server"] }
-winit = { version = "0.30", default-features = false, features = ["wayland", "x11", "rwh_06"] }
+winit = { version = "0.30", default-features = false, features = ["x11", "rwh_06"] }
 smithay-drm-extras = { version = "0.1", default-features = false, optional = true }
 
 # SCP (SOL Compositor Protocol) dependencies
@@ -61,4 +61,3 @@ udev = [
 
 [dev-dependencies]
 serial_test = "4.0.1"
-wayland-client = "0.31.15"

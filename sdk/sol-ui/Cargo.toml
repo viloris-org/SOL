@@ -12,7 +12,7 @@ accesskit = { version = "0.24.1", optional = true }
 accesskit_unix = { version = "0.22.1", optional = true }
 sol-design = { path = "../sol-design" }
 sol-animation = { path = "../sol-animation" }
-slint = { version = "=1.13.1", default-features = false, features = ["std", "compat-1-2", "backend-winit-wayland", "renderer-winit-software"], optional = true }
+slint = { version = "=1.13.1", default-features = false, features = ["std", "compat-1-2", "backend-winit-x11", "renderer-winit-software"], optional = true }
 
 [dev-dependencies]
 atspi-connection = "0.14"

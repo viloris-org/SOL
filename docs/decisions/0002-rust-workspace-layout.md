@@ -11,7 +11,7 @@ The repository needs a workspace layout that maps to PRD sections 7, 10, and 39.
 
 - Binaries: `compositor`, `shell`, `services/*`, `apps/*`
 - Libraries: `sdk/*` (`sol-ui`, `sol-app`, `sol-graphics`, `sol-animation`, `sol-system`)
-- Non-Cargo areas: `protocols`, `packaging/arch`, `tests`, `docs`
+- Non-Cargo areas: `protocols`, `packaging/sol`, `tests`, `docs`
 
 ## Open questions
 

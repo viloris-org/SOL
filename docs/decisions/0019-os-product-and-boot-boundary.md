@@ -7,7 +7,7 @@
 
 ## Context
 
-SOL was originally defined as a desktop platform installed on Arch Linux. That
+SOL was originally defined as a desktop platform installed on another Linux distribution. That
 left boot, recovery, system updates, base compatibility, and machine-wide trust
 owned by a different product. It also prevented SOL from giving applications a
 single system version, runtime, and security contract.
@@ -39,8 +39,6 @@ identity.
 SOL reuses the Linux kernel, drivers, UEFI libraries, UKI conventions, systemd,
 Mesa, PipeWire, and other upstream components. It does not create its own
 firmware, cryptography, driver model, or init system merely to claim ownership.
-Arch packages may bootstrap builds during transition but do not define the
-installed OS or its public compatibility contract.
 
 ## Consequences
 

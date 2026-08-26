@@ -4,8 +4,8 @@
 **Baseline:** OS redefinition, 2026-08-22
 
 This document defines the product boundary introduced by the OS rebaseline. If
-an older document describes SOL as a desktop layer for Arch Linux, names
-pacman/AUR as the native application backend, or conflicts with the security,
+an older document describes SOL as a desktop layer for another Linux distribution, names
+a third-party package manager as the native application backend, or conflicts with the security,
 account, material, compatibility, or Shell contracts below, this document and
 ADR-0019 through ADR-0025 take precedence. The narrower accepted ADR controls
 when this overview and an ADR differ in detail.
@@ -26,9 +26,7 @@ application experience as “the system”:
 
 SOL may consume upstream kernel, firmware, driver, systemd, Mesa, PipeWire,
 NetworkManager, BlueZ, and other projects. Those are implementation inputs, not
-the public product boundary. Arch remains useful as an early build source and
-developer bootstrap environment; it is no longer the installed-system identity
-or application package contract.
+the public product boundary.
 
 ## 2. System architecture
 
