@@ -1,4 +1,4 @@
-//! Wayland clipboard fixture for the headless SOL compositor.
+//! Clipboard test client for the headless SOL compositor.
 
 use std::fs::File;
 use std::io::{Read, Write};

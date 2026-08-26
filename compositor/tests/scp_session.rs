@@ -34,8 +34,8 @@ impl Session {
             .env("XDG_RUNTIME_DIR", &runtime_dir)
             .env("SOL_SCP_SOCKET", &socket_name)
             .env(
-                "SOL_WAYLAND_SOCKET",
-                format!("wayland-{}", std::process::id()),
+                "SOL_COMPOSITOR_SOCKET",
+                format!("sol-{}", std::process::id()),
             )
             .arg("--headless")
             .stdout(Stdio::null())

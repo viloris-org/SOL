@@ -30,7 +30,9 @@
 pub mod audit;
 pub mod buffer;
 pub mod capability;
+pub mod data_device;
 pub mod input;
+pub mod keymap;
 pub mod layer;
 pub mod manifest;
 pub mod output;

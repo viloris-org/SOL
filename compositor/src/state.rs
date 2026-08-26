@@ -1,7 +1,7 @@
 //! Core SOL compositor state.
 //!
 //! `SolState` owns the Smithay protocol state (compositor, shm, xdg-shell,
-//! seat, data-device) that a functioning Wayland compositor must expose, and
+//! seat, data-device) that a functioning SCP compositor must expose, and
 //! implements the handlers that drive them. Backends (winit for development,
 //! udev/DRM for real hardware) drive this state from a single event loop.
 //!
@@ -56,7 +56,7 @@ use crate::{
     window,
 };
 
-/// Client-level state attached to each connected Wayland client.
+/// Client-level state attached to each connected SCP client.
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,

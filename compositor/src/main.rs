@@ -1,10 +1,10 @@
 //! SOL compositor — Phase 0
 //!
-//! A functional Smithay compositor that can start a standalone Wayland
+//! A functional Smithay compositor that can start a standalone SCP
 //! session (PRD §38 Phase 0 success criterion):
 //!
 //! ```text
-//! > 能启动独立 SOL Wayland Session，并运行标准 Wayland 应用
+//! > 能启动独立 SOL SCP Session，并运行 SCP 原生应用
 //! ```
 //!
 //! For development this runs on Smithay's `winit` backend, which renders into
@@ -14,13 +14,13 @@
 //! (`features = ["udev"]`, `--tty-udev`) for real hardware sessions later.
 //!
 //! This milestone intentionally ships the "minimal well-formed compositor":
-//! the wire protocols every client needs (`wl_compositor`, `wl_shm`,
-//! `xdg_shell`, seat, data-device) plus the render/frame-callback loop. Window
-//! management, workspaces, layer-shell (shell) and XWayland are Phase 1.
+//! the wire protocols every client needs (SCP surface, buffer, shell, seat,
+//! data-device) plus the render/frame-callback loop. Window management,
+//! workspaces, and layer-shell (shell) are Phase 1.
 //!
 //! A `--headless` mode runs the same protocol loop with no render backend at
 //! all (no GPU, no display). It is driven by the integration tests and by CI,
-//! which therefore do not depend on a host X/Wayland session or GL drivers.
+//! which therefore do not depend on a host windowing system or GL drivers.
 
 mod grabs;
 mod outputs;
@@ -66,9 +66,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // headless modes. Keep the guard alive for the full compositor lifetime.
     let _scp_server = ScpServer::bind_from_env()?;
 
-    // `--spawn <client>` auto-launches a Wayland client once listening, e.g.
-    // `--spawn weston-terminal`. Optional; the token is otherwise ignored so
-    // extra args don't break the run.
+    // `--spawn <client>` auto-launches an SCP client once listening.
+    // Optional; the token is otherwise ignored so extra args don't break the run.
     let spawn = std::env::args()
         .position(|a| a == "--spawn")
         .and_then(|i| std::env::args().nth(i + 1));
@@ -115,10 +114,8 @@ pub fn run_udev(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>>
 
 /// Start the compositor on the winit backend (a window on the current session).
 ///
-/// `WAYLAND_DISPLAY` / `SOL_WAYLAND_SOCKET` selects the listener socket
-/// (default `wayland-sol`). `--spawn <client>` launches a Wayland client
-/// against that socket once listening, for quick interactive checks
-/// (e.g. `--spawn weston-terminal`).
+/// `SOL_COMPOSITOR_SOCKET` selects the listener socket (default `sol-0`).
+/// `--spawn <client>` launches an SCP client against that socket once listening.
 #[cfg(feature = "winit")]
 pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     use ::winit::platform::pump_events::PumpStatus;
@@ -143,7 +140,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
     let mut dh = display.handle();
     let mut state = SolState::with_output_configurations(&dh, Some(&[configured_output()?]));
 
-    let socket_name = std::env::var("SOL_WAYLAND_SOCKET").unwrap_or_else(|_| "wayland-sol".into());
+    let socket_name = std::env::var("SOL_COMPOSITOR_SOCKET").unwrap_or_else(|_| "sol-0".into());
     let listener = ListeningSocket::bind(&socket_name)?;
     tracing::info!(socket = %socket_name, "SOL compositor listening");
 
@@ -313,7 +310,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
     }
 }
 
-/// Spawn a Wayland client against the listener socket, if requested.
+/// Spawn an SCP client against the listener socket, if requested.
 fn spawn_client(spawn: &Option<String>) {
     if let Some(bin) = spawn {
         tracing::info!(%bin, "spawning test client");
@@ -364,14 +361,14 @@ impl ClientData for ClientState {
     }
 }
 
-/// Run the compositor headless: bind the socket and service Wayland clients,
+/// Run the compositor headless: bind the socket and service SCP clients,
 /// with no render backend. Used by integration tests and CI.
 pub fn run_headless(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut display: Display<SolState> = Display::new()?;
     let mut dh = display.handle();
     let mut state = SolState::with_output_configurations(&dh, Some(&[configured_output()?]));
 
-    let socket_name = std::env::var("SOL_WAYLAND_SOCKET").unwrap_or_else(|_| "wayland-sol".into());
+    let socket_name = std::env::var("SOL_COMPOSITOR_SOCKET").unwrap_or_else(|_| "sol-0".into());
     let listener = ListeningSocket::bind(&socket_name)?;
     tracing::info!(socket = %socket_name, "SOL compositor listening");
 

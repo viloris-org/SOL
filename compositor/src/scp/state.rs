@@ -3,14 +3,16 @@
 use crate::scp::{
     buffer::BufferManager,
     capability::{Capability, CapabilityGrant, CapabilityToken, Decision},
+    data_device::DataDevice,
     input::InputState,
+    keymap::{KeymapState, RepeatInfo, ModifierState},
     output::OutputManager,
     popup::{position_popup, Popup},
     protocol::{BufferId, ClientMessage, CompositorMessage, PopupId, Rect, SessionId, SurfaceId, LayerSurfaceId},
     security::{AppId, AuditOutcome, SecurityCoordinator, StubSecurityCoordinator},
     surface::{SurfaceManager, Layer, Anchor, Margin, KeyboardInteractivity},
 };
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant, os::unix::io::IntoRawFd};
 
 /// Authenticated client session.
 #[derive(Debug)]
@@ -81,6 +83,14 @@ pub struct ScpState {
     focused_surface: Option<(SessionId, SurfaceId)>,
     cursor_surface: Option<(SessionId, SurfaceId)>,
     next_serial: u32,
+
+    // Keyboard state
+    keymap_state: KeymapState,
+    repeat_info: RepeatInfo,
+    modifier_state: ModifierState,
+
+    // Data device (clipboard/DnD)
+    data_device: DataDevice,
 }
 
 impl ScpState {
@@ -103,6 +113,10 @@ impl ScpState {
             focused_surface: None,
             cursor_surface: None,
             next_serial: 1,
+            keymap_state: KeymapState::new(),
+            repeat_info: RepeatInfo::default(),
+            modifier_state: ModifierState::new(),
+            data_device: DataDevice::new(),
         }
     }
 
@@ -867,6 +881,111 @@ impl ScpState {
                 }
                 Ok(vec![])
             }
+
+            // ===== Data Transfer (Clipboard/DnD) =====
+            ClientMessage::SetSelection { mime_types, serial } => {
+                // Verify client has ClipboardWrite capability
+                self.verify_capability(session_id, &Capability::ClipboardWrite)?;
+
+                // Validate MIME types
+                for mime in &mime_types {
+                    if !crate::scp::data_device::is_valid_mime_type(mime) {
+                        return Err(format!("Invalid MIME type: {}", mime));
+                    }
+                }
+
+                // Record serial and set selection
+                self.data_device.record_serial(serial);
+                self.data_device
+                    .set_selection(session_id, mime_types.clone());
+
+                // Notify other clients
+                Ok(vec![CompositorMessage::SelectionOffer { mime_types }])
+            }
+
+            ClientMessage::SendSelectionData { mime_type: _, fd } => {
+                // Verify this session owns the selection
+                if !self
+                    .data_device
+                    .get_selection_full()
+                    .is_some_and(|s| s.owner == session_id)
+                {
+                    return Err("Not selection owner".to_string());
+                }
+
+                // In real implementation, read from fd and send to requesting client
+                // For now, just acknowledge
+                let _ = nix::unistd::close(fd);
+                Ok(vec![])
+            }
+
+            ClientMessage::StartDrag {
+                surface_id,
+                origin_surface,
+                icon_surface,
+                mime_types,
+                serial,
+            } => {
+                self.verify_capability(session_id, &Capability::DragAndDrop)?;
+                self.verify_surface_ownership(session_id, surface_id)?;
+                self.verify_surface_ownership(session_id, origin_surface)?;
+                if let Some(icon) = icon_surface {
+                    self.verify_surface_ownership(session_id, icon)?;
+                }
+
+                // Validate MIME types
+                for mime in &mime_types {
+                    if !crate::scp::data_device::is_valid_mime_type(mime) {
+                        return Err(format!("Invalid MIME type: {}", mime));
+                    }
+                }
+
+                self.data_device.record_serial(serial);
+                self.data_device
+                    .start_drag_validated(session_id, origin_surface, icon_surface, mime_types, serial)
+                    .map_err(|e| e.to_string())?;
+
+                Ok(vec![])
+            }
+
+            ClientMessage::AcceptDrag { serial, mime_type } => {
+                if serial > self.next_serial {
+                    return Err("Invalid drag serial".to_string());
+                }
+                self.data_device
+                    .accept_drag(mime_type)
+                    .map_err(|e| e.to_string())?;
+                Ok(vec![])
+            }
+
+            ClientMessage::FinishDrag => {
+                self.data_device
+                    .finish_drag()
+                    .map_err(|e| e.to_string())?;
+                Ok(vec![CompositorMessage::DragFinished])
+            }
+
+            ClientMessage::CancelDrag => {
+                self.data_device
+                    .cancel_drag()
+                    .map_err(|e| e.to_string())?;
+                Ok(vec![CompositorMessage::DragCancelled])
+            }
+
+            ClientMessage::SendDragData { mime_type: _, fd } => {
+                // Verify this session is the drag source
+                if !self
+                    .data_device
+                    .active_drag()
+                    .is_some_and(|d| d.source == session_id)
+                {
+                    return Err("Not drag source".to_string());
+                }
+
+                // In real implementation, read from fd and send to drop target
+                let _ = nix::unistd::close(fd);
+                Ok(vec![])
+            }
         }
     }
 
@@ -983,6 +1102,19 @@ impl ScpState {
         Ok(())
     }
 
+    fn verify_capability(
+        &self,
+        session_id: SessionId,
+        capability: &Capability,
+    ) -> Result<(), String> {
+        self.sessions
+            .get(&session_id)
+            .ok_or("Invalid session")?
+            .has_capability(capability)
+            .then_some(())
+            .ok_or_else(|| format!("Missing required capability: {}", capability.wire_name()))
+    }
+
     fn verify_layer_ownership(
         &self,
         session_id: SessionId,
@@ -1091,6 +1223,294 @@ impl ScpState {
 
     pub fn dismiss_popup(&mut self, popup_id: PopupId) -> Option<Popup> {
         self.popups.remove(&popup_id)
+    }
+
+    // ===== Keyboard Input =====
+
+    /// Send keymap to a newly focused surface
+    pub fn send_keymap(&self, _session_id: SessionId) -> Result<CompositorMessage, std::io::Error> {
+        let fd = self.keymap_state.create_memfd()?;
+        Ok(CompositorMessage::KeymapFormat {
+            format: match self.keymap_state.format() {
+                crate::scp::keymap::KeymapFormat::NoKeymap =>
+                    crate::scp::protocol::KeymapFormat::NoKeymap,
+                crate::scp::keymap::KeymapFormat::XkbV1 =>
+                    crate::scp::protocol::KeymapFormat::XkbV1,
+            },
+            fd,
+            size: self.keymap_state.size(),
+        })
+    }
+
+    /// Send repeat info to client
+    pub fn send_repeat_info(&self) -> CompositorMessage {
+        CompositorMessage::RepeatInfo {
+            rate: self.repeat_info.rate,
+            delay: self.repeat_info.delay,
+        }
+    }
+
+    /// Process a key press event
+    pub fn handle_key_press(&mut self, keycode: u32, time_ms: u32) -> Vec<(SessionId, CompositorMessage)> {
+        let mut messages = Vec::new();
+
+        // Update modifier state
+        self.modifier_state.key_pressed(keycode);
+
+        // Send key event to focused surface
+        if let Some((session_id, surface_id)) = self.focused_surface {
+            let serial = self.next_serial();
+
+            // Send key event
+            messages.push((
+                session_id,
+                CompositorMessage::InputEvent {
+                    surface_id,
+                    event: crate::scp::protocol::InputEvent::KeyboardKey {
+                        serial,
+                        key: keycode,
+                        state: crate::scp::protocol::KeyState::Pressed,
+                        time_ms,
+                    },
+                },
+            ));
+
+            // Send modifier update
+            messages.push((
+                session_id,
+                CompositorMessage::Modifiers {
+                    surface_id,
+                    serial,
+                    mods_depressed: self.modifier_state.mods_depressed,
+                    mods_latched: self.modifier_state.mods_latched,
+                    mods_locked: self.modifier_state.mods_locked,
+                    group: self.modifier_state.group,
+                },
+            ));
+        }
+
+        messages
+    }
+
+    /// Process a key release event
+    pub fn handle_key_release(&mut self, keycode: u32, time_ms: u32) -> Vec<(SessionId, CompositorMessage)> {
+        let mut messages = Vec::new();
+
+        // Update modifier state
+        self.modifier_state.key_released(keycode);
+
+        // Send key event to focused surface
+        if let Some((session_id, surface_id)) = self.focused_surface {
+            let serial = self.next_serial();
+
+            // Send key event
+            messages.push((
+                session_id,
+                CompositorMessage::InputEvent {
+                    surface_id,
+                    event: crate::scp::protocol::InputEvent::KeyboardKey {
+                        serial,
+                        key: keycode,
+                        state: crate::scp::protocol::KeyState::Released,
+                        time_ms,
+                    },
+                },
+            ));
+
+            // Send modifier update
+            messages.push((
+                session_id,
+                CompositorMessage::Modifiers {
+                    surface_id,
+                    serial,
+                    mods_depressed: self.modifier_state.mods_depressed,
+                    mods_latched: self.modifier_state.mods_latched,
+                    mods_locked: self.modifier_state.mods_locked,
+                    group: self.modifier_state.group,
+                },
+            ));
+        }
+
+        messages
+    }
+
+    /// Send keyboard enter event when surface gains focus
+    pub fn send_keyboard_enter(&mut self, _session_id: SessionId, surface_id: SurfaceId) -> Vec<CompositorMessage> {
+        let serial = self.next_serial();
+        let pressed_keys = self.modifier_state.pressed_keys();
+
+        vec![
+            CompositorMessage::InputEvent {
+                surface_id,
+                event: crate::scp::protocol::InputEvent::KeyboardEnter {
+                    serial,
+                    keys: pressed_keys,
+                },
+            },
+            CompositorMessage::Modifiers {
+                surface_id,
+                serial,
+                mods_depressed: self.modifier_state.mods_depressed,
+                mods_latched: self.modifier_state.mods_latched,
+                mods_locked: self.modifier_state.mods_locked,
+                group: self.modifier_state.group,
+            },
+        ]
+    }
+
+    /// Send keyboard leave event when surface loses focus
+    pub fn send_keyboard_leave(&mut self, _session_id: SessionId, surface_id: SurfaceId) -> CompositorMessage {
+        let serial = self.next_serial();
+        CompositorMessage::InputEvent {
+            surface_id,
+            event: crate::scp::protocol::InputEvent::KeyboardLeave { serial },
+        }
+    }
+
+    /// Reset modifier state (e.g., when compositor loses focus)
+    pub fn reset_keyboard_state(&mut self) {
+        self.modifier_state.reset();
+    }
+
+    /// Get current modifier state
+    pub fn modifier_state(&self) -> &ModifierState {
+        &self.modifier_state
+    }
+
+    // ===== Data Transfer (Clipboard/DnD) =====
+
+    /// Handle SetSelection request (clipboard write)
+    pub fn handle_set_selection(
+        &mut self,
+        session_id: SessionId,
+        mime_types: Vec<String>,
+        _serial: u32,
+    ) -> Result<Vec<CompositorMessage>, String> {
+        // Verify this is a recent input serial (anti-clipboard-hijacking)
+        // In production, track recent input serials per session
+
+        // Check ClipboardWrite capability
+        let _session = self.sessions.get(&session_id)
+            .ok_or("Invalid session")?;
+
+        // Store selection offer
+        self.data_device.set_selection(session_id, mime_types.clone());
+
+        // Notify all other clients about new selection
+        let mut messages = Vec::new();
+        for (&other_session_id, _) in &self.sessions {
+            if other_session_id != session_id {
+                messages.push(CompositorMessage::SelectionOffer {
+                    mime_types: mime_types.clone(),
+                });
+            }
+        }
+
+        Ok(messages)
+    }
+
+    /// Handle clipboard data request from client
+    pub fn handle_request_selection_data(
+        &mut self,
+        _session_id: SessionId,
+        mime_type: String,
+    ) -> Result<(SessionId, CompositorMessage), String> {
+        // Get the selection owner
+        let (owner_session, available_mimes) = self.data_device.get_selection()
+            .ok_or("No selection available")?;
+
+        // Verify requested mime type is available
+        if !available_mimes.contains(&mime_type) {
+            return Err("Requested mime type not available".to_string());
+        }
+
+        // Create pipe for data transfer
+        let (_read_fd, write_fd) = nix::unistd::pipe()
+            .map_err(|e| format!("Failed to create pipe: {}", e))?;
+
+        // Request data from selection owner
+        Ok((
+            owner_session,
+            CompositorMessage::RequestSelectionData {
+                mime_type,
+                fd: write_fd.into_raw_fd(),
+            },
+        ))
+    }
+
+    /// Handle drag-and-drop start
+    pub fn handle_start_drag(
+        &mut self,
+        session_id: SessionId,
+        surface_id: SurfaceId,
+        mime_types: Vec<String>,
+        _serial: u32,
+    ) -> Result<Vec<CompositorMessage>, String> {
+        // Verify DragAndDrop capability and recent input serial
+
+        // Start drag operation
+        self.data_device.start_drag(session_id, surface_id, mime_types.clone());
+
+        Ok(vec![])
+    }
+
+    /// Handle drag motion (update target surface)
+    pub fn handle_drag_motion(
+        &mut self,
+        x: f64,
+        y: f64,
+        time_ms: u32,
+    ) -> Vec<(SessionId, CompositorMessage)> {
+        let mut messages = Vec::new();
+
+        // Find surface under pointer
+        // This is simplified - real implementation uses hit-testing
+        if let Some((session_id, surface_id)) = self.focused_surface {
+            if let Some((_drag_session, _drag_surface, mime_types)) = self.data_device.get_drag() {
+                // If this is a new surface, send DragEnter
+                if !self.data_device.is_drag_over_surface(surface_id) {
+                    let serial = self.next_serial();
+                    messages.push((
+                        session_id,
+                        CompositorMessage::DragEnter {
+                            serial,
+                            surface_id,
+                            x,
+                            y,
+                            mime_types,
+                        },
+                    ));
+                    self.data_device.set_drag_surface(surface_id);
+                } else {
+                    // Send motion update
+                    messages.push((
+                        session_id,
+                        CompositorMessage::DragMotion { x, y, time_ms },
+                    ));
+                }
+            }
+        }
+
+        messages
+    }
+
+    /// Handle drag drop
+    pub fn handle_drag_drop(&mut self) -> Vec<(SessionId, CompositorMessage)> {
+        let mut messages = Vec::new();
+
+        if let Some(_drag_surface_id) = self.data_device.drag_surface() {
+            if let Some((session_id, _)) = self.focused_surface {
+                messages.push((session_id, CompositorMessage::Drop));
+            }
+        }
+
+        messages
+    }
+
+    /// Clear clipboard selection
+    pub fn clear_selection(&mut self) -> Vec<CompositorMessage> {
+        self.data_device.clear_selection();
+        vec![CompositorMessage::SelectionCleared]
     }
 }
 

@@ -14,7 +14,7 @@ use std::{
 
 use serial_test::serial;
 
-const SOCKET: &str = "wayland-sol";
+const SOCKET: &str = "sol-0";
 
 struct Session {
     compositor: Child,
@@ -27,10 +27,10 @@ impl Session {
         let compositor_bin = build_bin("sol-compositor");
         let socket = format!("{}-{}", SOCKET, std::process::id());
         let runtime_dir = std::env::temp_dir().join(format!("sol-session-{socket}"));
-        std::fs::create_dir_all(&runtime_dir).expect("create isolated Wayland runtime directory");
+        std::fs::create_dir_all(&runtime_dir).expect("create isolated runtime directory");
 
         let compositor = Command::new(compositor_bin)
-            .env("SOL_WAYLAND_SOCKET", &socket)
+            .env("SOL_COMPOSITOR_SOCKET", &socket)
             .env("XDG_RUNTIME_DIR", &runtime_dir)
             .arg("--headless")
             .stdout(Stdio::piped())

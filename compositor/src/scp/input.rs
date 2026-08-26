@@ -3,6 +3,7 @@
 use crate::scp::protocol::{
     AxisSource, ButtonState, InputEvent, KeyState, Orientation, SessionId, SurfaceId,
 };
+use std::collections::HashSet;
 use std::time::Instant;
 
 /// Input state tracker for the compositor.
@@ -13,6 +14,14 @@ pub struct InputState {
     touch_points: Vec<TouchPoint>,
     serial_counter: u32,
     last_input_time: Instant,
+
+    // Keyboard state
+    pressed_keys: HashSet<u32>,
+    modifiers: ModifierState,
+
+    // Pointer state
+    pointer_position: (f64, f64),
+    pressed_buttons: HashSet<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +31,24 @@ struct TouchPoint {
     surface: (SessionId, SurfaceId),
     x: f64,
     y: f64,
+}
+
+/// Keyboard modifier state (XKB compatible).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ModifierState {
+    pub mods_depressed: u32, // Currently pressed modifiers
+    pub mods_latched: u32,   // Latched modifiers (sticky)
+    pub mods_locked: u32,    // Locked modifiers (caps lock, etc.)
+    pub group: u32,          // Keyboard layout group
+}
+
+impl ModifierState {
+    pub fn is_empty(&self) -> bool {
+        self.mods_depressed == 0
+            && self.mods_latched == 0
+            && self.mods_locked == 0
+            && self.group == 0
+    }
 }
 
 impl Default for InputState {
@@ -38,6 +65,10 @@ impl InputState {
             touch_points: Vec::new(),
             serial_counter: 1,
             last_input_time: Instant::now(),
+            pressed_keys: HashSet::new(),
+            modifiers: ModifierState::default(),
+            pointer_position: (0.0, 0.0),
+            pressed_buttons: HashSet::new(),
         }
     }
 
@@ -62,12 +93,25 @@ impl InputState {
         self.keyboard_focus
     }
 
+    pub fn pressed_keys(&self) -> Vec<u32> {
+        self.pressed_keys.iter().copied().collect()
+    }
+
+    pub fn modifiers(&self) -> ModifierState {
+        self.modifiers
+    }
+
+    pub fn set_modifiers(&mut self, modifiers: ModifierState) {
+        self.modifiers = modifiers;
+    }
+
     pub fn dispatch_keyboard_enter(
         &mut self,
         surface: (SessionId, SurfaceId),
         pressed_keys: Vec<u32>,
     ) -> InputEvent {
         self.keyboard_focus = Some(surface);
+        self.pressed_keys = pressed_keys.iter().copied().collect();
         let serial = self.next_serial();
         InputEvent::KeyboardEnter {
             serial,
@@ -78,6 +122,7 @@ impl InputState {
     pub fn dispatch_keyboard_leave(&mut self) -> Option<InputEvent> {
         if self.keyboard_focus.is_some() {
             self.keyboard_focus = None;
+            self.pressed_keys.clear();
             let serial = self.next_serial();
             Some(InputEvent::KeyboardLeave { serial })
         } else {
@@ -92,6 +137,14 @@ impl InputState {
         time_ms: u32,
     ) -> Option<InputEvent> {
         if self.keyboard_focus.is_some() {
+            match state {
+                KeyState::Pressed => {
+                    self.pressed_keys.insert(key);
+                }
+                KeyState::Released => {
+                    self.pressed_keys.remove(&key);
+                }
+            }
             let serial = self.next_serial();
             Some(InputEvent::KeyboardKey {
                 serial,
@@ -101,6 +154,16 @@ impl InputState {
             })
         } else {
             None
+        }
+    }
+
+    pub fn dispatch_modifiers(&self, modifiers: ModifierState, serial: u32) -> InputEvent {
+        InputEvent::Modifiers {
+            serial,
+            mods_depressed: modifiers.mods_depressed,
+            mods_latched: modifiers.mods_latched,
+            mods_locked: modifiers.mods_locked,
+            group: modifiers.group,
         }
     }
 
@@ -114,6 +177,14 @@ impl InputState {
         self.pointer_focus
     }
 
+    pub fn pointer_position(&self) -> (f64, f64) {
+        self.pointer_position
+    }
+
+    pub fn pressed_buttons(&self) -> Vec<u32> {
+        self.pressed_buttons.iter().copied().collect()
+    }
+
     pub fn dispatch_pointer_enter(
         &mut self,
         surface: (SessionId, SurfaceId),
@@ -121,6 +192,7 @@ impl InputState {
         y: f64,
     ) -> InputEvent {
         self.pointer_focus = Some(surface);
+        self.pointer_position = (x, y);
         let serial = self.next_serial();
         InputEvent::PointerEnter { serial, x, y }
     }
@@ -137,6 +209,7 @@ impl InputState {
 
     pub fn dispatch_pointer_motion(&mut self, x: f64, y: f64, time_ms: u32) -> Option<InputEvent> {
         if self.pointer_focus.is_some() {
+            self.pointer_position = (x, y);
             Some(InputEvent::PointerMotion { x, y, time_ms })
         } else {
             None
@@ -150,6 +223,14 @@ impl InputState {
         time_ms: u32,
     ) -> Option<InputEvent> {
         if self.pointer_focus.is_some() {
+            match state {
+                ButtonState::Pressed => {
+                    self.pressed_buttons.insert(button);
+                }
+                ButtonState::Released => {
+                    self.pressed_buttons.remove(&button);
+                }
+            }
             let serial = self.next_serial();
             Some(InputEvent::PointerButton {
                 serial,

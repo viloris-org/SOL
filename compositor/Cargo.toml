@@ -30,6 +30,8 @@ rand = "0.8"
 nix = { version = "0.30", features = ["socket", "uio"] }
 toml = "0.8"
 thiserror = "1.0"
+memfd = "0.6"
+libc = "0.2"
 
 [features]
 # Phase 0 default: the winit backend renders into a window on the surrounding

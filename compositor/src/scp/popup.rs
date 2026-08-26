@@ -1,7 +1,7 @@
 //! Popup window positioning and constraint resolution.
 
 use crate::scp::protocol::{
-    ConstraintAdjustment, Edge, Gravity, PopupPositioner, Rect, SurfaceId,
+    Edge, Gravity, PopupPositioner, Rect, SurfaceId,
 };
 
 /// Resolved popup geometry after constraint adjustment.
@@ -200,6 +200,7 @@ fn flip_vertical(positioner: &PopupPositioner, parent: &Rect) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scp::protocol::ConstraintAdjustment;
 
     #[test]
     fn positions_popup_below_parent() {

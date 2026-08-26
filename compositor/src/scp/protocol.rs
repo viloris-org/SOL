@@ -205,6 +205,48 @@ pub enum ClientMessage {
         layer_id: LayerSurfaceId,
         serial: u32,
     },
+
+    // ===== Data Transfer (Clipboard/DnD) =====
+    /// Offer data to clipboard (requires ClipboardWrite capability + recent interaction)
+    SetSelection {
+        mime_types: Vec<String>,
+        serial: u32, // Must match recent input serial
+    },
+
+    /// Send clipboard data to compositor
+    SendSelectionData {
+        mime_type: String,
+        #[serde(skip, default = "invalid_fd")]
+        fd: i32,
+    },
+
+    /// Start drag-and-drop operation (requires DragAndDrop capability)
+    StartDrag {
+        surface_id: SurfaceId,
+        origin_surface: SurfaceId,
+        icon_surface: Option<SurfaceId>,
+        mime_types: Vec<String>,
+        serial: u32,
+    },
+
+    /// Send drag data
+    SendDragData {
+        mime_type: String,
+        #[serde(skip, default = "invalid_fd")]
+        fd: i32,
+    },
+
+    /// Accept a drag offer
+    AcceptDrag {
+        serial: u32,
+        mime_type: Option<String>,
+    },
+
+    /// Finish drag operation
+    FinishDrag,
+
+    /// Cancel ongoing drag
+    CancelDrag,
 }
 
 /// Compositor → Client messages.
@@ -359,6 +401,57 @@ pub enum CompositorMessage {
 
     /// Layer surface closed
     LayerSurfaceClosed { layer_id: LayerSurfaceId },
+
+    // ===== Data Transfer (Clipboard/DnD) =====
+    /// Selection offered (clipboard content available)
+    SelectionOffer {
+        mime_types: Vec<String>,
+    },
+
+    /// Request clipboard data
+    RequestSelectionData {
+        mime_type: String,
+        #[serde(skip, default = "invalid_fd")]
+        fd: i32,
+    },
+
+    /// Selection cleared
+    SelectionCleared,
+
+    /// Drag enter surface
+    DragEnter {
+        serial: u32,
+        surface_id: SurfaceId,
+        x: f64,
+        y: f64,
+        mime_types: Vec<String>,
+    },
+
+    /// Drag motion over surface
+    DragMotion {
+        x: f64,
+        y: f64,
+        time_ms: u32,
+    },
+
+    /// Drag leave surface
+    DragLeave,
+
+    /// Drop occurred
+    Drop,
+
+    /// Request drag data
+    RequestDragData {
+        mime_type: String,
+        #[serde(skip, default = "invalid_fd")]
+        fd: i32,
+    },
+
+    /// Drag finished successfully
+    DragFinished,
+
+    /// Drag cancelled
+    DragCancelled,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -554,6 +647,13 @@ pub enum InputEvent {
     TouchOrientation {
         touch_id: i32,
         orientation: f64,
+    },
+    Modifiers {
+        serial: u32,
+        mods_depressed: u32,
+        mods_latched: u32,
+        mods_locked: u32,
+        group: u32,
     },
 }
 

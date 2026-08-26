@@ -1,14 +1,14 @@
-//! SOL integration test: start the compositor, drive a real Wayland client
+//! SOL integration test: start the compositor, drive a real SCP client
 //! against it, and assert the end-to-end session works.
 //!
 //! This proves the PRD §38 Phase 0 success criterion:
 //!
-//! > 能启动独立 SOL Wayland Session，并运行标准 Wayland 应用
+//! > 能启动独立 SOL SCP Session，并运行 SCP 原生应用
 //!
-//! The compositor runs on the winit backend in this environment; the client is
+//! The compositor runs in headless mode in this environment; the client is
 //! the example built into `sol-compositor` (`test-client`). We:
 //!   1. launch `sol-compositor`,
-//!   2. wait until its `wayland-sol` socket appears,
+//!   2. wait until its socket appears,
 //!   3. run `test-client` against it,
 //!   4. assert the client connected and its toplevel was acknowledged (a
 //!      protocol round-trip through the compositor's dispatch + render loop).
@@ -21,9 +21,9 @@ use std::{
 
 use serial_test::serial;
 
-const SOCKET: &str = "wayland-sol";
+const SOCKET: &str = "sol-0";
 
-/// Spawn the compositor with a unique `SOL_WAYLAND_SOCKET` so parallel runs
+/// Spawn the compositor with a unique `SOL_COMPOSITOR_SOCKET` so parallel runs
 /// do not collide, and return the socket path that a client should connect to.
 struct Session {
     compositor: Child,
@@ -42,14 +42,14 @@ impl Session {
         let _client_bin = build_bin("sol-compositor --example test-client");
 
         // Use a unique socket per test process to avoid clashing with any real
-        // `wayland-sol` left running by hand.
+        // session left running by hand.
         let socket = format!("{}-{}", SOCKET, std::process::id());
         let runtime_dir = std::env::temp_dir().join(format!("sol-session-{socket}"));
-        std::fs::create_dir_all(&runtime_dir).expect("create isolated Wayland runtime directory");
+        std::fs::create_dir_all(&runtime_dir).expect("create isolated runtime directory");
 
         let mut compositor_command = Command::new(compositor_bin);
         compositor_command
-            .env("SOL_WAYLAND_SOCKET", &socket)
+            .env("SOL_COMPOSITOR_SOCKET", &socket)
             .env("XDG_RUNTIME_DIR", &runtime_dir)
             // Run the compositor in headless mode: no winit window, no GL.
             // This is the CI path — the protocol loop runs without any GPU /
