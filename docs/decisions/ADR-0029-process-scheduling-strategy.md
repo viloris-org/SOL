@@ -1,8 +1,12 @@
 # ADR-0029: Process Scheduling Strategy
 
-**Status**: Proposed  
+**Status**: Accepted (Phase 1 implemented)  
 **Date**: 2026-08-26  
 **Authors**: rownix  
+
+**Implementation**: Phase 1 lives in `services/sol-scheduler` and is enforced by
+`sol-init`, `sol-compositor`, and `sol-shell`. Later phases remain incremental
+work as described below.
 
 ## Context
 
@@ -144,10 +148,16 @@ Result: Game gets maximum throughput, compositor guarantees smoothness
 
 ### 3. Cgroup Hierarchy
 
+> Linux cgroup v2 does not expose a `cpu.min` bandwidth controller. The
+> percentages below are reservation targets; Phase 1 implements their
+> contention protection with `cpu.weight`. `cpu.max`, `io.weight`, and
+> `memory.min` are enforced directly by their kernel controllers.
+
 ```
 /sys/fs/cgroup/
 ├── sol-compositor/          # SCHED_FIFO threads run here
 │   ├── cpu.weight: 1000
+│   ├── cpu.min: 10%         # Guaranteed minimum CPU even under load
 │   └── [compositor process]
 │
 ├── sol-audio/               # Audio server (PipeWire/sol-audio)
@@ -157,18 +167,38 @@ Result: Game gets maximum throughput, compositor guarantees smoothness
 │
 ├── sol-shell/               # Shell UI
 │   ├── cpu.weight: 500
+│   ├── cpu.min: 5%          # Guaranteed minimum for UI responsiveness
 │   └── [sol-shell process]
+│
+├── sol-network/             # Network services
+│   ├── cpu.weight: 1000
+│   ├── cpu.min: 5%          # Guaranteed minimum for packet processing
+│   ├── io.weight: 200       # High IO priority for config/state files
+│   ├── memory.min: 64M      # Protected from swap pressure
+│   └── [sol-networkd, systemd-resolved]
+│
+├── sol-system/              # System services
+│   ├── cpu.weight: 800
+│   ├── cpu.min: 20%         # Guaranteed minimum (includes network)
+│   ├── io.weight: 100
+│   └── [sol-settingsd, sol-notificationd, sol-portal, etc.]
 │
 ├── sol-foreground/          # Active app (game or regular)
 │   ├── cpu.weight: 1000
 │   ├── cpu.max: unlimited
 │   └── [foreground app]
 │
-└── sol-background/          # Background apps
-    ├── cpu.weight: 100
-    ├── cpu.max: 20,100000   # 20% throttle
-    ├── io.weight: 10
-    └── [background apps]
+├── sol-background/          # Background apps
+│   ├── cpu.weight: 100
+│   ├── cpu.max: 20,100000   # 20% throttle
+│   ├── io.weight: 10
+│   └── [background apps]
+│
+└── sol-build/               # Build processes (auto-detected)
+    ├── cpu.weight: 100      # Low priority
+    ├── cpu.max: 80,100000   # Cap at 80% total CPU to leave headroom
+    ├── io.weight: 10        # Lowest IO priority
+    └── [make, cargo, gcc, clang, rustc, ninja, meson, etc.]
 ```
 
 ### 4. Thread Priority Breakdown
@@ -178,17 +208,26 @@ Result: Game gets maximum throughput, compositor guarantees smoothness
 | Audio server | DSP/mixing | SCHED_FIFO | 10 |
 | Compositor | Render/present | SCHED_FIFO | 2 |
 | Compositor | Input dispatch | SCHED_FIFO | 1 |
+| Shell | UI event loop | SCHED_FIFO | 1 |
 | Compositor | Protocol handlers | SCHED_OTHER | 0 |
 | Audio server | Client I/O | SCHED_OTHER | nice -5 |
-| Shell | UI thread | SCHED_OTHER | nice -5 |
+| Network service | Event loop | SCHED_OTHER | nice -10 |
+| DNS resolver | Main thread | SCHED_OTHER | nice -10 |
+| settingsd | Main thread | SCHED_OTHER | nice -10 |
+| portal | Main thread | SCHED_OTHER | nice -10 |
+| notificationd | Main thread | SCHED_OTHER | nice -5 |
+| Shell | Background tasks | SCHED_OTHER | nice -5 |
 | Game (foreground) | All threads | SCHED_OTHER | nice -10 |
 | Regular app (foreground) | All threads | SCHED_OTHER | nice 0 |
 | Background apps | All threads | SCHED_OTHER | nice 10 |
+| Build processes | All threads | SCHED_OTHER | nice 10 |
 
 **Priority rationale:**
 - Audio (10) > Compositor (2): Audio glitches are worse than frame drops
 - Compositor render (2) > Input (1): Presenting frames is the hard deadline
+- Shell UI (1) = Input (1): Top bar/dock must stay responsive under load
 - Input (1) > Protocol handlers (0): Low-latency input dispatch critical
+- Network/DNS/settingsd/portal (nice -10): System services must respond even under CPU saturation
 - All RT threads < kernel IRQ handlers (typically priority 50-99)
 
 ### 5. Frame-Aligned Scheduling
@@ -362,7 +401,7 @@ Result: App feels instant, 880ms of burst time saved
 - Crash-loop detection: App crashing within burst window disqualifies it from burst on next launch
 - Rate limiting: Same app max 1 burst per 5 seconds (prevents restart spam)
 
-### 8. Power and Thermal Management
+### 9. Security and Capability Model
 
 Scheduling adapts to system state:
 
@@ -398,7 +437,73 @@ Hot (>85°C):
   - Reduce compositor SCHED_FIFO priority to SCHED_OTHER
 ```
 
-### 9. Security and Capability Model
+### 9. System Component Protection (Anti-Starvation)
+
+Ensure system components remain responsive even when user processes consume 100% CPU/IO/memory.
+
+**OOM protection (oom_score_adj):**
+```
+sol-compositor:     -900  # Never kill compositor
+sol-audio:          -900  # Never kill audio
+sol-networkd:       -800  # Network stack is critical
+systemd-resolved:   -800  # DNS must work
+sol-shell:          -800  # UI must respond
+sol-settingsd:      -500  # System services
+sol-portal:         -500
+sol-notificationd:  -500
+apps (foreground):  0     # Default, can be killed
+apps (background):  100   # Kill background apps first
+```
+
+**IO priority (ionice):**
+```
+Compositor:  ionice -c1 -n0  # Realtime IO, highest priority
+Audio:       ionice -c1 -n0  # Realtime IO
+Shell:       ionice -c2 -n0  # Best-effort, highest
+Network:     ionice -c2 -n1  # Best-effort, high (config/state files)
+DNS:         ionice -c2 -n1  # Best-effort, high
+System:      ionice -c2 -n2  # Best-effort, medium
+Apps (fg):   ionice -c2 -n4  # Best-effort, normal
+Apps (bg):   ionice -c3      # Idle class
+Build:       ionice -c3      # Idle class (don't block system IO)
+```
+
+**Build process detection and containment:**
+
+When system detects build processes (make, cargo, gcc, clang, rustc, ninja, meson, cmake), automatically move them to `sol-build/` cgroup:
+
+```
+Rationale:
+  - Build processes are CPU/IO intensive but not latency-sensitive
+  - Users tolerate slower builds, not slower UI
+  - Cap at 80% total CPU to leave headroom for system/UI
+  - Idle IO class prevents compile from blocking file manager, settings, etc.
+
+Detection heuristics:
+  - Process name matches: make, cargo, gcc, g++, clang, rustc, ninja, meson, cmake, etc.
+  - High CPU + high IO + many child processes
+  - Parent process is a build tool
+```
+
+**Network stack protection:**
+
+Network services must remain responsive during high system load (e.g., compilation):
+
+```
+Why network needs protection:
+  - DNS queries block app launches and web browsing
+  - Connection establishment delays are user-visible
+  - Background disk IO can starve network config reads/writes
+  - Page cache pollution from builds evicts hot network data
+
+Protection mechanisms:
+  - sol-networkd/systemd-resolved: nice -10 (preempt build processes)
+  - Dedicated sol-network/ cgroup with cpu.min: 5%
+  - IO priority: best-effort high (ionice -c2 -n1)
+  - Memory protection: memory.min: 64M (prevent swap-out)
+```
+
+### 10. Security and Capability Model
 
 Applications cannot directly request elevated scheduling:
 
@@ -464,22 +569,39 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
    - Watchdog: warn if thread exceeds 50% of buffer period
    - Cgroup CPU guarantee: audio slice gets ≥10% CPU minimum
 
-3. **Cgroup hierarchy setup**
+3. **Shell UI real-time scheduling**
+   - Set SCHED_FIFO priority 1 for UI event loop
+   - Keep background tasks at SCHED_OTHER nice -5
+   - Ensures top bar, dock, launcher stay responsive under load
+
+4. **Cgroup hierarchy setup**
    - Create cgroup structure at boot (systemd units)
    - Implement process mover: assign apps to correct cgroup on launch
    - Basic foreground/background distinction
    - CPU/IO weight enforcement
    - Audio slice with guaranteed minimum CPU allocation
+   - Compositor/shell/network slices with cpu.min guarantees
 
-4. **Input latency optimization**
+5. **System component protection**
+   - Set OOM scores: compositor/audio (-900), network (-800), shell (-800), system services (-500)
+   - Set IO priorities: compositor/audio (realtime), network/system (best-effort high)
+   - Network services: nice -10, dedicated cgroup with cpu.min: 5%
+
+6. **Build process containment**
+   - Detect build processes (make, cargo, gcc, clang, rustc, ninja, meson, cmake)
+   - Auto-move to sol-build/ cgroup
+   - Cap at 80% total CPU, idle IO class
+   - Prevents compilation from dragging down UI/network
+
+7. **Input latency optimization**
    - Priority inheritance for input → app pipeline
    - Measure input event → frame present latency
 
-5. **CPU governor management**
+8. **CPU governor management**
    - Set performance governor when game detected
    - Revert to schedutil on game exit
 
-**Deliverable**: Compositor maintains 60fps under load, audio never glitches under CPU saturation, input latency <10ms
+**Deliverable**: Compositor maintains 60fps under load, audio never glitches under CPU saturation, input latency <10ms, UI stays responsive during compilation, network latency stable under disk IO load
 
 ### Phase 2: Workload Awareness and Optimization
 **Target: Dynamic adaptation to app types**
@@ -605,6 +727,10 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 - **Observability** - Rich metrics for debugging performance issues
 - **First impression wins** - Apps feel fast at the moment users care most (launch)
 - **Audio prioritization** - Human ear is less forgiving than eye; audio glitches are worse than frame drops
+- **System protection** - UI/network stay responsive even during compilation
+- **Build containment** - Compile jobs don't drag down interactive performance
+- **Network stability** - DNS/networking remain fast under disk IO saturation
+- **OOM resilience** - Critical components protected from memory pressure
 
 ### Negative
 - **Complexity** - More moving parts than simple CFS
@@ -618,6 +744,9 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 - **Cold vs warm detection complexity** - Heuristics may incorrectly classify starts
 - **GPU boost power draw** - Short-term power spike during burst (acceptable for <1s)
 - **Audio RT priority higher than compositor** - Audio bugs are now more critical (smaller, simpler code mitigates this)
+- **Build detection overhead** - Process monitoring adds CPU cost
+- **False positives** - Non-build processes may get misclassified and throttled
+- **Network cgroup overhead** - Extra memory for per-service isolation
 
 ### Neutral
 - **Platform OS approach** - We control the stack, so we can make these guarantees
@@ -627,6 +756,8 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 - **Burst only on cold start** - Warm restarts don't get boost (acceptable since they're already fast)
 - **GPU governor platform-specific** - AMD/Intel/NVIDIA have different control interfaces (need per-platform code)
 - **Audio latency vs throughput** - Small buffers (low latency) require more frequent scheduling, higher overhead
+- **Build throttling visibility** - Users may wonder why compilation is "slow" (actually: system is responsive)
+- **Network cgroup isolates issues** - Buggy network service can't impact other system components (good isolation, harder debugging)
 
 ## Verification
 
@@ -643,6 +774,10 @@ Success criteria:
 10. **Cold start performance** - Apps launch in <500ms perceived time (with Rapid Burst vs >1s without)
 11. **Burst efficiency** - 80%+ of bursts terminate early on first frame (not hitting 1s cap)
 12. **Audio thread budget** - DSP thread uses <30% of buffer period on average
+13. **UI responsiveness under compilation** - Compositor maintains 60fps, input <10ms latency even during `cargo build -j32`
+14. **Network latency under load** - DNS queries <50ms, ping latency stable (±5ms) during heavy disk IO
+15. **Build containment effectiveness** - Build processes use <80% total CPU, idle IO class confirmed
+16. **System service protection** - settingsd/portal respond <100ms even under 100% CPU load
 
 Metrics to collect:
 - **Frame presentation timestamps** - Vsync hits/misses, frame time distribution
@@ -658,6 +793,11 @@ Metrics to collect:
 - **Rapid Burst effectiveness** - Distribution of burst durations, percentage hitting 1s cap vs early termination, GPU frequency during burst
 - **Cold vs warm detection accuracy** - Manual validation against heuristic classification
 - **Audio-specific metrics** - JACK/PipeWire xrun reports, DSP load percentage, client wakeup jitter
+- **UI responsiveness during builds** - Frame time distribution, input latency during compilation
+- **Network latency under load** - DNS query time, ping latency, connection establishment time during disk IO
+- **Build process metrics** - CPU usage distribution, cgroup throttle events, IO wait time
+- **System service response time** - D-Bus method call latency for settingsd/portal/notificationd
+- **OOM events** - Which processes killed, memory pressure at time of kill
 
 Tools:
 - `ftrace` - Kernel scheduler events

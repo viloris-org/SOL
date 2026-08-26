@@ -64,7 +64,102 @@ impl AppManifest {
 
     /// Parse a manifest from TOML string.
     pub fn from_toml(toml: &str) -> Result<Self, ManifestError> {
-        toml::from_str(toml).map_err(|e| ManifestError::ParseError(e.to_string()))
+        let parsed = crate::scp::toml_parser::parse(toml)
+            .map_err(|e| ManifestError::ParseError(e))?;
+
+        // Extract [app] section
+        let app_table = parsed
+            .get("app")
+            .and_then(|v| v.as_table())
+            .ok_or_else(|| ManifestError::ParseError("[app] section is required".to_string()))?;
+
+        let app = AppMetadata {
+            id: app_table
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ManifestError::ParseError("app.id is required".to_string()))?
+                .to_string(),
+            name: app_table
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ManifestError::ParseError("app.name is required".to_string()))?
+                .to_string(),
+            version: app_table
+                .get("version")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ManifestError::ParseError("app.version is required".to_string()))?
+                .to_string(),
+            signature: app_table.get("signature").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        };
+
+        // Extract [capabilities] section (optional)
+        let capabilities = if let Some(caps_table) = parsed.get("capabilities").and_then(|v| v.as_table()) {
+            let mut static_caps = HashMap::new();
+            if let Some(static_table) = caps_table.get("static_caps").and_then(|v| v.as_table()) {
+                for (key, value) in static_table {
+                    if let Some(b) = value.as_bool() {
+                        static_caps.insert(key.clone(), b);
+                    }
+                }
+            }
+
+            let mut dynamic = HashMap::new();
+            if let Some(dynamic_table) = caps_table.get("dynamic").and_then(|v| v.as_table()) {
+                for (key, value) in dynamic_table {
+                    if let Some(req_table) = value.as_table() {
+                        let justification = req_table
+                            .get("justification")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let optional = req_table
+                            .get("optional")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        dynamic.insert(key.clone(), CapabilityRequest { justification, optional });
+                    }
+                }
+            }
+
+            let mut forbidden = HashMap::new();
+            if let Some(forbidden_table) = caps_table.get("forbidden").and_then(|v| v.as_table()) {
+                for (key, value) in forbidden_table {
+                    if let Some(b) = value.as_bool() {
+                        forbidden.insert(key.clone(), b);
+                    }
+                }
+            }
+
+            CapabilitiesSection {
+                static_caps,
+                dynamic,
+                forbidden,
+            }
+        } else {
+            CapabilitiesSection::default()
+        };
+
+        // Extract [special_directories] section (optional)
+        let mut special_directories = HashMap::new();
+        if let Some(dirs_table) = parsed.get("special_directories").and_then(|v| v.as_table()) {
+            for (key, value) in dirs_table {
+                if let Some(access_str) = value.as_str() {
+                    let access = match access_str {
+                        "read_write" => DirectoryAccess::ReadWrite,
+                        "read_only" => DirectoryAccess::ReadOnly,
+                        "denied" => DirectoryAccess::Denied,
+                        _ => DirectoryAccess::Denied,
+                    };
+                    special_directories.insert(key.clone(), access);
+                }
+            }
+        }
+
+        Ok(AppManifest {
+            app,
+            capabilities,
+            special_directories,
+        })
     }
 
     /// Get the set of statically-declared capabilities (auto-granted at connection).

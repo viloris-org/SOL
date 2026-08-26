@@ -95,23 +95,26 @@ impl SolInit {
         info!("sol-init main loop started");
 
         loop {
-            // Poll for exited processes (non-blocking)
-            match self.process_manager.wait_any() {
-                Ok(Some((name, status))) => {
-                    if let Err(e) = self.process_manager.handle_exit(&name, status) {
-                        error!("Error handling exit of {}: {}", name, e);
-                    }
-                }
-                Ok(None) => {
-                    // No process exited, sleep a bit
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                Err(e) => {
-                    error!("Error waiting for processes: {}", e);
-                    std::thread::sleep(Duration::from_secs(1));
+            self.run_once();
+        }
+    }
+
+    /// Run one non-blocking supervision/scheduling maintenance iteration.
+    /// This lets the binary observe its shutdown flag between iterations.
+    pub fn run_once(&mut self) {
+        match self.process_manager.wait_any() {
+            Ok(Some((name, status))) => {
+                if let Err(e) = self.process_manager.handle_exit(&name, status) {
+                    error!("Error handling exit of {}: {}", name, e);
                 }
             }
+            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            Err(e) => {
+                error!("Error waiting for processes: {}", e);
+                std::thread::sleep(Duration::from_secs(1));
+            }
         }
+        self.process_manager.maintain_scheduling();
     }
 
     pub fn shutdown(&mut self) -> Result<()> {

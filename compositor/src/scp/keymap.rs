@@ -129,29 +129,21 @@ impl KeymapState {
     #[cfg(target_os = "linux")]
     pub fn create_memfd(&self) -> Result<RawFd, std::io::Error> {
         use std::io::Write;
-        use std::os::unix::io::IntoRawFd;
+        use std::os::unix::io::FromRawFd;
+        use crate::scp::memfd;
 
         // Create anonymous sealed memfd
-        let memfd = memfd::MemfdOptions::default()
-            .allow_sealing(true)
-            .create("sol-keymap")
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let fd = memfd::create("sol-keymap", true)?;
 
-        let mut file = memfd.into_file();
+        let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
         file.write_all(&self.keymap_data)?;
         file.sync_all()?;
 
-        // Seal the memfd (make it read-only)
-        let fd = file.into_raw_fd();
+        // Get raw fd back before sealing
+        let fd = std::os::unix::io::IntoRawFd::into_raw_fd(file);
 
-        // Add seals: F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
-        unsafe {
-            libc::fcntl(
-                fd,
-                libc::F_ADD_SEALS,
-                libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_WRITE,
-            );
-        }
+        // Seal the memfd (make it read-only)
+        memfd::seal_readonly(fd)?;
 
         Ok(fd)
     }

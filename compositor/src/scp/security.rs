@@ -1,7 +1,7 @@
 //! Security coordinator interface — communicates with sol-securityd.
 
 use crate::scp::capability::{Capability, CapabilityToken, Decision};
-use rand::RngCore;
+use crate::scp::random;
 use std::{collections::HashMap, fmt, sync::Mutex};
 
 /// Authenticated application identity.
@@ -106,7 +106,7 @@ impl SecurityCoordinator for StubSecurityCoordinator {
 
     fn issue_token(&self, _app_id: &AppId, _cap: &Capability) -> CapabilityToken {
         let mut data = vec![0_u8; 32];
-        rand::thread_rng().fill_bytes(&mut data);
+        random::fill_bytes(&mut data).expect("generate random token");
         let token = CapabilityToken {
             data,
             expires_at: None,

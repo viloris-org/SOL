@@ -1,6 +1,6 @@
 //! SCP buffer management (SHM pools and buffers).
 
-use crate::scp::protocol::{BufferId, PoolId, ShmFormat};
+use crate::scp::{protocol::{BufferId, PoolId, ShmFormat}, unix_socket};
 use std::collections::HashMap;
 
 /// Shared memory pool.
@@ -14,7 +14,7 @@ pub struct ShmPool {
 impl Drop for ShmPool {
     fn drop(&mut self) {
         if self.fd >= 0 {
-            let _ = nix::unistd::close(self.fd);
+            unix_socket::close_fd(self.fd);
         }
     }
 }

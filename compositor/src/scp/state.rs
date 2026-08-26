@@ -11,6 +11,7 @@ use crate::scp::{
     protocol::{BufferId, ClientMessage, CompositorMessage, PopupId, Rect, SessionId, SurfaceId, LayerSurfaceId},
     security::{AppId, AuditOutcome, SecurityCoordinator, StubSecurityCoordinator},
     surface::{SurfaceManager, Layer, Anchor, Margin, KeyboardInteractivity},
+    unix_socket,
 };
 use std::{collections::HashMap, sync::Arc, time::Instant, os::unix::io::IntoRawFd};
 
@@ -176,7 +177,7 @@ impl ScpState {
             }
             _ if received_fd.is_some() => {
                 if let Some(fd) = received_fd {
-                    let _ = nix::unistd::close(fd);
+                    unix_socket::close_fd(fd);
                 }
                 return Err("File descriptor is only valid with AttachBuffer".to_string());
             }
@@ -191,7 +192,7 @@ impl ScpState {
         if result.is_err()
             && let Some(fd) = attached_fd
         {
-            let _ = nix::unistd::close(fd);
+            unix_socket::close_fd(fd);
         }
         result
     }
@@ -915,7 +916,7 @@ impl ScpState {
 
                 // In real implementation, read from fd and send to requesting client
                 // For now, just acknowledge
-                let _ = nix::unistd::close(fd);
+                unix_socket::close_fd(fd);
                 Ok(vec![])
             }
 
@@ -983,7 +984,7 @@ impl ScpState {
                 }
 
                 // In real implementation, read from fd and send to drop target
-                let _ = nix::unistd::close(fd);
+                unix_socket::close_fd(fd);
                 Ok(vec![])
             }
         }
@@ -1425,7 +1426,7 @@ impl ScpState {
         }
 
         // Create pipe for data transfer
-        let (_read_fd, write_fd) = nix::unistd::pipe()
+        let (_read_fd, write_fd) = unix_socket::create_pipe()
             .map_err(|e| format!("Failed to create pipe: {}", e))?;
 
         // Request data from selection owner

@@ -61,6 +61,7 @@ use smithay::{
     wayland::shell::xdg::ToplevelSurface,
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
+use sol_scheduler::FrameWatchdog;
 
 use crate::{
     CLEAR_BACKGROUND, accept_clients,
@@ -123,6 +124,8 @@ struct UdevRuntime {
     fallback_cursor: SolidColorBuffer,
     serial: u32,
     started_at: Instant,
+    frame_watchdog: FrameWatchdog,
+    pending_input_at: Option<Instant>,
 }
 
 pub fn run(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -149,6 +152,13 @@ pub fn run(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let gpus = GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High))?;
 
     let session_active = session.is_active();
+    let mut frame_watchdog = FrameWatchdog::for_refresh_millihz(60_000);
+    if let Err(error) = frame_watchdog.enable_realtime(2) {
+        tracing::warn!(%error, "SCHED_FIFO priority 2 unavailable; compositor remains on CFS");
+    } else {
+        tracing::info!("compositor render/present event loop elevated to SCHED_FIFO priority 2");
+    }
+
     let mut runtime = UdevRuntime {
         handle,
         display,
@@ -167,6 +177,8 @@ pub fn run(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
         fallback_cursor: SolidColorBuffer::new((12, 18), [0.95, 0.95, 0.97, 1.0]),
         serial: 1,
         started_at: Instant::now(),
+        frame_watchdog,
+        pending_input_at: None,
     };
 
     let drm_devices = udev
@@ -610,6 +622,7 @@ impl UdevRuntime {
         if surface.pending_page_flip {
             return;
         }
+        let frame_started = Instant::now();
         let output = surface.output.clone();
         let render_node = device.render_node;
         let output_location = output.current_location();
@@ -704,7 +717,7 @@ impl UdevRuntime {
         else {
             return;
         };
-        match surface.drm_output.render_frame(
+        let presented = match surface.drm_output.render_frame(
             &mut renderer,
             &elements,
             CLEAR_BACKGROUND,
@@ -713,6 +726,7 @@ impl UdevRuntime {
             Ok(frame) if !frame.is_empty => {
                 if let Err(error) = surface.drm_output.queue_frame(()) {
                     tracing::warn!(?node, ?crtc, %error, "KMS framebuffer submission failed");
+                    false
                 } else {
                     surface.pending_page_flip = true;
                     for (toplevel, _) in &windows {
@@ -727,14 +741,35 @@ impl UdevRuntime {
                             self.started_at.elapsed().as_millis() as u32,
                         );
                     }
+                    true
                 }
             }
-            Ok(_) => {}
-            Err(error) => tracing::warn!(?node, ?crtc, %error, "GBM/EGL frame render failed"),
+            Ok(_) => false,
+            Err(error) => {
+                tracing::warn!(?node, ?crtc, %error, "GBM/EGL frame render failed");
+                false
+            }
+        };
+        if presented {
+            if let Some(input_at) = self.pending_input_at.take() {
+                self.frame_watchdog.note_input_age(input_at.elapsed());
+            }
+            match self.frame_watchdog.observe(frame_started.elapsed()) {
+                Ok(observation) if observation.watchdog_downgraded => tracing::error!(
+                    ?node,
+                    ?crtc,
+                    frame_time_us = frame_started.elapsed().as_micros(),
+                    budget_us = self.frame_watchdog.frame_budget().as_micros(),
+                    "compositor exceeded watchdog budget and was downgraded to SCHED_OTHER"
+                ),
+                Ok(_) => {}
+                Err(error) => tracing::error!(%error, "failed to downgrade compositor scheduler"),
+            }
         }
     }
 
     fn process_input<B: InputBackend>(&mut self, event: InputEvent<B>) {
+        self.pending_input_at = Some(Instant::now());
         match event {
             InputEvent::Keyboard { event } => self.keyboard::<B>(event),
             InputEvent::PointerMotion { event } => {

@@ -1,0 +1,18 @@
+[Daemon]
+name = "sol-portal"
+exec = "/usr/bin/sol-portal"
+type = "system"
+start_mode = "boot"
+restart_policy = "on-failure"
+
+after = ["sol-compositor"]
+requires = ["sol-compositor"]
+
+dbus_name = "org.freedesktop.portal.Desktop"
+
+capabilities = [
+    "security.authorize",
+    "compositor.screencast"
+]
+
+[Environment]

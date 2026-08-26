@@ -3,6 +3,7 @@
 use crate::scp::{
     protocol::{BufferFormat, BufferId, Rect, SessionId, SurfaceId, ToplevelId, OutputId, LayerSurfaceId},
     security::AppId,
+    unix_socket,
 };
 use std::collections::HashMap;
 
@@ -36,7 +37,7 @@ pub struct SurfaceBuffer {
 impl Drop for SurfaceBuffer {
     fn drop(&mut self) {
         if self.fd >= 0 {
-            let _ = nix::unistd::close(self.fd);
+            unix_socket::close_fd(self.fd);
         }
     }
 }

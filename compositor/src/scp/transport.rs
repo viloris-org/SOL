@@ -6,15 +6,11 @@
 use crate::scp::{
     protocol::{ClientMessage, CompositorMessage, SessionId},
     state::ScpState,
-};
-use nix::{
-    cmsg_space,
-    sys::socket::{ControlMessageOwned, MsgFlags, getsockopt, recvmsg, sockopt::PeerCredentials},
-    unistd::close,
+    unix_socket,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
-    io::{self, IoSliceMut, Read, Write},
+    io::{self, Read, Write},
     os::fd::AsRawFd,
     os::unix::{
         fs::{FileTypeExt, PermissionsExt},
@@ -204,9 +200,7 @@ fn serve_client_inner(
     bytes: &mut Vec<u8>,
     pending_fds: &mut Vec<i32>,
 ) -> io::Result<()> {
-    let credentials = getsockopt(&stream, PeerCredentials).map_err(io::Error::other)?;
-    let peer_pid = u32::try_from(credentials.pid())
-        .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "peer PID is not valid"))?;
+    let (peer_pid, _, _) = unix_socket::get_peer_credentials(stream.as_raw_fd())?;
 
     loop {
         if !receive_chunk(stream, bytes, pending_fds)? {
@@ -307,24 +301,13 @@ fn receive_chunk(
     pending_fds: &mut Vec<i32>,
 ) -> io::Result<bool> {
     let mut buffer = [0_u8; 64 * 1024];
-    let mut io_vectors = [IoSliceMut::new(&mut buffer)];
-    let mut control_buffer = cmsg_space!([i32; 4]);
-    let message = recvmsg::<()>(
-        stream.as_raw_fd(),
-        &mut io_vectors,
-        Some(&mut control_buffer),
-        MsgFlags::empty(),
-    )
-    .map_err(io::Error::other)?;
-    let received = message.bytes;
-    for control in message.cmsgs().map_err(io::Error::other)? {
-        if let ControlMessageOwned::ScmRights(fds) = control {
-            pending_fds.extend(fds);
-        }
-    }
+    let (received, fds) = unix_socket::recvmsg_with_fds(stream.as_raw_fd(), &mut buffer, 4)?;
+
     if received == 0 {
         return Ok(false);
     }
+
+    pending_fds.extend(fds);
     bytes.extend_from_slice(&buffer[..received]);
     Ok(true)
 }
@@ -395,7 +378,7 @@ pub fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> io::Result<T>
 
 fn close_all(fds: &mut Vec<i32>) {
     for fd in fds.drain(..) {
-        let _ = close(fd);
+        unix_socket::close_fd(fd);
     }
 }
 

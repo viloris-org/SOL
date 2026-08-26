@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sol_init::SolInit;
 use std::path::PathBuf;
-use tracing::{error, info};
+use tracing::info;
 
 fn main() -> Result<()> {
     // Initialize logging
@@ -59,10 +59,7 @@ fn main() -> Result<()> {
 
     // Main loop
     while running.load(std::sync::atomic::Ordering::SeqCst) {
-        if let Err(e) = sol_init.run() {
-            error!("Error in main loop: {}", e);
-            break;
-        }
+        sol_init.run_once();
     }
 
     // Shutdown

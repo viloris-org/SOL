@@ -26,12 +26,9 @@ smithay-drm-extras = { version = "0.1", default-features = false, optional = tru
 # SCP (SOL Compositor Protocol) dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rand = "0.8"
-nix = { version = "0.30", features = ["socket", "uio"] }
-toml = "0.8"
 thiserror = "1.0"
-memfd = "0.6"
 libc = "0.2"
+sol-scheduler = { path = "../services/sol-scheduler" }
 
 [features]
 # Phase 0 default: the winit backend renders into a window on the surrounding

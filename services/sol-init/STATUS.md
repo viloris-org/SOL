@@ -50,7 +50,10 @@ WAYLAND_DISPLAY = "sol-0"
 
 - [ ] User daemon directory (`~/.local/share/sol/daemons/`)
 - [ ] Capability enforcement for `type = "application"` daemons
-- [ ] Resource limits via cgroups (`memory_limit`, `cpu_share`)
+- [x] ADR-0029 Phase 1 cgroup hierarchy and trusted process placement
+- [x] OOM/nice/I/O protection for compositor, shell, network, and system daemons
+- [x] Automatic build-process containment in `sol-build`
+- [ ] Per-daemon legacy resource overrides (`memory_limit`, `cpu_share`)
 - [ ] Socket activation (in addition to D-Bus)
 - [ ] IPC interface for querying daemon status
 

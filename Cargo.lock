@@ -3044,15 +3044,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "memfd"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227"
-dependencies = [
- "rustix 1.1.4",
-]
-
-[[package]]
 name = "memmap2"
 version = "0.9.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5377,16 +5368,13 @@ name = "sol-compositor"
 version = "0.1.0"
 dependencies = [
  "libc",
- "memfd",
- "nix 0.30.1",
- "rand 0.8.8",
  "serde",
  "serde_json",
  "serial_test",
  "smithay",
  "smithay-drm-extras",
+ "sol-scheduler",
  "thiserror 1.0.69",
- "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
  "wayland-client",
@@ -5456,6 +5444,7 @@ dependencies = [
  "ctrlc",
  "nix 0.29.0",
  "serde",
+ "sol-scheduler",
  "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
@@ -5529,6 +5518,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sol-scheduler"
+version = "0.1.0"
+dependencies = [
+ "thread-priority",
+]
+
+[[package]]
 name = "sol-session"
 version = "0.1.0"
 dependencies = [
@@ -5570,6 +5566,7 @@ dependencies = [
  "sol-diagnostics",
  "sol-graphics",
  "sol-notificationd",
+ "sol-scheduler",
  "sol-settingsd",
  "sol-system",
  "sol-ui",
@@ -5879,6 +5876,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "thread-priority"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d2e834949be5111506bb252643498af1514f600d9e1dceedaa42afae155b67f"
+dependencies = [
+ "bitflags 2.13.1",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows 0.61.3",
 ]
 
 [[package]]

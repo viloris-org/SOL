@@ -1,0 +1,19 @@
+[Daemon]
+name = "sol-networkd"
+exec = "/usr/bin/sol-networkd"
+type = "core"
+start_mode = "boot"
+restart_policy = "always"
+
+after = ["sol-compositor"]
+requires = []
+
+dbus_name = "org.sol.Network1"
+
+capabilities = [
+    "network.manage",
+    "system.netlink",
+    "system.dns"
+]
+
+[Environment]

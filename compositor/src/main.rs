@@ -33,6 +33,7 @@ mod window;
 
 use outputs::OutputConfiguration;
 use sol_compositor::scp::ScpServer;
+use sol_scheduler::FrameWatchdog;
 
 use std::{sync::Arc, time::Instant};
 
@@ -146,103 +147,115 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
 
     let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
 
+    let mut frame_watchdog = FrameWatchdog::for_refresh_millihz(60_000);
+    if let Err(error) = frame_watchdog.enable_realtime(2) {
+        tracing::warn!(%error, "SCHED_FIFO priority 2 unavailable; compositor remains on CFS");
+    } else {
+        tracing::info!("compositor render/present event loop elevated to SCHED_FIFO priority 2");
+    }
+
     let keyboard = state.keyboard.clone();
     let mut serial: u32 = 0;
     let start_time = Instant::now();
+    let mut pending_input_at: Option<Instant> = None;
 
     spawn_client(&spawn);
 
     loop {
+        let frame_started = Instant::now();
         let status = winit.dispatch_new_events(|event| match event {
             WinitEvent::Resized { .. } => {}
-            WinitEvent::Input(event) => match event {
-                InputEvent::Keyboard { event } => {
-                    use smithay::{
-                        backend::input::{Event, KeyState},
-                        input::keyboard::{FilterResult, Keysym, keysyms},
-                        utils::Serial,
-                    };
-                    let kbd_serial = Serial::from(serial);
-                    let kbd_time = event.time_msec();
-                    let kbd_key = event.key_code();
-                    let kbd_state = event.state();
+            WinitEvent::Input(event) => {
+                pending_input_at = Some(Instant::now());
+                match event {
+                    InputEvent::Keyboard { event } => {
+                        use smithay::{
+                            backend::input::{Event, KeyState},
+                            input::keyboard::{FilterResult, Keysym, keysyms},
+                            utils::Serial,
+                        };
+                        let kbd_serial = Serial::from(serial);
+                        let kbd_time = event.time_msec();
+                        let kbd_key = event.key_code();
+                        let kbd_state = event.state();
 
-                    // Intercept Alt+Tab (and Alt+Shift+Tab) to cycle keyboard
-                    // focus between windows (Phase 1 window management) instead
-                    // of forwarding the key to the focused client.
-                    let tab = Keysym::from(keysyms::KEY_Tab);
-                    let shift_tab = Keysym::from(keysyms::KEY_ISO_Left_Tab);
-                    let action = keyboard.input::<(), _>(
-                        &mut state,
-                        kbd_key,
-                        kbd_state,
-                        kbd_serial,
-                        kbd_time,
-                        |_, modifiers, handle| {
-                            let sym = handle.modified_sym();
-                            let tab_cycle = (sym == tab || sym == shift_tab) && modifiers.alt;
-                            if tab_cycle && kbd_state == KeyState::Pressed {
-                                FilterResult::Intercept(())
-                            } else {
-                                FilterResult::Forward
-                            }
-                        },
-                    );
+                        // Intercept Alt+Tab (and Alt+Shift+Tab) to cycle keyboard
+                        // focus between windows (Phase 1 window management) instead
+                        // of forwarding the key to the focused client.
+                        let tab = Keysym::from(keysyms::KEY_Tab);
+                        let shift_tab = Keysym::from(keysyms::KEY_ISO_Left_Tab);
+                        let action = keyboard.input::<(), _>(
+                            &mut state,
+                            kbd_key,
+                            kbd_state,
+                            kbd_serial,
+                            kbd_time,
+                            |_, modifiers, handle| {
+                                let sym = handle.modified_sym();
+                                let tab_cycle = (sym == tab || sym == shift_tab) && modifiers.alt;
+                                if tab_cycle && kbd_state == KeyState::Pressed {
+                                    FilterResult::Intercept(())
+                                } else {
+                                    FilterResult::Forward
+                                }
+                            },
+                        );
 
-                    if action.is_some() {
-                        // Alt+Tab: raise & focus the next window; deliver the
-                        // updated keyboard focus to that surface.
-                        let surface = state.window_manager.cycle_focus();
-                        keyboard.set_focus(&mut state, surface, kbd_serial);
+                        if action.is_some() {
+                            // Alt+Tab: raise & focus the next window; deliver the
+                            // updated keyboard focus to that surface.
+                            let surface = state.window_manager.cycle_focus();
+                            keyboard.set_focus(&mut state, surface, kbd_serial);
+                        }
+                        serial += 1;
                     }
-                    serial += 1;
-                }
-                InputEvent::PointerMotionAbsolute { event } => {
-                    use smithay::backend::input::Event;
-                    // Real hit-testing: find the topmost window under the
-                    // pointer and give keyboard focus to it, raising it in the
-                    // z-order (Phase 1, replacing the Phase 0 "focus the first
-                    // toplevel" placeholder).
-                    let physical_size = backend.window_size();
-                    let pos = event.position_transformed(physical_size.to_logical(1));
-                    let focus = state.window_manager.surface_under(pos);
-                    if let Some(ref surf) = focus {
-                        state.window_manager.set_focus(surf);
-                    }
-                    keyboard.set_focus(&mut state, focus.clone(), serial.into());
-                    serial += 1;
+                    InputEvent::PointerMotionAbsolute { event } => {
+                        use smithay::backend::input::Event;
+                        // Real hit-testing: find the topmost window under the
+                        // pointer and give keyboard focus to it, raising it in the
+                        // z-order (Phase 1, replacing the Phase 0 "focus the first
+                        // toplevel" placeholder).
+                        let physical_size = backend.window_size();
+                        let pos = event.position_transformed(physical_size.to_logical(1));
+                        let focus = state.window_manager.surface_under(pos);
+                        if let Some(ref surf) = focus {
+                            state.window_manager.set_focus(surf);
+                        }
+                        keyboard.set_focus(&mut state, focus.clone(), serial.into());
+                        serial += 1;
 
-                    // Route the motion to the pointer handle too, so active
-                    // move/resize grabs receive it and update geometry.
-                    let motion = smithay::input::pointer::MotionEvent {
-                        location: pos,
-                        serial: serial.into(),
-                        time: event.time_msec(),
-                    };
-                    state
-                        .pointer
-                        .clone()
-                        .motion(&mut state, focus.map(|s| (s, pos)), &motion);
+                        // Route the motion to the pointer handle too, so active
+                        // move/resize grabs receive it and update geometry.
+                        let motion = smithay::input::pointer::MotionEvent {
+                            location: pos,
+                            serial: serial.into(),
+                            time: event.time_msec(),
+                        };
+                        state
+                            .pointer
+                            .clone()
+                            .motion(&mut state, focus.map(|s| (s, pos)), &motion);
+                    }
+                    InputEvent::PointerButton { event } => {
+                        use smithay::{
+                            backend::input::{Event, PointerButtonEvent},
+                            input::pointer::ButtonEvent,
+                            utils::Serial,
+                        };
+                        let button = event.button_code();
+                        let btn_serial = Serial::from(serial);
+                        let btn_event = ButtonEvent {
+                            serial: btn_serial,
+                            time: event.time_msec(),
+                            button,
+                            state: event.state(),
+                        };
+                        state.pointer.clone().button(&mut state, &btn_event);
+                        serial += 1;
+                    }
+                    _ => {}
                 }
-                InputEvent::PointerButton { event } => {
-                    use smithay::{
-                        backend::input::{Event, PointerButtonEvent},
-                        input::pointer::ButtonEvent,
-                        utils::Serial,
-                    };
-                    let button = event.button_code();
-                    let btn_serial = Serial::from(serial);
-                    let btn_event = ButtonEvent {
-                        serial: btn_serial,
-                        time: event.time_msec(),
-                        button,
-                        state: event.state(),
-                    };
-                    state.pointer.clone().button(&mut state, &btn_event);
-                    serial += 1;
-                }
-                _ => {}
-            },
+            }
             _ => (),
         });
 
@@ -307,6 +320,28 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
 
         // Must dispatch + flush before swapping buffers; the swap can block.
         backend.submit(Some(&[damage]))?;
+
+        if let Some(input_at) = pending_input_at.take() {
+            frame_watchdog.note_input_age(input_at.elapsed());
+        }
+        let observation = frame_watchdog.observe(frame_started.elapsed())?;
+        if observation.watchdog_downgraded {
+            tracing::error!(
+                frame_time_us = frame_started.elapsed().as_micros(),
+                budget_us = frame_watchdog.frame_budget().as_micros(),
+                "compositor exceeded watchdog budget and was downgraded to SCHED_OTHER"
+            );
+        }
+        let telemetry = frame_watchdog.telemetry();
+        if telemetry.presented_frames.is_multiple_of(600) {
+            tracing::info!(
+                frames = telemetry.presented_frames,
+                missed_vsyncs = telemetry.missed_vsyncs,
+                maximum_frame_time_us = telemetry.maximum_frame_time.as_micros(),
+                maximum_input_latency_us = telemetry.maximum_input_latency.as_micros(),
+                "compositor scheduling telemetry"
+            );
+        }
     }
 }
 
