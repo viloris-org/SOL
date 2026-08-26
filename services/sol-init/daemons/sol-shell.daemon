@@ -1,0 +1,18 @@
+[Daemon]
+name = "sol-shell"
+exec = "/usr/bin/sol-shell"
+type = "core"
+start_mode = "boot"
+restart_policy = "always"
+
+after = ["sol-compositor"]
+requires = ["sol-compositor"]
+
+capabilities = [
+    "compositor.layer_shell",
+    "compositor.screenshot",
+    "system.notifications",
+    "system.settings"
+]
+
+[Environment]

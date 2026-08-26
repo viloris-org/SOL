@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.sol.Notifications
+Exec=/usr/bin/sol-init --activate sol-notificationd

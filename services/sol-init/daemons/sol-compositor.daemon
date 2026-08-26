@@ -1,0 +1,19 @@
+[Daemon]
+name = "sol-compositor"
+exec = "/usr/bin/sol-compositor"
+type = "core"
+start_mode = "boot"
+restart_policy = "always"
+
+after = []
+requires = []
+
+capabilities = [
+    "compositor.render",
+    "compositor.input",
+    "system.drm",
+    "system.input_devices"
+]
+
+[Environment]
+WAYLAND_DISPLAY = "sol-0"

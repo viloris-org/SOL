@@ -42,6 +42,10 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 | 22 | GTK, Qt, and non-native toolkit compatibility | Accepted (architecture) | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
 | 23 | Shell spatial grammar, global menu, and Live Capsule | Accepted (product/architecture) | Phases 4/9 | [0025](0025-shell-spatial-menu-live-capsule.md) |
 | 24 | SOL boot execution, UKI, and seamless graphics handoff | Accepted (architecture) | Phase 7 | [0026](0026-sol-boot-uki-and-graphics-handoff.md) |
+| 25 | SOL Compositor Protocol (SCP) - capability-based security | Accepted (architecture) | Phases 1–2 | [0027](ADR-0027-sol-compositor-protocol.md) |
+| 26 | Drop Wayland compatibility layer | Accepted (product) | Phase 1 | [0028](ADR-0028-drop-wayland-compatibility.md) |
+| 27 | Application signing and publisher lineage | Proposed | Phase 8 | [0029](ADR-0029-app-signing-publisher-lineage.md) |
+| 27b | ADR-0029 Technical Fixes | Proposed | Phase 8 | [0029-fixes](ADR-0029-fixes.md) |
 
 ## Decision register (PRD §41)
 
@@ -51,13 +55,13 @@ accepted decision remain open implementation or product work.
 
 | # | Decision | Earliest prototype trigger | Notes |
 |---|---|---|---|
-| 3 | Is Smithay renderer sufficient long-term? | Phase 0/1 | Start with Smithay renderer; reassess with damage/VRR/HDR data |
+| 3 | Is Smithay renderer sufficient long-term? | Phase 0/1 | **Revisit with native SCP implementation** - ADR-0028 drops Smithay entirely |
 | 4 | Long-term role of Vulkan / wgpu | Phase 1+ | Do not rewrite the renderer prematurely |
 | 5 | Compositor ↔ Shell IPC transport / wire format | **Accepted (implementation open)** | [ADR-0006](0006-shell-ipc-deferred.md) selects D-Bus; schema, compositor service, Shell proxy, and integration remain Phase 1 work |
 | 6 | Settings storage architecture | **Accepted (Phase 2)** | [ADR-0011](0011-settings-storage-api.md): typed API; daemon-owned storage boundary |
 | 7 | Application identity format | **Accepted (Phase 2)** | [ADR-0012](0012-application-identity-lifecycle.md): validated reverse-DNS `AppId`; lifecycle boundary |
 | 8 | SolKit ABI/API stability strategy | **Accepted (Phase 6 policy)** | [ADR-0017](0017-solkit-stability-tiers.md): source-API semver begins only with a post-v0.1 public release; no Rust ABI promise |
-| 9 | Server-side vs client-side decorations | Phase 1 | Wayland-first policy; affects GTK/Qt/Electron behavior |
+| 9 | Server-side vs client-side decorations | **Accepted (Phase 1)** | SCP enforces server-side decorations only (ADR-0027, ADR-0028) - clients cannot draw chrome |
 | 10 | Global menu protocol | **Existence/placement accepted (Phase 4)** | [ADR-0025](0025-shell-spatial-menu-live-capsule.md): Shell-rendered foreground menu at upper-left; schema remains open |
 | 11 | Window tiling product model | Phase 1/4 | Floating + snap first; optional advanced tiling |
 | 12 | Application sandbox implementation | **Policy accepted (Phase 8)** | [ADR-0021](0021-application-security-permissions.md): default deny, kernel enforcement, typed portals; exact LSM composition remains open |

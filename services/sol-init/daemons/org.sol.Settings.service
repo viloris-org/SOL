@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.sol.Settings
+Exec=/usr/bin/sol-init --activate sol-settingsd

@@ -1,0 +1,18 @@
+[Daemon]
+name = "sol-notificationd"
+exec = "/usr/bin/sol-notificationd"
+type = "system"
+start_mode = "dbus"
+restart_policy = "on-failure"
+
+after = []
+requires = []
+
+dbus_name = "org.sol.Notifications"
+
+capabilities = [
+    "system.notifications",
+    "compositor.layer_shell"
+]
+
+[Environment]

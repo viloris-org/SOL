@@ -1,0 +1,19 @@
+[Daemon]
+name = "sol-settingsd"
+exec = "/usr/bin/sol-settingsd"
+type = "system"
+start_mode = "dbus"
+restart_policy = "on-failure"
+
+after = []
+requires = []
+
+dbus_name = "org.sol.Settings"
+
+capabilities = [
+    "system.settings.read",
+    "system.settings.write",
+    "system.dconf"
+]
+
+[Environment]

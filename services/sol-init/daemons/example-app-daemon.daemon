@@ -1,0 +1,34 @@
+# Example third-party daemon (Phase 2+)
+# This would be installed by an app to ~/.local/share/sol/daemons/
+
+[Daemon]
+name = "example-sync-daemon"
+exec = "/opt/example-app/bin/sync-daemon"
+type = "application"
+
+start_mode = "dbus"
+restart_policy = "on-failure"
+
+after = []
+requires = []
+
+dbus_name = "com.example.SyncDaemon"
+
+capabilities = [
+    "network.access",
+    "storage.user_data",
+    "system.notifications"
+]
+
+[Environment]
+LOG_LEVEL = "info"
+
+[Resources]
+memory_limit = "256M"
+cpu_share = 512
+
+[Metadata]
+app_id = "com.example.sync"
+display_name = "Example Sync Service"
+publisher = "Example Inc."
+description = "Background sync service for Example App"

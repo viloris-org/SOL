@@ -13,6 +13,7 @@ members = [
     "sdk/sol-graphics",
     "sdk/sol-animation",
     "sdk/sol-system",
+    "services/sol-init",
     "services/sol-settingsd",
     "services/sol-notificationd",
     "services/sol-portal",
@@ -23,6 +24,7 @@ members = [
     "apps/sol-settings",
     "apps/sol-installer",
     "examples/solkit-showcase",
+    "packaging/sol/bundle",
 ]
 
 [workspace.package]
