@@ -13,6 +13,8 @@ protocols to the compositor, shell, and apps.
 | `sol-ime` | `services/sol-ime/` | First-party IME frontend + fcitx5 engine bridge | Phase 0 scaffold → Phase 1 |
 | `sol-diagnostics` | `services/sol-diagnostics/` | Typed, redacted, bounded local diagnostics store | Phase 5 foundation |
 | `sol-ntpd` | `services/sol-ntpd/` | NTPv4/NTS time sampling, authenticated source selection, and bounded privileged clock synchronization | NTS complete; frequency discipline pending |
+| `sol-networkd` | `services/sol-networkd/` | Network device management, connection profiles, DHCP client, DNS integration, and connectivity monitoring over `org.sol.Network1` | Phase 1 complete; WiFi scanning/auth and VPN pending Phase 2 |
+| `sol-init` | `services/sol-init/` | Session daemon manager and startup orchestrator; starts compositor, shell, and services in dependency order | Phase 1 bootstrap |
 
 ## Architecture principles
 

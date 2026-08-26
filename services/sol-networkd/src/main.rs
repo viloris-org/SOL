@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tracing::{info, error};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod manager;
@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let manager = NetworkManager::new().await?;
 
     // Start D-Bus service
-    let dbus_service = DbusService::new(manager.clone()).await?;
+    let _dbus_service = DbusService::new(manager.clone()).await?;
 
     info!("sol-networkd started, listening on D-Bus");
 

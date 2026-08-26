@@ -1,5 +1,4 @@
-use zbus::dbus_interface;
-use zbus::zvariant::{OwnedObjectPath, ObjectPath};
+use zbus::interface;
 use std::collections::HashMap;
 
 use crate::device::{Device, DeviceType};
@@ -15,7 +14,7 @@ impl DeviceInterface {
     }
 }
 
-#[dbus_interface(name = "org.sol.Network1.Device")]
+#[interface(name = "org.sol.Network1.Device")]
 impl DeviceInterface {
     /// Device type (wifi, ethernet, vpn)
     async fn device_type(&self) -> String {

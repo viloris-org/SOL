@@ -19,7 +19,7 @@ impl WiFiDevice {
         Ok(vec![])
     }
 
-    pub async fn connect(&self, ssid: &str, passphrase: &str) -> Result<()> {
+    pub async fn connect(&self, ssid: &str, _passphrase: &str) -> Result<()> {
         info!("Connecting to WiFi network: {}", ssid);
         // TODO: Implement WiFi connection
         Ok(())

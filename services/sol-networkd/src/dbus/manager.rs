@@ -1,9 +1,9 @@
-use zbus::{dbus_interface, SignalContext};
+use zbus::interface;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 use std::collections::HashMap;
 
 use crate::manager::NetworkManager;
-use crate::profile::{Profile, ProfileId};
+use crate::profile::ProfileId;
 
 /// D-Bus Manager interface implementation
 pub struct ManagerInterface {
@@ -16,7 +16,7 @@ impl ManagerInterface {
     }
 }
 
-#[dbus_interface(name = "org.sol.Network1.Manager")]
+#[interface(name = "org.sol.Network1.Manager")]
 impl ManagerInterface {
     /// Get current network state
     async fn state(&self) -> String {
@@ -65,7 +65,7 @@ impl ManagerInterface {
     /// Create a new network profile
     async fn create_profile(
         &self,
-        settings: HashMap<String, zbus::zvariant::Value<'_>>,
+        _settings: HashMap<String, zbus::zvariant::Value<'_>>,
     ) -> zbus::fdo::Result<OwnedObjectPath> {
         // TODO: Parse settings HashMap into Profile struct
         Err(zbus::fdo::Error::NotSupported(
@@ -83,13 +83,16 @@ impl ManagerInterface {
     }
 
     /// Signal: Network state changed
-    #[dbus_interface(signal)]
+    #[zbus(signal)]
     async fn state_changed(
-        ctxt: &SignalContext<'_>,
+        signal_ctxt: &zbus::SignalContext<'_>,
         new_state: HashMap<String, zbus::zvariant::Value<'_>>,
     ) -> zbus::Result<()>;
 
     /// Signal: Connectivity changed
-    #[dbus_interface(signal)]
-    async fn connectivity_changed(ctxt: &SignalContext<'_>, connectivity: u32) -> zbus::Result<()>;
+    #[zbus(signal)]
+    async fn connectivity_changed(
+        signal_ctxt: &zbus::SignalContext<'_>,
+        connectivity: u32,
+    ) -> zbus::Result<()>;
 }

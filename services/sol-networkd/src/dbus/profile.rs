@@ -1,4 +1,4 @@
-use zbus::dbus_interface;
+use zbus::interface;
 use zbus::zvariant::OwnedObjectPath;
 
 use crate::profile::{Profile, ProfileType};
@@ -14,7 +14,7 @@ impl ProfileInterface {
     }
 }
 
-#[dbus_interface(name = "org.sol.Network1.Profile")]
+#[interface(name = "org.sol.Network1.Profile")]
 impl ProfileInterface {
     /// Profile ID
     async fn id(&self) -> String {

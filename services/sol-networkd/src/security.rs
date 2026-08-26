@@ -26,15 +26,18 @@ impl SecretStore {
         // 3. Add authentication tag
 
         let key_bytes = [0u8; 32]; // PLACEHOLDER - derive real key
-        let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)?;
+        let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to create key: {:?}", e))?;
         let key = LessSafeKey::new(unbound_key);
 
         let mut nonce_bytes = [0u8; 12];
-        self.rng.fill(&mut nonce_bytes)?;
+        self.rng.fill(&mut nonce_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to generate nonce: {:?}", e))?;
         let nonce = Nonce::assume_unique_for_key(nonce_bytes);
 
         let mut in_out = plaintext.to_vec();
-        key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)?;
+        key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+            .map_err(|e| anyhow::anyhow!("Encryption failed: {:?}", e))?;
 
         // Prepend nonce to ciphertext
         let mut result = nonce_bytes.to_vec();
@@ -56,11 +59,13 @@ impl SecretStore {
         let encrypted_data = &ciphertext[12..];
 
         let key_bytes = [0u8; 32]; // PLACEHOLDER - derive real key
-        let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)?;
+        let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to create key: {:?}", e))?;
         let key = LessSafeKey::new(unbound_key);
 
         let mut in_out = encrypted_data.to_vec();
-        let decrypted = key.open_in_place(nonce, Aad::empty(), &mut in_out)?;
+        let decrypted = key.open_in_place(nonce, Aad::empty(), &mut in_out)
+            .map_err(|e| anyhow::anyhow!("Decryption failed: {:?}", e))?;
 
         Ok(decrypted.to_vec())
     }
