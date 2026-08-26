@@ -1,32 +1,70 @@
-use anyhow::Result;
+use anyhow::{Result, Context};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::rand::{SecureRandom, SystemRandom};
+use ring::pbkdf2;
+use std::num::NonZeroU32;
 use tracing::info;
 
 /// Secure credential storage with encryption
 pub struct SecretStore {
     rng: SystemRandom,
+    master_key: [u8; 32],
 }
 
 impl SecretStore {
     pub async fn new() -> Result<Self> {
         info!("Initializing secret store");
+
+        let rng = SystemRandom::new();
+        let master_key = Self::derive_master_key().await?;
+
         Ok(Self {
-            rng: SystemRandom::new(),
+            rng,
+            master_key,
         })
     }
 
+    async fn derive_master_key() -> Result<[u8; 32]> {
+        // In production, this should:
+        // 1. Read hardware-bound secret from TPM or /sys/class/dmi/id/product_uuid
+        // 2. Combine with system salt from /var/lib/sol-networkd/salt
+        // 3. Use PBKDF2 to derive key
+        //
+        // For now, we use a machine-specific identifier
+
+        let machine_id = tokio::fs::read_to_string("/etc/machine-id")
+            .await
+            .context("Failed to read machine ID")?;
+
+        let salt_path = "/var/lib/sol-networkd/salt";
+        let salt = if let Ok(s) = tokio::fs::read(salt_path).await {
+            s
+        } else {
+            // Generate new salt
+            let mut new_salt = vec![0u8; 32];
+            let rng = SystemRandom::new();
+            rng.fill(&mut new_salt)
+                .map_err(|_| anyhow::anyhow!("Failed to generate salt"))?;
+
+            tokio::fs::create_dir_all("/var/lib/sol-networkd").await.ok();
+            tokio::fs::write(salt_path, &new_salt).await.ok();
+            new_salt
+        };
+
+        let mut key = [0u8; 32];
+        pbkdf2::derive(
+            pbkdf2::PBKDF2_HMAC_SHA256,
+            NonZeroU32::new(100_000).unwrap(),
+            &salt,
+            machine_id.as_bytes(),
+            &mut key,
+        );
+
+        Ok(key)
+    }
+
     pub async fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        // TODO: Implement proper key derivation and storage
-        // For now, this is a placeholder structure
-
-        // In production:
-        // 1. Derive key from user password + hardware-bound secret
-        // 2. Use proper key storage (TPM, keyring, etc.)
-        // 3. Add authentication tag
-
-        let key_bytes = [0u8; 32]; // PLACEHOLDER - derive real key
-        let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)
+        let unbound_key = UnboundKey::new(&AES_256_GCM, &self.master_key)
             .map_err(|e| anyhow::anyhow!("Failed to create key: {:?}", e))?;
         let key = LessSafeKey::new(unbound_key);
 
@@ -58,8 +96,7 @@ impl SecretStore {
         // Extract encrypted data
         let encrypted_data = &ciphertext[12..];
 
-        let key_bytes = [0u8; 32]; // PLACEHOLDER - derive real key
-        let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)
+        let unbound_key = UnboundKey::new(&AES_256_GCM, &self.master_key)
             .map_err(|e| anyhow::anyhow!("Failed to create key: {:?}", e))?;
         let key = LessSafeKey::new(unbound_key);
 

@@ -1,7 +1,7 @@
 //! SCP surface management.
 
 use crate::scp::{
-    protocol::{BufferFormat, BufferId, Rect, SessionId, SurfaceId, ToplevelId},
+    protocol::{BufferFormat, BufferId, Rect, SessionId, SurfaceId, ToplevelId, OutputId, LayerSurfaceId},
     security::AppId,
 };
 use std::collections::HashMap;
@@ -46,7 +46,7 @@ pub enum SurfaceRole {
     None,
     Toplevel(ToplevelId),
     Popup { parent: SurfaceId },
-    LayerShell,
+    LayerShell(LayerSurfaceId),
 }
 
 impl ScpSurface {
@@ -274,12 +274,182 @@ impl Toplevel {
     }
 }
 
-/// Surface manager — owns all surfaces and toplevels.
+/// Layer shell surface for desktop panels/overlays.
+#[derive(Debug, Clone)]
+pub struct LayerSurface {
+    pub id: LayerSurfaceId,
+    pub surface_id: SurfaceId,
+    pub session_id: SessionId,
+    pub app_id: AppId,
+    pub layer: Layer,
+    pub namespace: String,
+    pub output: Option<OutputId>,
+    pub anchor: Anchor,
+    pub exclusive_zone: i32,
+    pub margin: Margin,
+    pub keyboard_interactivity: KeyboardInteractivity,
+    pub size: (i32, i32),
+    pub configured_size: (i32, i32),
+    pub pending_configure: Option<LayerConfigure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Layer {
+    Background = 0,
+    Bottom = 1,
+    Top = 2,
+    Overlay = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Anchor {
+    pub top: bool,
+    pub bottom: bool,
+    pub left: bool,
+    pub right: bool,
+}
+
+impl Anchor {
+    pub fn is_horizontal_stretch(&self) -> bool {
+        self.left && self.right
+    }
+
+    pub fn is_vertical_stretch(&self) -> bool {
+        self.top && self.bottom
+    }
+
+    pub fn is_corner(&self) -> bool {
+        (self.top || self.bottom) && (self.left || self.right)
+            && !(self.is_horizontal_stretch() && self.is_vertical_stretch())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Margin {
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+    pub left: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyboardInteractivity {
+    None,
+    Exclusive,
+    OnDemand,
+}
+
+#[derive(Debug, Clone)]
+pub struct LayerConfigure {
+    pub serial: u32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl LayerSurface {
+    pub fn new(
+        id: LayerSurfaceId,
+        surface_id: SurfaceId,
+        session_id: SessionId,
+        app_id: AppId,
+        layer: Layer,
+        namespace: String,
+    ) -> Self {
+        Self {
+            id,
+            surface_id,
+            session_id,
+            app_id,
+            layer,
+            namespace,
+            output: None,
+            anchor: Anchor::default(),
+            exclusive_zone: 0,
+            margin: Margin::default(),
+            keyboard_interactivity: KeyboardInteractivity::None,
+            size: (0, 0),
+            configured_size: (0, 0),
+            pending_configure: None,
+        }
+    }
+
+    pub fn configure(&mut self, serial: u32, width: i32, height: i32) {
+        self.pending_configure = Some(LayerConfigure {
+            serial,
+            width,
+            height,
+        });
+        self.configured_size = (width, height);
+    }
+
+    pub fn ack_configure(&mut self, serial: u32) -> bool {
+        if let Some(pending) = &self.pending_configure
+            && pending.serial == serial
+        {
+            self.pending_configure = None;
+            return true;
+        }
+        false
+    }
+
+    /// Calculate the actual geometry based on anchor, size, and output bounds.
+    pub fn calculate_geometry(&self, output_width: i32, output_height: i32) -> Rect {
+        let (desired_width, desired_height) = self.size;
+
+        // Determine actual width
+        let width = if self.anchor.is_horizontal_stretch() {
+            output_width - self.margin.left - self.margin.right
+        } else if desired_width > 0 {
+            desired_width
+        } else {
+            self.configured_size.0
+        };
+
+        // Determine actual height
+        let height = if self.anchor.is_vertical_stretch() {
+            output_height - self.margin.top - self.margin.bottom
+        } else if desired_height > 0 {
+            desired_height
+        } else {
+            self.configured_size.1
+        };
+
+        // Calculate position based on anchors
+        let x = if self.anchor.left && !self.anchor.right {
+            self.margin.left
+        } else if self.anchor.right && !self.anchor.left {
+            output_width - width - self.margin.right
+        } else {
+            // Centered or stretched
+            self.margin.left
+        };
+
+        let y = if self.anchor.top && !self.anchor.bottom {
+            self.margin.top
+        } else if self.anchor.bottom && !self.anchor.top {
+            output_height - height - self.margin.bottom
+        } else {
+            // Centered or stretched
+            self.margin.top
+        };
+
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
+/// Surface manager — owns all surfaces, toplevels, and layer surfaces.
 #[derive(Debug, Default)]
 pub struct SurfaceManager {
     surfaces: HashMap<(SessionId, SurfaceId), ScpSurface>,
     toplevels: HashMap<ToplevelId, Toplevel>,
+    layer_surfaces: HashMap<LayerSurfaceId, LayerSurface>,
     next_toplevel_id: ToplevelId,
+    next_layer_id: LayerSurfaceId,
 }
 
 impl SurfaceManager {
@@ -367,10 +537,64 @@ impl SurfaceManager {
         self.toplevels.values()
     }
 
+    pub fn create_layer_surface(
+        &mut self,
+        session_id: SessionId,
+        surface_id: SurfaceId,
+        layer: Layer,
+        namespace: String,
+    ) -> Result<LayerSurfaceId, String> {
+        let surface = self
+            .surfaces
+            .get_mut(&(session_id, surface_id))
+            .ok_or_else(|| "Surface not found".to_string())?;
+
+        let layer_id = self.next_layer_id;
+        self.next_layer_id = self
+            .next_layer_id
+            .checked_add(1)
+            .ok_or("Layer surface ID space exhausted")?;
+
+        surface.assign_role(SurfaceRole::LayerShell(layer_id))?;
+
+        let layer_surface = LayerSurface::new(
+            layer_id,
+            surface_id,
+            session_id,
+            surface.app_id.clone(),
+            layer,
+            namespace,
+        );
+        self.layer_surfaces.insert(layer_id, layer_surface);
+
+        Ok(layer_id)
+    }
+
+    pub fn get_layer_surface(&self, id: LayerSurfaceId) -> Option<&LayerSurface> {
+        self.layer_surfaces.get(&id)
+    }
+
+    pub fn get_layer_surface_mut(&mut self, id: LayerSurfaceId) -> Option<&mut LayerSurface> {
+        self.layer_surfaces.get_mut(&id)
+    }
+
+    pub fn iter_layer_surfaces(&self) -> impl Iterator<Item = &LayerSurface> {
+        self.layer_surfaces.values()
+    }
+
+    /// Get layer surfaces sorted by layer (background → overlay).
+    pub fn iter_layer_surfaces_sorted(&self) -> Vec<&LayerSurface> {
+        let mut surfaces: Vec<_> = self.layer_surfaces.values().collect();
+        surfaces.sort_by_key(|s| s.layer);
+        surfaces
+    }
+
     pub fn destroy_session(&mut self, session_id: SessionId) {
         self.surfaces.retain(|(owner, _), _| *owner != session_id);
         self.toplevels
             .retain(|_, toplevel| toplevel.session_id != session_id);
+        self.layer_surfaces
+            .retain(|_, layer| layer.session_id != session_id);
     }
 
     /// Collect and clear all pending frame callbacks from all surfaces.

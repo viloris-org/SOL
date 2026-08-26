@@ -14,6 +14,7 @@ pub type PopupId = u32;
 pub type OutputId = u32;
 pub type BufferId = u32;
 pub type PoolId = u32;
+pub type LayerSurfaceId = u32;
 
 /// Client → Compositor messages.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +151,59 @@ pub enum ClientMessage {
         surface_id: Option<SurfaceId>,
         hotspot_x: i32,
         hotspot_y: i32,
+    },
+
+    // ===== Layer Shell =====
+    /// Create a layer surface (requires LayerShell capability)
+    CreateLayerSurface {
+        surface_id: SurfaceId,
+        capability_token: Vec<u8>,
+        layer: LayerShellLayer,
+        namespace: String,
+        output_id: Option<OutputId>,
+    },
+
+    /// Set layer surface anchor edges
+    SetLayerAnchor {
+        layer_id: LayerSurfaceId,
+        top: bool,
+        bottom: bool,
+        left: bool,
+        right: bool,
+    },
+
+    /// Set layer surface exclusive zone
+    SetLayerExclusiveZone {
+        layer_id: LayerSurfaceId,
+        zone: i32,
+    },
+
+    /// Set layer surface margins
+    SetLayerMargin {
+        layer_id: LayerSurfaceId,
+        top: i32,
+        right: i32,
+        bottom: i32,
+        left: i32,
+    },
+
+    /// Set layer surface keyboard interactivity
+    SetLayerKeyboardInteractivity {
+        layer_id: LayerSurfaceId,
+        interactivity: LayerKeyboardInteractivity,
+    },
+
+    /// Set layer surface size
+    SetLayerSize {
+        layer_id: LayerSurfaceId,
+        width: i32,
+        height: i32,
+    },
+
+    /// Acknowledge layer surface configure
+    AckLayerConfigure {
+        layer_id: LayerSurfaceId,
+        serial: u32,
     },
 }
 
@@ -293,6 +347,18 @@ pub enum CompositorMessage {
         mods_locked: u32,
         group: u32,
     },
+
+    // ===== Layer Shell =====
+    /// Configure layer surface
+    ConfigureLayerSurface {
+        layer_id: LayerSurfaceId,
+        serial: u32,
+        width: i32,
+        height: i32,
+    },
+
+    /// Layer surface closed
+    LayerSurfaceClosed { layer_id: LayerSurfaceId },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -515,6 +581,21 @@ pub enum ButtonState {
 pub enum KeyState {
     Pressed,
     Released,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LayerShellLayer {
+    Background,
+    Bottom,
+    Top,
+    Overlay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LayerKeyboardInteractivity {
+    None,
+    Exclusive,
+    OnDemand,
 }
 
 const fn invalid_fd() -> i32 {

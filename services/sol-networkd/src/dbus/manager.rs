@@ -82,6 +82,83 @@ impl ManagerInterface {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
+    /// Scan for WiFi networks
+    async fn scan_wifi(&self) -> zbus::fdo::Result<Vec<HashMap<String, zbus::zvariant::Value<'static>>>> {
+        let networks = self.manager
+            .scan_wifi()
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for network in networks {
+            let mut map = HashMap::new();
+            map.insert("ssid".to_string(), zbus::zvariant::Value::new(network.ssid));
+            map.insert("bssid".to_string(), zbus::zvariant::Value::new(network.bssid));
+            map.insert("signal_strength".to_string(), zbus::zvariant::Value::new(network.signal_strength));
+            map.insert("frequency".to_string(), zbus::zvariant::Value::new(network.frequency));
+            map.insert("security".to_string(), zbus::zvariant::Value::new(format!("{:?}", network.security)));
+            results.push(map);
+        }
+
+        Ok(results)
+    }
+
+    /// Quick connect to WiFi network (creates profile automatically)
+    async fn connect_wifi(&self, ssid: String, passphrase: String) -> zbus::fdo::Result<String> {
+        let pass = if passphrase.is_empty() {
+            None
+        } else {
+            Some(passphrase)
+        };
+
+        let profile_id = self.manager
+            .connect_wifi_quick(ssid, pass)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+
+        Ok(profile_id.0)
+    }
+
+    /// Get WiFi signal strength (0-100)
+    async fn wifi_signal_strength(&self) -> zbus::fdo::Result<u8> {
+        self.manager
+            .get_wifi_signal_strength()
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
+            .ok_or_else(|| zbus::fdo::Error::Failed("Not connected to WiFi".to_string()))
+    }
+
+    /// Get active connection information
+    async fn active_connection(&self) -> zbus::fdo::Result<HashMap<String, zbus::zvariant::Value<'static>>> {
+        let info = self.manager
+            .get_active_connection_info()
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
+            .ok_or_else(|| zbus::fdo::Error::Failed("No active connection".to_string()))?;
+
+        let mut map = HashMap::new();
+        map.insert("type".to_string(), zbus::zvariant::Value::new(info.connection_type));
+        map.insert("interface".to_string(), zbus::zvariant::Value::new(info.interface));
+        map.insert("details".to_string(), zbus::zvariant::Value::new(info.details));
+        if let Some(strength) = info.signal_strength {
+            map.insert("signal_strength".to_string(), zbus::zvariant::Value::new(strength));
+        }
+
+        Ok(map)
+    }
+
+    /// List all saved profiles
+    async fn list_profiles(&self) -> zbus::fdo::Result<Vec<String>> {
+        let profiles = self.manager.list_profiles().await;
+        Ok(profiles.into_iter().map(|id| id.0).collect())
+    }
+
+    /// Enable/disable auto-connect for a profile
+    async fn set_auto_connect(&self, _profile_id: String, _enabled: bool) -> zbus::fdo::Result<()> {
+        // TODO: Implement in manager
+        Ok(())
+    }
+
     /// Signal: Network state changed
     #[zbus(signal)]
     async fn state_changed(
@@ -94,5 +171,12 @@ impl ManagerInterface {
     async fn connectivity_changed(
         signal_ctxt: &zbus::SignalContext<'_>,
         connectivity: u32,
+    ) -> zbus::Result<()>;
+
+    /// Signal: WiFi scan completed
+    #[zbus(signal)]
+    async fn scan_completed(
+        signal_ctxt: &zbus::SignalContext<'_>,
+        networks_count: u32,
     ) -> zbus::Result<()>;
 }

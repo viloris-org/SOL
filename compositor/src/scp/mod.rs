@@ -31,6 +31,7 @@ pub mod audit;
 pub mod buffer;
 pub mod capability;
 pub mod input;
+pub mod layer;
 pub mod manifest;
 pub mod output;
 pub mod permission_manager;
@@ -44,4 +45,5 @@ pub mod transport;
 
 pub use permission_manager::PermissionManager;
 pub use state::ScpState;
+pub use surface::{Layer, LayerSurface};
 pub use transport::ScpServer;

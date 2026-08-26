@@ -22,18 +22,25 @@ Network management service for SOL OS. Handles device discovery, connection prof
 
 ## Phase 1 Implementation Status
 
-### ✅ Completed
+### ✅ Completed (Latest Updates)
 
 **Core Infrastructure**
 - NetworkManager with device/profile/connectivity state management
 - D-Bus service on `org.sol.Network1` with Manager/Device/Profile/WiFi/VPN interfaces
 - Netlink integration via rtnetlink for device monitoring
 - Device abstraction (WiFi/Ethernet/VPN types with per-type handlers)
+- **Profile persistence** - Profiles saved to `/var/lib/sol-networkd/profiles/*.json`
+- **Secure credential storage** - PBKDF2-derived keys with AES-256-GCM encryption
+- **Network Time Security (NTS)** - Automatic time sync after connection
+- **Enhanced connection flow** - Complete DHCP → IP config → DNS → time sync pipeline
 
 **Device Management**
 - Interface discovery via netlink + /sys/class/net
 - Device state tracking (Unavailable → Active lifecycle)
 - Per-device-type specialization (WiFiDevice, EthernetDevice, VpnDevice)
+- **Ethernet device implementation** - DHCP, static IP, carrier detection, link speed
+- **Automatic IP configuration** - Apply DHCP leases to network interfaces
+- **Interface management** - Link up/down, address assignment, routing
 
 **WiFi Support**
 - D-Bus WiFi interface (`org.sol.Network1.WiFi`)
@@ -43,6 +50,8 @@ Network management service for SOL OS. Handles device discovery, connection prof
 - Signal strength and current network properties
 - Enable/disable WiFi radio control
 - Network information dictionary (SSID, BSSID, signal, frequency, security)
+- **Quick connect API** - Single-call WiFi connection with auto-profile creation
+- **WPA2/Open security** - Automatic security type detection
 
 **VPN Support**
 - D-Bus VPN interface (`org.sol.Network1.VPN`)
@@ -59,13 +68,18 @@ Network management service for SOL OS. Handles device discovery, connection prof
 - Auto-connect policy framework
 - WiFi profiles with security type and passphrase storage
 - VPN profiles (WireGuard/OpenVPN/IPSec configurations)
-- Profile persistence (structure ready, file I/O pending Phase 2)
+- **Profile persistence** - JSON serialization to `/var/lib/sol-networkd/profiles/`
+- **Automatic loading** - Profiles restored on daemon startup
+- **Profile CRUD** - Create, read, update, delete with atomic file operations
 
 **DHCP Client**
 - RFC 2131 DHCPv4 implementation via dhcproto
 - DISCOVER → OFFER → REQUEST → ACK state machine
 - Lease acquisition, renewal, and release
 - Integration with NetworkManager for automatic IP configuration
+- **Lease renewal** - Background task for lease maintenance
+- **Multiple DNS servers** - Support for primary and secondary DNS
+- **Gateway and netmask** - Full IP configuration from DHCP response
 
 **DNS Integration**
 - systemd-resolved D-Bus client
@@ -84,6 +98,17 @@ Network management service for SOL OS. Handles device discovery, connection prof
 - Separate encryption per profile (WiFi passphrase, VPN credentials)
 - Secure VPN private key storage
 - Credential handling without logging
+- **PBKDF2 key derivation** - Machine-specific keys from hardware ID
+- **Per-profile nonces** - Unique encryption context for each credential
+- **Automatic key rotation** - Re-derive keys on machine ID changes
+
+**Network Time Security (NTS)**
+- RFC 8915 NTS-KE client implementation
+- Automatic time synchronization after network connection
+- TLS 1.3 connection to time.cloudflare.com
+- Cookie-based authenticated NTP requests
+- Integration with NetworkManager connection flow
+- Time drift monitoring and correction
 
 ### 🚧 Phase 2 Pending
 
@@ -104,11 +129,6 @@ Network management service for SOL OS. Handles device discovery, connection prof
 - IPSec/IKEv2 backend (strongSwan integration)
 - Automatic reconnection on network changes
 
-**Profile Persistence**
-- Profile file I/O (JSON or TOML)
-- Profile validation on load
-- Migration on schema changes
-
 **Advanced Features**
 - IPv6 support (DHCPv6, SLAAC)
 - Connection prioritization (prefer ethernet, avoid metered)
@@ -128,12 +148,19 @@ Network management service for SOL OS. Handles device discovery, connection prof
 - `ConnectToProfile(s profile_id) -> o` - Returns active connection path
 - `DisconnectProfile(s profile_id) -> ()`
 - `ListProfiles() -> ao` - Returns profile object paths
+- `ScanWifi() -> aa{sv}` - Scan and return available WiFi networks
+- `ConnectWifi(ss ssid, ss passphrase) -> s` - Quick connect to WiFi, returns profile_id
+- `SyncTime() -> a{sv}` - Trigger NTS time sync, returns time info
+
+**Properties:**
+- `TimeInfo: a{sv}` - Current time and synchronization status
 
 **Signals:**
 - `StateChanged(s new_state)` - Network state transition
 - `ConnectivityChanged(u new_level)` - Connectivity level changed
 - `DeviceAdded(o device)` - New device detected
 - `DeviceRemoved(o device)` - Device removed
+- `TimeSynchronized(t timestamp)` - System time updated via NTS
 
 ### org.sol.Network1.WiFi
 
@@ -255,7 +282,20 @@ Unavailable → Disconnected → Preparing → Configuring → NeedAuth
 7. Manager emits StateChanged signal
 
 **Profile Storage:**
-Profiles are stored in-memory (HashMap) in Phase 1. Phase 2 will persist to `~/.config/sol/network/profiles/` as JSON.
+Profiles are stored in `/var/lib/sol-networkd/profiles/` as JSON files, one per profile. Each file is named by its UUID and contains encrypted credentials. The SecretStore derives encryption keys from the machine's hardware ID using PBKDF2-HMAC-SHA256 with 100,000 iterations.
+
+Example profile file structure:
+```json
+{
+  "WiFi": {
+    "ssid": "HomeNetwork",
+    "security": "Wpa2",
+    "passphrase": "base64_encrypted_data_here",
+    "auto_connect": true,
+    "metered": false
+  }
+}
+```
 
 **Security Model:**
 - WiFi passphrases encrypted at rest via SecretStore
@@ -268,7 +308,6 @@ Profiles are stored in-memory (HashMap) in Phase 1. Phase 2 will persist to `~/.
 - [ ] Complete iwd D-Bus integration for WiFi scanning and authentication
 - [ ] WireGuard kernel module integration via wireguard-control
 - [ ] OpenVPN and IPSec backend implementations
-- [ ] Profile file persistence
 - [ ] IPv6 DHCPv6 and SLAAC
 - [ ] Hotspot mode (AP + DHCP server)
 - [ ] Connection statistics and usage tracking
@@ -277,7 +316,8 @@ Profiles are stored in-memory (HashMap) in Phase 1. Phase 2 will persist to `~/.
 - [ ] MAC address randomization
 - [ ] 802.1X enterprise WiFi authentication
 - [ ] mDNS/DNS-SD service discovery
-- [ ] Network Time Security (NTS) client
+- [ ] NTP fallback when NTS is unavailable
+- [ ] Connection migration (seamless switch between networks)
 
 ## Documentation
 

@@ -6,9 +6,9 @@ use crate::scp::{
     input::InputState,
     output::OutputManager,
     popup::{position_popup, Popup},
-    protocol::{BufferId, ClientMessage, CompositorMessage, PopupId, Rect, SessionId, SurfaceId},
+    protocol::{BufferId, ClientMessage, CompositorMessage, PopupId, Rect, SessionId, SurfaceId, LayerSurfaceId},
     security::{AppId, AuditOutcome, SecurityCoordinator, StubSecurityCoordinator},
-    surface::SurfaceManager,
+    surface::{SurfaceManager, Layer, Anchor, Margin, KeyboardInteractivity},
 };
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
@@ -712,6 +712,161 @@ impl ScpState {
                 }
                 Ok(vec![])
             }
+
+            // Layer Shell
+            ClientMessage::CreateLayerSurface {
+                surface_id,
+                capability_token,
+                layer,
+                namespace,
+                output_id,
+            } => {
+                self.verify_surface_ownership(session_id, surface_id)?;
+                self.verify_capability_token(
+                    session_id,
+                    &Capability::LayerShell,
+                    &capability_token,
+                )?;
+
+                let layer_enum = match layer {
+                    crate::scp::protocol::LayerShellLayer::Background => Layer::Background,
+                    crate::scp::protocol::LayerShellLayer::Bottom => Layer::Bottom,
+                    crate::scp::protocol::LayerShellLayer::Top => Layer::Top,
+                    crate::scp::protocol::LayerShellLayer::Overlay => Layer::Overlay,
+                };
+
+                let layer_id = self
+                    .surface_manager
+                    .create_layer_surface(session_id, surface_id, layer_enum, namespace)?;
+
+                if let Some(layer_surface) = self.surface_manager.get_layer_surface_mut(layer_id) {
+                    layer_surface.output = output_id;
+                }
+
+                if let Some(session) = self.sessions.get_mut(&session_id) {
+                    session.record_use(&Capability::LayerShell);
+                }
+                self.security.audit_capability_use(
+                    &app_id,
+                    &Capability::LayerShell,
+                    AuditOutcome::Used,
+                );
+
+                // Send initial configure
+                let serial = self.next_serial();
+                let output = output_id
+                    .and_then(|id| self.output_manager.get_output(id))
+                    .or_else(|| self.output_manager.primary_output());
+
+                let (width, height) = if let Some(output) = output {
+                    (output.geometry.width, output.geometry.height)
+                } else {
+                    (1920, 1080)
+                };
+
+                if let Some(layer_surface) = self.surface_manager.get_layer_surface_mut(layer_id) {
+                    layer_surface.configure(serial, width, height);
+                }
+
+                Ok(vec![CompositorMessage::ConfigureLayerSurface {
+                    layer_id,
+                    serial,
+                    width,
+                    height,
+                }])
+            }
+
+            ClientMessage::SetLayerAnchor {
+                layer_id,
+                top,
+                bottom,
+                left,
+                right,
+            } => {
+                self.verify_layer_ownership(session_id, layer_id)?;
+                if let Some(layer_surface) = self.surface_manager.get_layer_surface_mut(layer_id) {
+                    layer_surface.anchor = Anchor {
+                        top,
+                        bottom,
+                        left,
+                        right,
+                    };
+                }
+                Ok(vec![])
+            }
+
+            ClientMessage::SetLayerExclusiveZone { layer_id, zone } => {
+                self.verify_layer_ownership(session_id, layer_id)?;
+                if let Some(layer_surface) = self.surface_manager.get_layer_surface_mut(layer_id) {
+                    layer_surface.exclusive_zone = zone;
+                }
+                Ok(vec![])
+            }
+
+            ClientMessage::SetLayerMargin {
+                layer_id,
+                top,
+                right,
+                bottom,
+                left,
+            } => {
+                self.verify_layer_ownership(session_id, layer_id)?;
+                if let Some(layer_surface) = self.surface_manager.get_layer_surface_mut(layer_id) {
+                    layer_surface.margin = Margin {
+                        top,
+                        right,
+                        bottom,
+                        left,
+                    };
+                }
+                Ok(vec![])
+            }
+
+            ClientMessage::SetLayerKeyboardInteractivity {
+                layer_id,
+                interactivity,
+            } => {
+                self.verify_layer_ownership(session_id, layer_id)?;
+                if let Some(layer_surface) = self.surface_manager.get_layer_surface_mut(layer_id) {
+                    layer_surface.keyboard_interactivity = match interactivity {
+                        crate::scp::protocol::LayerKeyboardInteractivity::None => {
+                            KeyboardInteractivity::None
+                        }
+                        crate::scp::protocol::LayerKeyboardInteractivity::Exclusive => {
+                            KeyboardInteractivity::Exclusive
+                        }
+                        crate::scp::protocol::LayerKeyboardInteractivity::OnDemand => {
+                            KeyboardInteractivity::OnDemand
+                        }
+                    };
+                }
+                Ok(vec![])
+            }
+
+            ClientMessage::SetLayerSize {
+                layer_id,
+                width,
+                height,
+            } => {
+                self.verify_layer_ownership(session_id, layer_id)?;
+                if let Some(layer_surface) = self.surface_manager.get_layer_surface_mut(layer_id) {
+                    layer_surface.size = (width, height);
+                }
+                Ok(vec![])
+            }
+
+            ClientMessage::AckLayerConfigure { layer_id, serial } => {
+                self.verify_layer_ownership(session_id, layer_id)?;
+                if !self
+                    .surface_manager
+                    .get_layer_surface_mut(layer_id)
+                    .ok_or("Layer surface not found")?
+                    .ack_configure(serial)
+                {
+                    return Err("Configure serial is stale or unknown".to_string());
+                }
+                Ok(vec![])
+            }
         }
     }
 
@@ -828,6 +983,22 @@ impl ScpState {
         Ok(())
     }
 
+    fn verify_layer_ownership(
+        &self,
+        session_id: SessionId,
+        layer_id: LayerSurfaceId,
+    ) -> Result<(), String> {
+        let layer = self
+            .surface_manager
+            .get_layer_surface(layer_id)
+            .ok_or("Layer surface not found")?;
+        if layer.session_id == session_id {
+            Ok(())
+        } else {
+            Err("Layer surface does not belong to this session".to_string())
+        }
+    }
+
     fn validate_buffer(&self, fd: i32, width: i32, height: i32, stride: i32) -> Result<(), String> {
         if fd < 0 {
             return Err("Invalid buffer file descriptor".to_string());
@@ -877,6 +1048,14 @@ impl ScpState {
 
     pub fn iter_toplevels(&self) -> impl Iterator<Item = &crate::scp::surface::Toplevel> {
         self.surface_manager.iter_toplevels()
+    }
+
+    pub fn iter_layer_surfaces(&self) -> impl Iterator<Item = &crate::scp::surface::LayerSurface> {
+        self.surface_manager.iter_layer_surfaces()
+    }
+
+    pub fn iter_layer_surfaces_sorted(&self) -> Vec<&crate::scp::surface::LayerSurface> {
+        self.surface_manager.iter_layer_surfaces_sorted()
     }
 
     /// Send frame callbacks to all surfaces that requested them.

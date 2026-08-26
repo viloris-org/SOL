@@ -11,6 +11,7 @@ mod dns;
 mod captive_portal;
 mod dbus;
 mod security;
+mod nts;
 
 use manager::NetworkManager;
 use dbus::DbusService;
