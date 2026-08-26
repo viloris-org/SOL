@@ -81,6 +81,43 @@ Watchdog: Auto-downgrade if budget exceeded
 - Priority 2 is below kernel interrupt handlers
 - Uses priority inheritance to avoid priority inversion
 
+### 1a. Audio Pipeline: Real-Time Scheduling
+
+The audio server (PipeWire/sol-audio) uses **SCHED_FIFO priority 10** with stricter guarantees than compositor:
+
+```rust
+// Audio server threads
+SCHED_FIFO priority 10  // Higher than compositor
+Buffer size: 256-512 samples (5-11ms @ 48kHz)
+Deadline: Must not miss or audio cracks/pops occur
+```
+
+**Rationale**:
+- **Audio is more latency-sensitive than video** - 1 missed frame (16ms) is visible jank; 1 missed audio buffer (5ms) is audible crackling
+- **Human ear is less forgiving** - Frame drop = slight stutter; audio dropout = jarring artifact
+- **Small buffer = tight deadline** - Pro audio workflows use 256 samples (5ms), leaving almost no slack
+- **Background tasks can starve audio** - CPU-bound app at 100% can delay audio thread past buffer deadline
+- Priority 10 ensures audio preempts everything except kernel interrupts and hardware IRQ handlers
+
+**Safety**:
+- Audio thread is small and predictable (mix samples → DMA, no complex logic)
+- Watchdog: If audio thread exceeds 50% of buffer period, log warning
+- Priority inheritance for shared locks with clients
+- Cgroup CPU guarantee: audio cgroup always gets ≥10% CPU even under load
+
+**Thread breakdown**:
+```
+PipeWire/sol-audio process:
+  - DSP/mixing thread: SCHED_FIFO priority 10
+  - Client communication: SCHED_OTHER nice -5
+  - Control/management: SCHED_OTHER nice 0
+```
+
+**Interaction with compositor**:
+- Audio priority 10 > Compositor priority 2
+- If system is overloaded, audio glitches are worse than frame drops
+- Compositor can recover from missed frame; audio cannot recover from buffer underrun
+
 ### 2. Games: Resource Isolation, Not Real-Time Priority
 
 Games receive **maximum resources through cgroup isolation**, not SCHED_FIFO:
@@ -113,6 +150,11 @@ Result: Game gets maximum throughput, compositor guarantees smoothness
 │   ├── cpu.weight: 1000
 │   └── [compositor process]
 │
+├── sol-audio/               # Audio server (PipeWire/sol-audio)
+│   ├── cpu.weight: 1000
+│   ├── cpu.min: 10%         # Guaranteed minimum CPU even under load
+│   └── [audio server process]
+│
 ├── sol-shell/               # Shell UI
 │   ├── cpu.weight: 500
 │   └── [sol-shell process]
@@ -133,13 +175,21 @@ Result: Game gets maximum throughput, compositor guarantees smoothness
 
 | Component | Thread | Scheduling | Priority |
 |-----------|--------|-----------|----------|
+| Audio server | DSP/mixing | SCHED_FIFO | 10 |
 | Compositor | Render/present | SCHED_FIFO | 2 |
 | Compositor | Input dispatch | SCHED_FIFO | 1 |
 | Compositor | Protocol handlers | SCHED_OTHER | 0 |
+| Audio server | Client I/O | SCHED_OTHER | nice -5 |
 | Shell | UI thread | SCHED_OTHER | nice -5 |
 | Game (foreground) | All threads | SCHED_OTHER | nice -10 |
 | Regular app (foreground) | All threads | SCHED_OTHER | nice 0 |
 | Background apps | All threads | SCHED_OTHER | nice 10 |
+
+**Priority rationale:**
+- Audio (10) > Compositor (2): Audio glitches are worse than frame drops
+- Compositor render (2) > Input (1): Presenting frames is the hard deadline
+- Input (1) > Protocol handlers (0): Low-latency input dispatch critical
+- All RT threads < kernel IRQ handlers (typically priority 50-99)
 
 ### 5. Frame-Aligned Scheduling
 
@@ -408,21 +458,28 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
    - Implement watchdog: downgrade to SCHED_OTHER if frame budget exceeded
    - Add frame timing telemetry (present timestamps, missed vsyncs)
 
-2. **Cgroup hierarchy setup**
+2. **Audio server real-time scheduling**
+   - Set SCHED_FIFO priority 10 for PipeWire/sol-audio DSP thread
+   - Buffer size: 256-512 samples (5-11ms @ 48kHz)
+   - Watchdog: warn if thread exceeds 50% of buffer period
+   - Cgroup CPU guarantee: audio slice gets ≥10% CPU minimum
+
+3. **Cgroup hierarchy setup**
    - Create cgroup structure at boot (systemd units)
    - Implement process mover: assign apps to correct cgroup on launch
    - Basic foreground/background distinction
    - CPU/IO weight enforcement
+   - Audio slice with guaranteed minimum CPU allocation
 
-3. **Input latency optimization**
+4. **Input latency optimization**
    - Priority inheritance for input → app pipeline
    - Measure input event → frame present latency
 
-4. **CPU governor management**
+5. **CPU governor management**
    - Set performance governor when game detected
    - Revert to schedutil on game exit
 
-**Deliverable**: Compositor maintains 60fps under load, input latency <10ms
+**Deliverable**: Compositor maintains 60fps under load, audio never glitches under CPU saturation, input latency <10ms
 
 ### Phase 2: Workload Awareness and Optimization
 **Target: Dynamic adaptation to app types**
@@ -440,10 +497,12 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 
 3. **Rapid Burst for cold starts**
    - 1-second performance burst on app launch (cold start only)
-   - CPU governor → performance, nice -10, IO realtime
-   - Early termination on first frame presented
-   - Crash-loop and rate-limit protection
-   - Battery-aware: 500ms cap when <30% battery
+   - **CPU boost**: governor → performance, nice -10, IO realtime class
+   - **GPU boost**: governor → performance (AMD: `power_dpm_force_performance_level=high`), min_freq = max_freq
+   - Early termination on first frame presented (CPU+GPU+IO restore together)
+   - Crash-loop and rate-limit protection (max 3 bursts per 10 seconds per app)
+   - **Battery-aware**: 500ms cap + skip GPU boost when <30% battery
+   - **Thermal-aware**: Skip GPU boost in hot zone (>80°C)
 
 4. **Frame-aligned scheduling**
    - Compositor announces vsync deadline via SCP protocol
@@ -532,9 +591,11 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 
 ### Positive
 - **Guaranteed compositor responsiveness** - Frame timing independent of app load
+- **Guaranteed audio reliability** - Zero buffer underruns even under CPU saturation
 - **Game performance** - Maximum resources without security risk of RT priority
 - **Instant app launches** - Rapid Burst makes cold starts feel <500ms
-- **Clear hierarchy** - Easy to reason about priority model
+- **GPU launch boost** - First frame renders faster, critical for perceived responsiveness
+- **Clear hierarchy** - Easy to reason about priority model (audio > compositor > input > apps)
 - **No kernel fork** - Pure userspace policy on upstream Linux
 - **Proven approach** - Aligns with Android/ChromeOS/macOS production systems
 - **Power efficiency** - Aggressive background throttling saves battery
@@ -543,10 +604,11 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 - **Thermal safety** - Automatic throttling prevents overheating
 - **Observability** - Rich metrics for debugging performance issues
 - **First impression wins** - Apps feel fast at the moment users care most (launch)
+- **Audio prioritization** - Human ear is less forgiving than eye; audio glitches are worse than frame drops
 
 ### Negative
 - **Complexity** - More moving parts than simple CFS
-- **SCHED_FIFO risk** - Compositor bugs could freeze system (mitigated by watchdog)
+- **SCHED_FIFO risk** - Compositor/audio bugs could freeze system (mitigated by watchdog)
 - **Cgroup overhead** - Process migration cost on window focus
 - **Tuning required** - Optimal weights/thresholds need real-world data
 - **Background app impact** - Apps may feel sluggish when game active (intentional trade-off)
@@ -554,6 +616,8 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 - **Memory footprint** - Telemetry and tracing infrastructure adds overhead
 - **Rapid Burst abuse potential** - Apps crash-looping could waste power (mitigated by rate limiting)
 - **Cold vs warm detection complexity** - Heuristics may incorrectly classify starts
+- **GPU boost power draw** - Short-term power spike during burst (acceptable for <1s)
+- **Audio RT priority higher than compositor** - Audio bugs are now more critical (smaller, simpler code mitigates this)
 
 ### Neutral
 - **Platform OS approach** - We control the stack, so we can make these guarantees
@@ -561,23 +625,28 @@ if render_time > FRAME_BUDGET_60HZ * 1.5 {
 - **Power/performance trade-off** - Users on battery accept reduced performance for longer runtime
 - **Portal authorization required** - Apps can't self-elevate (security wins, but adds friction for legitimate use cases)
 - **Burst only on cold start** - Warm restarts don't get boost (acceptable since they're already fast)
+- **GPU governor platform-specific** - AMD/Intel/NVIDIA have different control interfaces (need per-platform code)
+- **Audio latency vs throughput** - Small buffers (low latency) require more frequent scheduling, higher overhead
 
 ## Verification
 
 Success criteria:
 1. **Frame timing consistency** - Compositor maintains 60fps (16.67ms frame time) under game load, <1% frame drops
-2. **Input latency** - <10ms mouse/keyboard event → frame present latency (measured end-to-end)
-3. **Game frame-time variance** - Reduced jitter compared to default CFS scheduler (measure with frame-time graphs)
-4. **Background isolation** - Frozen background apps consume <1% CPU
-5. **Multi-display independence** - 144Hz primary + 60Hz secondary without forced sync
-6. **Interaction boost effectiveness** - Typing latency <5ms during active editing
-7. **Power efficiency** - 15-20% longer battery life vs naive scheduling
-8. **Thermal stability** - No thermal throttling during typical workloads (<85°C sustained)
-9. **Cold start performance** - Apps launch in <500ms perceived time (with Rapid Burst vs >1s without)
-10. **Burst efficiency** - 80%+ of bursts terminate early on first frame (not hitting 1s cap)
+2. **Audio reliability** - Zero audio glitches (buffer underruns) even with CPU-bound apps at 100% load
+3. **Input latency** - <10ms mouse/keyboard event → frame present latency (measured end-to-end)
+4. **Game frame-time variance** - Reduced jitter compared to default CFS scheduler (measure with frame-time graphs)
+5. **Background isolation** - Frozen background apps consume <1% CPU
+6. **Multi-display independence** - 144Hz primary + 60Hz secondary without forced sync
+7. **Interaction boost effectiveness** - Typing latency <5ms during active editing
+8. **Power efficiency** - 15-20% longer battery life vs naive scheduling
+9. **Thermal stability** - No thermal throttling during typical workloads (<85°C sustained)
+10. **Cold start performance** - Apps launch in <500ms perceived time (with Rapid Burst vs >1s without)
+11. **Burst efficiency** - 80%+ of bursts terminate early on first frame (not hitting 1s cap)
+12. **Audio thread budget** - DSP thread uses <30% of buffer period on average
 
 Metrics to collect:
 - **Frame presentation timestamps** - Vsync hits/misses, frame time distribution
+- **Audio buffer metrics** - Buffer fill level, underruns, xruns, DSP thread execution time
 - **Input event latency** - Event timestamp → frame present timestamp delta
 - **CPU scheduling latency** - Trace with ftrace/bpftrace (wakeup → running time)
 - **Game benchmarks** - Frame-time graphs (0.1%/1%/avg), not just average FPS
@@ -586,8 +655,9 @@ Metrics to collect:
 - **Power consumption** - Battery drain rate per workload profile
 - **Thermal data** - CPU/GPU temperature over time under load
 - **App launch timing** - Cold start time (click → first frame), burst duration, early termination rate
-- **Rapid Burst effectiveness** - Distribution of burst durations, percentage hitting 1s cap vs early termination
+- **Rapid Burst effectiveness** - Distribution of burst durations, percentage hitting 1s cap vs early termination, GPU frequency during burst
 - **Cold vs warm detection accuracy** - Manual validation against heuristic classification
+- **Audio-specific metrics** - JACK/PipeWire xrun reports, DSP load percentage, client wakeup jitter
 
 Tools:
 - `ftrace` - Kernel scheduler events
