@@ -1,6 +1,8 @@
 pub mod manager;
 pub mod device;
 pub mod profile;
+pub mod wifi;
+pub mod vpn;
 
 use anyhow::Result;
 use zbus::Connection;
@@ -26,6 +28,26 @@ impl DbusService {
             .at(
                 "/org/sol/Network1",
                 manager::ManagerInterface::new(manager.clone()),
+            )
+            .await?;
+
+        // Register WiFi interface
+        // TODO: Register per-device WiFi interfaces dynamically
+        // For now, register a global WiFi interface
+        connection
+            .object_server()
+            .at(
+                "/org/sol/Network1/WiFi",
+                wifi::WiFiInterface::new(manager.clone(), String::new()),
+            )
+            .await?;
+
+        // Register VPN interface
+        connection
+            .object_server()
+            .at(
+                "/org/sol/Network1/VPN",
+                vpn::VpnInterface::new(manager.clone()),
             )
             .await?;
 

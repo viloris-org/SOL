@@ -26,19 +26,39 @@ Network management service for SOL OS. Handles device discovery, connection prof
 
 **Core Infrastructure**
 - NetworkManager with device/profile/connectivity state management
-- D-Bus service on `org.sol.Network1` with Manager/Device/Profile interfaces
+- D-Bus service on `org.sol.Network1` with Manager/Device/Profile/WiFi/VPN interfaces
 - Netlink integration via rtnetlink for device monitoring
 - Device abstraction (WiFi/Ethernet/VPN types with per-type handlers)
 
 **Device Management**
 - Interface discovery via netlink + /sys/class/net
 - Device state tracking (Unavailable → Active lifecycle)
-- Per-device-type specialization (WiFiDevice, EthernetDevice, VpnDevice scaffolds)
+- Per-device-type specialization (WiFiDevice, EthernetDevice, VpnDevice)
+
+**WiFi Support**
+- D-Bus WiFi interface (`org.sol.Network1.WiFi`)
+- WiFi device abstraction with iwd backend integration structure
+- Network scanning API (Scan, GetNetworks)
+- Connection/disconnection methods
+- Signal strength and current network properties
+- Enable/disable WiFi radio control
+- Network information dictionary (SSID, BSSID, signal, frequency, security)
+
+**VPN Support**
+- D-Bus VPN interface (`org.sol.Network1.VPN`)
+- WireGuard configuration structures with multi-peer support
+- VPN device abstraction
+- Profile management (create, list, delete)
+- Connection/disconnection methods
+- VPN status reporting (connection state, traffic statistics)
+- Support structures for OpenVPN and IPSec (implementation pending)
 
 **Profile System**
 - Connection profile storage (WiFi/Ethernet/VPN)
 - Profile-to-device activation flow
 - Auto-connect policy framework
+- WiFi profiles with security type and passphrase storage
+- VPN profiles (WireGuard/OpenVPN/IPSec configurations)
 - Profile persistence (structure ready, file I/O pending Phase 2)
 
 **DHCP Client**
@@ -62,20 +82,27 @@ Network management service for SOL OS. Handles device discovery, connection prof
 **Security**
 - SecretStore using ring for credential encryption (AES-256-GCM)
 - Separate encryption per profile (WiFi passphrase, VPN credentials)
+- Secure VPN private key storage
+- Credential handling without logging
 
 ### 🚧 Phase 2 Pending
 
-**WiFi**
-- nl80211 scanning implementation
-- WPA2/WPA3 authentication via wpa_supplicant or iwd
-- Signal strength monitoring
-- Network switching logic
+**WiFi Backend Integration**
+- Complete iwd D-Bus integration for real scanning
+- Real-time signal strength monitoring
+- Network quality metrics collection
+- Background scanning and roaming
+- WPS (WiFi Protected Setup)
+- Hidden network support
 
-**VPN**
-- WireGuard integration
-- OpenVPN support
-- Split tunneling
-- DNS leak prevention
+**VPN Backend Integration**
+- WireGuard kernel module integration via wireguard-control
+- Interface creation and IP configuration
+- Routing table management
+- Split tunneling support
+- OpenVPN backend implementation
+- IPSec/IKEv2 backend (strongSwan integration)
+- Automatic reconnection on network changes
 
 **Profile Persistence**
 - Profile file I/O (JSON or TOML)
@@ -86,36 +113,62 @@ Network management service for SOL OS. Handles device discovery, connection prof
 - IPv6 support (DHCPv6, SLAAC)
 - Connection prioritization (prefer ethernet, avoid metered)
 - Time/location-based auto-connect policies
-- Hotspot mode
+- Hotspot mode (AP + DHCP server)
+- 802.1X enterprise WiFi authentication
+- Traffic shaping and QoS
 
 ## D-Bus API
 
 ### org.sol.Network1.Manager
 
 **Methods:**
-- `ListDevices() -> a(so)` - Returns (index, object_path) pairs
-- `GetDevice(o device) -> a{sv}` - Device properties dict
-- `ListConnections() -> ao` - Active connection object paths
-- `ActivateConnection(s profile_id, o device) -> o` - Returns connection path
-- `AddProfile(a{sv} profile) -> s` - Returns profile_id
-- `GetProfiles() -> as` - Returns profile_id list
-- `CheckConnectivity() -> u` - Returns PortalState enum
-
-**Properties:**
-- `State: u` - NetworkState enum (Unknown/Disconnected/Connected/Limited)
-- `Connectivity: u` - PortalState enum (from captive portal check)
-- `PrimaryConnection: o` - Object path of active connection
+- `State() -> s` - Returns current network state string
+- `Connectivity() -> u` - Returns connectivity level (0=none, 1=portal, 2=limited, 3=full)
+- `ListDevices() -> ao` - Returns device object paths
+- `ConnectToProfile(s profile_id) -> o` - Returns active connection path
+- `DisconnectProfile(s profile_id) -> ()`
+- `ListProfiles() -> ao` - Returns profile object paths
 
 **Signals:**
+- `StateChanged(s new_state)` - Network state transition
+- `ConnectivityChanged(u new_level)` - Connectivity level changed
 - `DeviceAdded(o device)` - New device detected
 - `DeviceRemoved(o device)` - Device removed
-- `StateChanged(u new_state)` - Network state transition
-- `ConnectivityChanged(u new_state)` - Portal detection result
+
+### org.sol.Network1.WiFi
+
+**Methods:**
+- `Scan() -> ()` - Trigger WiFi network scan
+- `GetNetworks() -> aa{sv}` - Get available networks (SSID, BSSID, signal, security)
+- `Connect(ss ssid, ss passphrase) -> ()` - Connect to WiFi network
+- `Disconnect() -> ()` - Disconnect from current network
+
+**Properties:**
+- `SignalStrength: y` (readable) - Current signal strength (0-100)
+- `CurrentNetwork: s` (readable) - Currently connected SSID
+- `Enabled: b` (readwrite) - WiFi radio enabled state
+
+**Signals:**
+- `ScanComplete()` - Scan finished
+- `NetworkAdded(a{sv})` - New network detected
+
+### org.sol.Network1.VPN
+
+**Methods:**
+- `Connect(s profile_id) -> ()` - Connect to VPN
+- `Disconnect(s profile_id) -> ()` - Disconnect from VPN
+- `CreateWireGuardProfile(a{sv} config) -> s` - Create WireGuard profile, returns profile_id
+- `ListProfiles() -> as` - List VPN profile IDs
+- `GetStatus(s profile_id) -> a{sv}` - Get connection status (connected, bytes_sent, bytes_received)
+- `DeleteProfile(s profile_id) -> ()` - Delete VPN profile
+
+**Signals:**
+- `ConnectionStateChanged(s profile_id, b connected)` - VPN connection state changed
 
 ### org.sol.Network1.Device
 
 **Properties:**
-- `Type: s` - "wifi", "ethernet", "vpn"
+- `DeviceType: s` - "wifi", "ethernet", "vpn"
 - `State: s` - Device state string
 - `Interface: s` - Linux interface name (wlan0, eth0, etc.)
 
@@ -128,14 +181,16 @@ Network management service for SOL OS. Handles device discovery, connection prof
 **Properties:**
 - `Id: s` - Profile UUID
 - `Name: s` - User-visible name
-- `Type: s` - "wifi", "ethernet", "vpn"
-- `AutoConnect: b` - Auto-connect on availability
-- `Metered: b` - Treat as metered connection
+- `ProfileType: s` - "wifi", "ethernet", "vpn"
+- `AutoConnect: b` (readwrite) - Auto-connect on availability
+- `Metered: b` (readwrite) - Treat as metered connection
 
 **Methods:**
 - `Connect() -> o` - Activate and return connection path
 - `Disconnect() -> ()`
 - `Delete() -> ()`
+
+For complete API documentation, see [docs/dbus-api.md](docs/dbus-api.md).
 
 ## Building
 
@@ -167,8 +222,17 @@ Integration tests require D-Bus session bus and rtnetlink permissions.
 - **dhcproto** - DHCPv4 protocol implementation
 - **zbus** - D-Bus interface and service hosting
 - **ring** - Cryptographic primitives for secret storage
+- **wireguard-control** - WireGuard VPN configuration
+- **reqwest** - HTTP client for connectivity checking
 - **tokio** - Async runtime
 - **anyhow** - Error handling
+- **thiserror** - Error type derivation
+
+## External Dependencies
+
+- **iwd** (Intel's iNet Wireless Daemon) - WiFi backend (Phase 2)
+- **systemd-resolved** - DNS resolution
+- **WireGuard kernel module** - VPN tunneling (Phase 2)
 
 ## Architecture Notes
 
@@ -201,8 +265,9 @@ Profiles are stored in-memory (HashMap) in Phase 1. Phase 2 will persist to `~/.
 
 ## Future Work (Phase 2+)
 
-- [ ] WiFi nl80211 scanning and authentication
-- [ ] WireGuard VPN integration
+- [ ] Complete iwd D-Bus integration for WiFi scanning and authentication
+- [ ] WireGuard kernel module integration via wireguard-control
+- [ ] OpenVPN and IPSec backend implementations
 - [ ] Profile file persistence
 - [ ] IPv6 DHCPv6 and SLAAC
 - [ ] Hotspot mode (AP + DHCP server)
@@ -210,3 +275,13 @@ Profiles are stored in-memory (HashMap) in Phase 1. Phase 2 will persist to `~/.
 - [ ] Network cost awareness (prefer WiFi over cellular)
 - [ ] Captive portal web view integration
 - [ ] MAC address randomization
+- [ ] 802.1X enterprise WiFi authentication
+- [ ] mDNS/DNS-SD service discovery
+- [ ] Network Time Security (NTS) client
+
+## Documentation
+
+- [D-Bus API Reference](docs/dbus-api.md) - Complete API specification
+- [WiFi and VPN Usage Guide](docs/wifi-vpn-usage.md) - Usage examples with busctl and Python
+- [Implementation Status](docs/implementation-status.md) - Detailed phase-by-phase status
+- [Architecture Overview](docs/architecture.md) - System design and component interaction (coming soon)
