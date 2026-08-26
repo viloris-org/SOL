@@ -1,6 +1,6 @@
 [Unit]
 Description=SOL network time synchronization
-Documentation=https://www.rfc-editor.org/rfc/rfc5905
+Documentation=https://www.rfc-editor.org/rfc/rfc5905 https://www.rfc-editor.org/rfc/rfc8915
 Wants=network-online.target
 After=network-online.target
 
@@ -9,7 +9,7 @@ Type=simple
 ExecStart=/usr/bin/sol-ntpd
 Restart=on-failure
 RestartSec=30s
-Environment=SOL_NTP_SERVERS=0.pool.ntp.org,1.pool.ntp.org,2.pool.ntp.org
+Environment=SOL_NTS_SERVERS=time.cloudflare.com
 DynamicUser=yes
 AmbientCapabilities=CAP_SYS_TIME
 CapabilityBoundingSet=CAP_SYS_TIME

@@ -8,7 +8,11 @@ license.workspace = true
 publish = false
 
 [dependencies]
+aes-siv = "0.8.0"
+getrandom = "0.4.3"
 nix = { version = "0.30", features = ["time"] }
+rustls = { version = "0.23.37", default-features = false, features = ["ring", "std"] }
+webpki-roots = "1.0.9"
 
 [lints]
 workspace = true

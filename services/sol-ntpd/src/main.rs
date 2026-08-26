@@ -4,15 +4,17 @@ use std::thread;
 use std::time::Duration;
 
 use sol_ntpd::{
-    Adjustment, NtpClient, NtpError, StepPolicy, SystemClock, apply_sample, select_sample,
+    Adjustment, NtpClient, NtpError, NtsClient, StepPolicy, SystemClock, apply_sample,
+    select_sample,
 };
 
-const DEFAULT_SERVER: &str = "pool.ntp.org";
+const DEFAULT_NTS_SERVER: &str = "time.cloudflare.com";
 const MINIMUM_POLL_INTERVAL_SECONDS: u64 = 16;
 
 #[derive(Debug)]
 struct Options {
     servers: Vec<String>,
+    nts_servers: Vec<String>,
     timeout: Duration,
     interval: Duration,
     once: bool,
@@ -24,6 +26,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             servers: Vec::new(),
+            nts_servers: Vec::new(),
             timeout: Duration::from_secs(2),
             interval: Duration::from_secs(1_024),
             once: false,
@@ -51,8 +54,13 @@ fn main() -> ExitCode {
     };
 
     let client = NtpClient::new(options.timeout);
+    let mut nts_clients: Vec<_> = options
+        .nts_servers
+        .iter()
+        .map(|server| NtsClient::new(server, options.timeout))
+        .collect();
     loop {
-        if let Err(error) = synchronize_once(&client, &options) {
+        if let Err(error) = synchronize_once(&client, &mut nts_clients, &options) {
             eprintln!("sol-ntpd: synchronization failed: {error}");
             if options.once {
                 return ExitCode::FAILURE;
@@ -65,7 +73,11 @@ fn main() -> ExitCode {
     }
 }
 
-fn synchronize_once(client: &NtpClient, options: &Options) -> Result<(), NtpError> {
+fn synchronize_once(
+    client: &NtpClient,
+    nts_clients: &mut [NtsClient],
+    options: &Options,
+) -> Result<(), NtpError> {
     let mut samples = Vec::new();
     for server in &options.servers {
         match client.query(server) {
@@ -73,10 +85,17 @@ fn synchronize_once(client: &NtpClient, options: &Options) -> Result<(), NtpErro
             Err(error) => eprintln!("sol-ntpd: source {server} rejected: {error}"),
         }
     }
+    for (server, client) in options.nts_servers.iter().zip(nts_clients) {
+        match client.query() {
+            Ok(sample) => samples.push(sample),
+            Err(error) => eprintln!("sol-ntpd: NTS source {server} rejected: {error}"),
+        }
+    }
     let sample = select_sample(&samples).ok_or(NtpError::NoUsableSample)?;
     println!(
-        "sol-ntpd: source={} stratum={} offset={:+.6}s delay={:.6}s distance={:.6}s",
+        "sol-ntpd: source={} security={} stratum={} offset={:+.6}s delay={:.6}s distance={:.6}s",
         sample.server,
+        if sample.authenticated { "NTS" } else { "NTP" },
         sample.stratum,
         sample.offset_seconds,
         sample.delay_seconds,
@@ -105,6 +124,9 @@ fn parse_options(arguments: impl IntoIterator<Item = String>) -> Result<Options,
             "--server" => options
                 .servers
                 .push(next_value(&mut arguments, "--server")?),
+            "--nts-server" => options
+                .nts_servers
+                .push(next_value(&mut arguments, "--nts-server")?),
             "--timeout-ms" => {
                 let milliseconds =
                     parse_positive_u64(&next_value(&mut arguments, "--timeout-ms")?, "timeout")?;
@@ -133,21 +155,28 @@ fn parse_options(arguments: impl IntoIterator<Item = String>) -> Result<Options,
         }
     }
 
-    if options.servers.is_empty() {
-        options.servers = env::var("SOL_NTP_SERVERS")
-            .ok()
-            .map(|servers| {
-                servers
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|server| !server.is_empty())
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .filter(|servers: &Vec<String>| !servers.is_empty())
-            .unwrap_or_else(|| vec![DEFAULT_SERVER.to_owned()]);
+    if options.servers.is_empty() && options.nts_servers.is_empty() {
+        options.nts_servers = servers_from_environment("SOL_NTS_SERVERS");
+        options.servers = servers_from_environment("SOL_NTP_SERVERS");
+        if options.servers.is_empty() && options.nts_servers.is_empty() {
+            options.nts_servers.push(DEFAULT_NTS_SERVER.to_owned());
+        }
     }
     Ok(options)
+}
+
+fn servers_from_environment(name: &str) -> Vec<String> {
+    env::var(name)
+        .ok()
+        .map(|servers| {
+            servers
+                .split(',')
+                .map(str::trim)
+                .filter(|server| !server.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn next_value(
@@ -175,6 +204,7 @@ const fn usage() -> &'static str {
      \n\
      Options:\n\
        --server HOST[:PORT]       Add an NTP source (repeatable)\n\
+       --nts-server HOST[:PORT]   Add an NTS-KE source (repeatable)\n\
        --timeout-ms MILLISECONDS  Per-address timeout (default: 2000)\n\
        --interval SECONDS         Poll interval, minimum 16 (default: 1024)\n\
        --panic-threshold SECONDS  Reject larger clock steps (default: 1000)\n\
@@ -182,7 +212,8 @@ const fn usage() -> &'static str {
        --dry-run                  Measure without setting CLOCK_REALTIME\n\
        -h, --help                 Show this help\n\
      \n\
-     SOL_NTP_SERVERS may contain a comma-separated source list."
+     SOL_NTS_SERVERS and SOL_NTP_SERVERS accept comma-separated source lists.\n\
+     With no configured sources, NTS via time.cloudflare.com is used."
 }
 
 #[cfg(test)]
@@ -205,6 +236,15 @@ mod tests {
         assert_eq!(options.servers, ["one.example", "127.0.0.1:8123"]);
         assert!(options.once);
         assert!(options.dry_run);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_nts_server() -> Result<(), String> {
+        let options =
+            parse_options(["--nts-server", "nts.example:4460", "--once"].map(str::to_owned))?;
+        assert_eq!(options.nts_servers, ["nts.example:4460"]);
+        assert!(options.servers.is_empty());
         Ok(())
     }
 

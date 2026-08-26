@@ -1,9 +1,15 @@
-//! Small, dependency-light `NTPv4` client used by the SOL time service.
+//! `NTPv4` and Network Time Security client used by the SOL time service.
 //!
 //! The implementation intentionally supports only unicast client/server mode.
 //! It validates response provenance and timestamps, calculates the RFC 5905
 //! offset and delay, and offers conservative sample selection and clock-step
-//! policy. It does not implement an NTP server, symmetric modes, or NTS.
+//! policy. NTS support implements RFC 8915 key establishment over TLS 1.3 and
+//! authenticated NTP extension fields. It does not implement an NTP server or
+//! symmetric modes.
+
+mod nts;
+
+pub use nts::NtsClient;
 
 use std::error::Error;
 use std::fmt;
@@ -15,6 +21,7 @@ const NTP_HEADER_LEN: usize = 48;
 const NTP_UNIX_EPOCH_OFFSET: i128 = 2_208_988_800;
 const FRACTION_SCALE: f64 = 4_294_967_296.0;
 const DEFAULT_NTP_PORT: u16 = 123;
+const QUERY_ATTEMPTS_PER_ADDRESS: usize = 2;
 
 /// Default upper bound for total synchronization distance.
 pub const DEFAULT_MAX_ROOT_DISTANCE: Duration = Duration::from_secs(16);
@@ -41,6 +48,10 @@ pub enum NtpError {
     },
     /// Reading or setting the platform clock failed.
     Clock(String),
+    /// NTS key establishment or packet construction failed.
+    Nts(String),
+    /// An NTS response failed authenticated decryption or replay checks.
+    NtsAuthentication,
 }
 
 impl fmt::Display for NtpError {
@@ -59,6 +70,8 @@ impl fmt::Display for NtpError {
                 "NTP offset {offset_seconds:.3}s exceeds panic threshold {limit_seconds:.3}s"
             ),
             Self::Clock(reason) => write!(formatter, "cannot update system clock: {reason}"),
+            Self::Nts(reason) => write!(formatter, "NTS failed: {reason}"),
+            Self::NtsAuthentication => formatter.write_str("NTS response authentication failed"),
         }
     }
 }
@@ -170,6 +183,8 @@ pub struct NtpSample {
     pub reference_id: [u8; 4],
     /// Leap indicator supplied by the server.
     pub leap: u8,
+    /// Whether this measurement was authenticated using NTS.
+    pub authenticated: bool,
 }
 
 /// Network client configuration.
@@ -220,9 +235,11 @@ impl NtpClient {
 
         let mut last_error = None;
         for address in addresses {
-            match self.query_addr(address) {
-                Ok(sample) => return Ok(sample),
-                Err(error) => last_error = Some(error),
+            for _ in 0..QUERY_ATTEMPTS_PER_ADDRESS {
+                match self.query_addr(address) {
+                    Ok(sample) => return Ok(sample),
+                    Err(error) => last_error = Some(error),
+                }
             }
         }
         Err(last_error.unwrap_or_else(|| NtpError::NoAddress(server.to_owned())))
@@ -258,12 +275,8 @@ impl NtpClient {
         let arrived = SystemTime::now();
         let destination = NtpTimestamp::from_system_time(arrived)?;
         let response = parse_response(&response_bytes[..received_len], transmit)?;
-        let sample = response.into_sample(server, transmit, destination);
-        if sample.root_distance_seconds > self.max_root_distance.as_secs_f64() {
-            return Err(NtpError::InvalidResponse(
-                "root synchronization distance is too large",
-            ));
-        }
+        let sample = response.into_sample(server, transmit, destination, false);
+        validate_root_distance(&sample, self.max_root_distance)?;
         Ok(sample)
     }
 }
@@ -281,17 +294,25 @@ pub fn query_sources(client: &NtpClient, servers: &[String]) -> Vec<NtpSample> {
 ///
 /// With three or more sources, samples outside four median absolute
 /// deviations (with a 50 ms floor) are rejected. The survivor nearest the
-/// median wins, with root distance and stratum used as tie-breakers.
+/// median wins, with root distance and stratum used as tie-breakers. If any
+/// authenticated samples are available, unauthenticated samples are excluded
+/// so a classic NTP source cannot downgrade an NTS synchronization round.
 #[must_use]
 pub fn select_sample(samples: &[NtpSample]) -> Option<&NtpSample> {
     if samples.is_empty() {
         return None;
     }
-    let mut offsets: Vec<f64> = samples.iter().map(|sample| sample.offset_seconds).collect();
+    let require_authentication = samples.iter().any(|sample| sample.authenticated);
+    let eligible = |sample: &&NtpSample| !require_authentication || sample.authenticated;
+    let mut offsets: Vec<f64> = samples
+        .iter()
+        .filter(eligible)
+        .map(|sample| sample.offset_seconds)
+        .collect();
     offsets.sort_by(f64::total_cmp);
     let median = median_of_sorted(&offsets);
 
-    let tolerance = if samples.len() >= 3 {
+    let tolerance = if offsets.len() >= 3 {
         let mut deviations: Vec<f64> = offsets
             .iter()
             .map(|offset| (offset - median).abs())
@@ -304,6 +325,7 @@ pub fn select_sample(samples: &[NtpSample]) -> Option<&NtpSample> {
 
     samples
         .iter()
+        .filter(eligible)
         .filter(|sample| (sample.offset_seconds - median).abs() <= tolerance)
         .min_by(|left, right| {
             let left_key = (left.offset_seconds - median).abs();
@@ -432,6 +454,7 @@ impl ServerResponse {
         server: SocketAddr,
         origin: NtpTimestamp,
         destination: NtpTimestamp,
+        authenticated: bool,
     ) -> NtpSample {
         let outbound = self.receive.seconds_since(origin);
         let inbound = self.transmit.seconds_since(destination);
@@ -450,6 +473,7 @@ impl ServerResponse {
             root_distance_seconds,
             reference_id: self.reference_id,
             leap: self.leap,
+            authenticated,
         }
     }
 }
@@ -509,6 +533,11 @@ fn parse_response(bytes: &[u8], expected_origin: NtpTimestamp) -> Result<ServerR
     if receive.raw() == 0 || transmit.raw() == 0 {
         return Err(NtpError::InvalidResponse("server timestamp is zero"));
     }
+    if transmit.seconds_since(receive).is_sign_negative() {
+        return Err(NtpError::InvalidResponse(
+            "server transmit timestamp precedes receive timestamp",
+        ));
+    }
 
     Ok(ServerResponse {
         leap,
@@ -527,6 +556,21 @@ fn parse_response(bytes: &[u8], expected_origin: NtpTimestamp) -> Result<ServerR
         receive,
         transmit,
     })
+}
+
+fn validate_root_distance(sample: &NtpSample, maximum: Duration) -> Result<(), NtpError> {
+    if !sample.offset_seconds.is_finite()
+        || !sample.delay_seconds.is_finite()
+        || !sample.root_distance_seconds.is_finite()
+    {
+        return Err(NtpError::InvalidResponse("non-finite timing measurement"));
+    }
+    if sample.root_distance_seconds > maximum.as_secs_f64() {
+        return Err(NtpError::InvalidResponse(
+            "root synchronization distance is too large",
+        ));
+    }
+    Ok(())
 }
 
 fn read_timestamp(bytes: &[u8], offset: usize) -> Result<NtpTimestamp, NtpError> {
@@ -666,7 +710,7 @@ mod tests {
         let t3 = timestamp(1_000, 150_000_000);
         let t4 = timestamp(1_000, 75_000_000);
         let parsed = parse_response(&response(t1, t2, t3), t1)?;
-        let sample = parsed.into_sample(SocketAddr::from(([127, 0, 0, 1], 123)), t1, t4);
+        let sample = parsed.into_sample(SocketAddr::from(([127, 0, 0, 1], 123)), t1, t4, false);
         assert!((sample.offset_seconds - 0.100).abs() < 0.000_001);
         assert!((sample.delay_seconds - 0.050).abs() < 0.000_001);
         Ok(())
@@ -684,6 +728,22 @@ mod tests {
             parse_response(&packet, t1),
             Err(NtpError::InvalidResponse(
                 "origin timestamp does not match request"
+            ))
+        ));
+    }
+
+    #[test]
+    fn rejects_reversed_server_timestamps() {
+        let t1 = timestamp(1_000, 0);
+        let packet = response(
+            t1,
+            timestamp(1_000, 200_000_000),
+            timestamp(1_000, 100_000_000),
+        );
+        assert!(matches!(
+            parse_response(&packet, t1),
+            Err(NtpError::InvalidResponse(
+                "server transmit timestamp precedes receive timestamp"
             ))
         ));
     }
@@ -714,10 +774,34 @@ mod tests {
             root_distance_seconds: 0.020,
             reference_id: [0; 4],
             leap: 0,
+            authenticated: false,
         };
         let samples = [sample(0.010), sample(0.011), sample(60.0)];
         let selected = select_sample(&samples).ok_or(NtpError::NoUsableSample)?;
         assert!((selected.offset_seconds - 0.011).abs() < f64::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn authenticated_sample_prevents_downgrade() -> Result<(), NtpError> {
+        let sample = |offset_seconds, authenticated| NtpSample {
+            server: SocketAddr::from(([127, 0, 0, 1], 123)),
+            stratum: 2,
+            offset_seconds,
+            delay_seconds: 0.010,
+            root_distance_seconds: 0.020,
+            reference_id: [0; 4],
+            leap: 0,
+            authenticated,
+        };
+        let samples = [
+            sample(0.010, false),
+            sample(0.011, false),
+            sample(2.0, true),
+        ];
+        let selected = select_sample(&samples).ok_or(NtpError::NoUsableSample)?;
+        assert!(selected.authenticated);
+        assert!((selected.offset_seconds - 2.0).abs() < f64::EPSILON);
         Ok(())
     }
 
@@ -755,6 +839,7 @@ mod tests {
             root_distance_seconds: 0.02,
             reference_id: [0; 4],
             leap: 0,
+            authenticated: false,
         };
         assert_eq!(
             apply_sample(&clock, &sample, StepPolicy::default())?,
