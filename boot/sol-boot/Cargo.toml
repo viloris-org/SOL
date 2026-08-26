@@ -14,6 +14,14 @@ path = "src/lib.rs"
 name = "sol-boot"
 path = "src/main.rs"
 
+[[bin]]
+name = "sol-boot-test-payload"
+path = "src/test_payload.rs"
+required-features = ["ovmf-test-payload"]
+
+[features]
+ovmf-test-payload = []
+
 [dependencies]
 ed25519-dalek = { version = "2.2", default-features = false, features = ["fast"] }
 sha2 = { version = "0.10", default-features = false }

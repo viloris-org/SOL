@@ -83,10 +83,13 @@ removes it before trying `recovery-a.efi`, then `recovery-b.efi`.
 
 ## Validation and current qualification boundary
 
-Run `scripts/test-ovmf.sh` after building to verify that OVMF executes the
-application and reaches its fail-closed recovery path. Host tests cover
-signature/artifact corruption, A/B fallback, exact durable read-back, report
-promotion, EDID parsing/mode decisions, and bounded rendering.
+Run `scripts/test-ovmf.sh` to build an isolated test-key image and verify both
+the fail-closed recovery path and a complete signed A/B trial. The harness
+boots the trial payload through UEFI `LoadImage`/`StartImage`, checks the exact
+durable attempt report, submits it as the health result, and verifies that the
+next boot promotes the deployment to known-good. Host tests cover signature/
+artifact corruption, A/B fallback, exact durable read-back, report promotion,
+EDID parsing/mode decisions, and bounded rendering.
 
 The current UEFI adapter preserves the usable firmware mode and renders via
 GOP BLT. EDID preferred-mode parsing and selection are implemented and tested,
