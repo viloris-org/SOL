@@ -3,11 +3,11 @@
 This directory is reserved for the Phase 8–9 native package work defined by
 [ADR-0020](../../docs/decisions/0020-sol-package-app-runtime.md).
 
-Planned ownership:
+Ownership:
 
 ```text
 packaging/sol/
-├── bundle/         .app manifest, deterministic build, signing, inspection
+├── bundle/         implemented .app content manifest, signing, lineage, verification CLI
 ├── client/         sol-pkg CLI and unprivileged API client
 ├── daemon/         sol-packaged privileged transaction authority
 ├── repository/     signed metadata, channels, revocation, transparency

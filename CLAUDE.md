@@ -2,6 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Product Philosophy
+
+SOL is a **Linux Family OS** (like Android/Chrome OS), not a Linux distribution (like Ubuntu/Fedora):
+
+- **No legacy compatibility** - We don't run arbitrary GTK/Qt/Wayland apps
+- **Native-first** - Apps are built with SolKit SDK specifically for SOL
+- **Curated ecosystem** - App store with reviewed apps, not a package manager
+- **Platform security** - Capability model enforced by the OS, not optional
+- **Atomic updates** - Image-based system, not package-by-package upgrades
+
+This means: **No Wayland compatibility layer** (see ADR-0028). Third-party apps adapt through the `sol-runtime` SDK, similar to how Android apps use the Android SDK rather than raw Linux syscalls.
+
+When working on SOL code, remember:
+- We're building a new platform, not maintaining compatibility with existing Linux desktop apps
+- Security and consistency come before ecosystem size
+- The compositor speaks **only SCP** (SOL Compositor Protocol), not Wayland
+- Apps that want to run on SOL must explicitly target it
+
 ## Build & Run
 
 ```bash
@@ -40,7 +58,7 @@ cargo build -p sol-compositor --features udev
 
 ## Architecture (Big Picture)
 
-SOL is a layered Wayland-native desktop platform built from the ground up:
+SOL is a layered Linux Family platform built from the ground up:
 
 ```
 Applications  (apps/)   sol-files, sol-terminal, sol-settings
@@ -51,21 +69,24 @@ Runtime       (services/) sol-settingsd, sol-notificationd, sol-portal, sol-ime
 ─────────────
 Shell         (shell/)  sol-shell — top bar, dock, launcher, overview
 ─────────────
-Compositor    (compositor/) sol-compositor — Smithay Wayland compositor
+Compositor    (compositor/) sol-compositor — SCP (SOL Compositor Protocol) only
 ─────────────
 Linux         Arch/systemd/kernel/etc.
 ```
 
 ### Compositor (`compositor/`)
-Core is `src/state.rs` containing `SolState` which owns all Smithay protocol state. The `main.rs` is a thin winit/udev backend event loop. Key components:
-- `state.rs`: `SolState` - protocol handlers and state
+Core is `src/state.rs` containing `SolState` which owns the SCP protocol state and window management. The `main.rs` is a thin winit/udev backend event loop. Key components:
+- `state.rs`: `SolState` - SCP protocol handlers and state
 - `main.rs`: backend event loops (`run_winit`, `run_headless`)
+- `scp/`: SOL Compositor Protocol implementation (capability-based security)
 - `window.rs`: `WindowManager` - window layout, hit-testing, focus
 - `grabs.rs`: interactive move/resize grab handlers
 - `outputs.rs`: output management (add/remove outputs, HiDPI scale)
 
+**Protocol**: SOL uses SCP (SOL Compositor Protocol) exclusively. No Wayland compatibility (see ADR-0028).
+
 ### Shell (`shell/`)
-Desktop shell (top bar, dock, launcher). Runs as a separate process from the compositor for crash safety. Communicates via layer-shell protocol and D-Bus IPC (ADR-0006). Currently a scaffold/placeholder.
+Desktop shell (top bar, dock, launcher). Runs as a separate process from the compositor for crash safety. Communicates via SCP layer-shell capability and D-Bus IPC (ADR-0006). Currently a scaffold/placeholder.
 
 ### SDK Crates (`sdk/`)
 - `sol-design`: Design tokens (color, typography, spacing, motion) - single source of truth
@@ -83,30 +104,37 @@ Desktop shell (top bar, dock, launcher). Runs as a separate process from the com
 
 ## Key Architectural Principles
 
-1. **Compositor state ownership**: `SolState` owns all protocol state. Backends only drive it.
+1. **Compositor state ownership**: `SolState` owns all SCP protocol state. Backends only drive it.
 2. **Shell crash safety**: Shell is a separate process; compositor must not die if shell crashes.
 3. **Consistency via tokens**: Visual parameters live in `sol-design`; components use tokens only.
-4. **No XWayland**: Wayland-native only (PRD §4.2).
+4. **No legacy compatibility**: No XWayland, no Wayland (ADR-0028). SCP only.
 5. **Framework first**: Behavior comes from SolKit, not per-app conventions.
+6. **Linux Family OS**: Like Android, apps target SOL explicitly through sol-runtime SDK.
 
 ## Testing
 
-The integration test (`compositor/tests/sol_session.rs`) validates end-to-end Wayland protocol round-trips:
+The integration test (`compositor/tests/sol_session.rs`) validates end-to-end SCP protocol round-trips:
 - Spawns compositor in headless mode
 - Waits for socket
-- Runs test client against it
+- Runs SCP test client against it
 - Asserts successful toplevel configure round-trip
 
 ## Common Tasks
 
-### Start compositor with custom socket
+### Start compositor in development mode
 ```bash
-SOL_WAYLAND_SOCKET=my-sol WAYLAND_DISPLAY=wayland-sol cargo run -p sol-compositor -- --spawn weston-terminal
+# Run in winit backend (window on host Wayland/X11 session)
+cargo run -p sol-compositor
+
+# Run headless (no GPU, for CI/tests)
+cargo run -p sol-compositor -- --headless
 ```
 
-### Run a Wayland client against the compositor
+### Test with SCP clients
 ```bash
-WAYLAND_DISPLAY=wayland-sol weston-terminal
+# Run example SCP clients
+cargo run -p sol-compositor --example scp-client
+cargo run -p sol-compositor --example popup-client
 ```
 
 ### Run formatter

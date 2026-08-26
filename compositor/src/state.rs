@@ -258,7 +258,9 @@ impl XdgShellHandler for SolState {
         if !pointer.has_grab(serial) {
             return;
         }
-        let start_data = pointer.grab_start_data().unwrap();
+        let Some(start_data) = pointer.grab_start_data() else {
+            return;
+        };
 
         // Only honor the move if the grab's focus belongs to this surface.
         let same_client = start_data
@@ -300,7 +302,9 @@ impl XdgShellHandler for SolState {
         if !pointer.has_grab(serial) {
             return;
         }
-        let start_data = pointer.grab_start_data().unwrap();
+        let Some(start_data) = pointer.grab_start_data() else {
+            return;
+        };
 
         let same_client = start_data
             .focus

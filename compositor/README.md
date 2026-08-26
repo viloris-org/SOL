@@ -1,6 +1,24 @@
 # sol-compositor
 
-SOL's Wayland compositor, built on [Smithay].
+SOL's compositor. The native frontend is SCP (SOL Compositor Protocol); the
+Smithay/Wayland frontend remains temporarily while SCP rendering is brought up.
+
+## Native SCP quick start
+
+The compositor always opens `$XDG_RUNTIME_DIR/sol-compositor-0` (override the
+name with `SOL_SCP_SOCKET`). Messages use a 4-byte big-endian length prefix;
+buffer descriptors travel through `SCM_RIGHTS`.
+
+```bash
+# Terminal 1
+cargo run -p sol-compositor -- --headless
+
+# Terminal 2
+cargo run -p sol-compositor --example scp-client
+```
+
+The example performs a real authenticated connect → surface → toplevel
+round-trip. It does not simulate responses.
 
 ## Status
 
@@ -64,6 +82,7 @@ touch the user's live clipboard or prove drag-and-drop behavior.
 
 | Variable | Meaning | Default |
 |---|---|---|
+| `SOL_SCP_SOCKET` | Native SCP socket name or absolute path | `sol-compositor-0` |
 | `SOL_WAYLAND_SOCKET` | Compositor listener socket name | `wayland-sol` |
 
 ## Architecture
@@ -72,6 +91,8 @@ touch the user's live clipboard or prove drag-and-drop behavior.
   `CompositorHandler`, `ShmHandler`, `XdgShellHandler`, `SeatHandler`,
   `DataDeviceHandler` implementations.
 - `src/main.rs` — winit/headless entry points and shared client helpers.
+- `src/scp/transport.rs` — native Unix socket, framing, peer credentials, and FD passing.
+- `src/scp/state.rs` — authenticated sessions, capabilities, and SCP object routing.
 - `src/udev_runtime.rs` — libseat/libinput session lifecycle and the
   DRM/GBM/EGL/KMS event loop selected by `--tty-udev`.
 - `examples/test-client.rs` — the reference Wayland client used by the test.

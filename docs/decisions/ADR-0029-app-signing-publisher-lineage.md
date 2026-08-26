@@ -100,9 +100,9 @@ message PublisherLineage {
 }
 
 message SignerConfig {
-  bytes certificate = 1;         // X.509 cert or raw public key
-  bytes signed_data = 2;         // SignedSignerConfig serialized
-  repeated Signature signatures = 3;  // signature(s) over signed_data
+  bytes certificate = 1;                  // X.509 cert or raw public key (32 bytes for Ed25519)
+  optional bytes signed_data = 2;         // SignedSignerConfig serialized (absent for last node)
+  repeated Signature signatures = 3;      // signature(s) over signed_data (empty for last node)
 }
 
 message SignedSignerConfig {
@@ -113,7 +113,7 @@ message SignedSignerConfig {
 
 message RotationMetadata {
   string reason = 1;      // "key_expiry", "security_upgrade", "compromise_recovery"
-  int64 timestamp = 2;
+  int64 timestamp = 2;    // Unix timestamp in UTC
   string description = 3; // human-readable explanation
 }
 ```
@@ -145,15 +145,16 @@ signers[1]: SignerConfig {
 
 signers[2]: SignerConfig {
   certificate: Key C's cert
-  signed_data: NULL  // current key, no next signer
+  signed_data: <absent>  // current key, no next signer (field not set)
   signatures: []
 }
 ```
 
-**Verification logic (mirrors APK v3, with DOS protection):**
+**Verification logic (mirrors APK v3, with DOS protection and circular reference detection):**
 
 ```rust
 const MAX_LINEAGE_LENGTH: usize = 100;  // DOS protection
+const MAX_LINEAGE_VERIFY_TIME_MS: u64 = 100;  // timeout protection
 
 pub fn verify_lineage(lineage: &PublisherLineage) -> Result<VerifiedLineage> {
     // DOS protection: reject excessively long chains
@@ -164,10 +165,16 @@ pub fn verify_lineage(lineage: &PublisherLineage) -> Result<VerifiedLineage> {
         });
     }
     
+    let start = std::time::Instant::now();
     let mut verified_keys = Vec::new();
     let mut seen_keys = HashSet::new();
     
     for i in 0..lineage.signers.len() {
+        // Check timeout on every iteration (not just every 10)
+        if start.elapsed().as_millis() > MAX_LINEAGE_VERIFY_TIME_MS as u128 {
+            return Err(LineageError::VerificationTimeout);
+        }
+        
         let signer = &lineage.signers[i];
         
         // Extract current key
@@ -180,20 +187,37 @@ pub fn verify_lineage(lineage: &PublisherLineage) -> Result<VerifiedLineage> {
         
         if i < lineage.signers.len() - 1 {
             // Not the last key - must sign next key
-            let signed = deserialize::<SignedSignerConfig>(&signer.signed_data)?;
+            let signed = deserialize::<SignedSignerConfig>(
+                &signer.signed_data.as_ref()
+                    .ok_or(LineageError::MissingSignedData { index: i })?
+            )?;
             let next_cert = &signed.next_signer_certificate;
+            
+            // CRITICAL: Prevent forward references (circular detection)
+            let next_key = extract_public_key(next_cert)?;
+            if seen_keys.contains(&next_key.fingerprint()) {
+                return Err(LineageError::CircularReference { 
+                    index: i,
+                    next_index: i + 1,
+                });
+            }
             
             // CRITICAL: Verify signature using algorithm specified in SignedSignerConfig
             verify_signature_with_algorithm(
                 &current_key,
                 &signer.signatures[0],
-                &signer.signed_data,
+                signer.signed_data.as_ref().unwrap(),
                 signed.algorithm,  // Explicitly use declared algorithm
             )?;
             
             // Ensure next_cert matches next signer
             if next_cert != &lineage.signers[i + 1].certificate {
                 return Err(LineageError::BrokenChain { index: i });
+            }
+        } else {
+            // Last key: must not have signed_data
+            if signer.signed_data.is_some() {
+                return Err(LineageError::LastNodeHasSignedData);
             }
         }
         
@@ -262,6 +286,7 @@ pub fn verify_app_bundle(bundle: &AppBundle) -> Result<VerifiedIdentity, Signatu
     }
     
     // CRITICAL: All signers must be valid (reject if any invalid)
+    // This prevents attackers from adding their own signature alongside legitimate ones
     if !failed_signers.is_empty() {
         return Err(SignatureError::InvalidSignersPresent {
             valid_count: verified_signers.len(),
@@ -294,6 +319,7 @@ pub fn verify_app_bundle(bundle: &AppBundle) -> Result<VerifiedIdentity, Signatu
     // 5. Build verified identity (primary = signers[0])
     Ok(VerifiedIdentity {
         app_id: manifest.app_id.clone(),
+        version_code: manifest.version_code,  // NEW: monotonic version for replay protection
         publisher_lineage: verified_signers[0].lineage.clone(),
         bundle_hash: compute_bundle_hash(bundle),
         signed_at: verified_signers[0].signed_at,
@@ -316,10 +342,12 @@ fn verify_signer_with_lineage(
         read_protobuf::<PublisherLineage>(&lineage_path)?
     } else {
         // First signing - create implicit single-node lineage
+        // Note: lineage file is NOT created during first signing
+        // It will be created on first rotate-key operation
         PublisherLineage {
             signers: vec![SignerConfig {
                 certificate: signer.public_key.clone(),
-                signed_data: vec![],
+                signed_data: None,  // No rotation yet
                 signatures: vec![],
             }],
             version: 1,
@@ -349,9 +377,9 @@ fn verify_signer(signer: &Signer, manifest: &Manifest) -> Result<PublicKey, Sign
     let public_key = PublicKey::from_bytes(&signer.public_key)?;
     let signed_data = deserialize::<SignedData>(&signer.signed_data)?;
     
-    // CRITICAL: Check timestamp within validity period
+    // CRITICAL: Check timestamp within validity period (all timestamps are Unix epoch UTC)
     if let Some(validity) = &signer.validity {
-        let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(signed_data.timestamp);
+        let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(signed_data.timestamp as u64);
         
         if timestamp < validity.not_before {
             return Err(SignatureError::KeyNotYetValid {
@@ -450,18 +478,19 @@ pub fn check_grant_inheritance(
         return GrantInheritance::Discontinuous;
     }
     
-    // For multi-signer bundles, check if ANY old signer's lineage
-    // extends to ANY new signer (company merger scenario)
-    for old_signer in &old_identity.all_signers {
-        for new_signer in &new_identity.all_signers {
-            if lineage_extends(&new_signer.lineage, &old_signer.lineage) {
-                return GrantInheritance::SameLineage {
-                    inherited: true,
-                    old_root: old_signer.lineage.root_key.clone(),
-                    new_current: new_signer.lineage.current_key.clone(),
-                };
-            }
-        }
+    // CRITICAL: Only check primary signer (signers[0]) for lineage continuity
+    // This prevents attacks where attacker adds their signature alongside legitimate one
+    // Multi-signer scenarios (company merger) must establish lineage continuity
+    // through the primary signer's lineage extending to cover all historical roots
+    let old_primary = &old_identity.publisher_lineage;
+    let new_primary = &new_identity.publisher_lineage;
+    
+    if lineage_extends(new_primary, old_primary) {
+        return GrantInheritance::SameLineage {
+            inherited: true,
+            old_root: old_primary.root_key.clone(),
+            new_current: new_primary.current_key.clone(),
+        };
     }
     
     GrantInheritance::Discontinuous
@@ -563,6 +592,7 @@ Inspired by Android APK v2 digests, covers all bundle content:
   "format_version": 2,
   "app_id": "com.example.editor",
   "version": "2.4.1",
+  "version_code": 241,
   "bundle_sections": {
     "app_toml": {
       "path": "App.toml",
@@ -592,6 +622,8 @@ Inspired by Android APK v2 digests, covers all bundle content:
 }
 ```
 
+**New field: `version_code`** — Monotonically increasing integer for replay attack protection. The installer (sol-packaged) rejects installations where `new_version_code <= installed_version_code`, preventing attackers from downgrading to older signed versions with known vulnerabilities.
+
 **Why section-based?** Inspired by APK v2's "four regions" approach:
 - Fast partial verification (check only executables if resources unchanged)
 - Clear separation of content types
@@ -617,10 +649,11 @@ message Signer {
 message SignedData {
   string app_id = 1;
   string version = 2;
-  bytes manifest_digest = 3;   // SHA-256 of manifest.json
-  bytes content_digest = 4;    // total_content_hash from manifest
-  int64 timestamp = 5;
-  repeated Digest additional_digests = 6;  // future: SHA-512, BLAKE3
+  uint64 version_code = 3;         // monotonic version for replay protection
+  bytes manifest_digest = 4;       // SHA-256 of manifest.json
+  bytes content_digest = 5;        // total_content_hash from manifest
+  int64 timestamp = 6;             // Unix timestamp in UTC (seconds since epoch)
+  repeated Digest additional_digests = 7;  // future: SHA-512, BLAKE3
 }
 
 message Signature {
@@ -657,6 +690,7 @@ repository-metadata.json (signed by repo key):
     {
       "app_id": "com.example.editor",
       "version": "2.4.1",
+      "version_code": 241,
       "bundle_hash": "...",
       "publisher_fingerprint": "...",  # first key in lineage
       "release_date": "2026-08-26",
@@ -667,9 +701,18 @@ repository-metadata.json (signed by repo key):
 }
 ```
 
-**Two-layer trust:**
-1. **Repository trust**: SOL ships with trusted repo public keys
-2. **Publisher trust**: Repository vouches for publisher identity; lineage proves continuity
+**Two-layer trust model:**
+1. **App bundle signature**: Verifies publisher identity and content integrity (verified independently)
+2. **Repository metadata signature**: Repository vouches that this app was reviewed and approved
+   - Signature covers metadata.json only (NOT the app bundles themselves)
+   - Each app bundle is verified using its own embedded signatures
+   - Repository cannot forge app signatures (only publishers have their private keys)
+
+**Trust boundaries:**
+- SOL ships with trusted repository public keys (built into OS)
+- Repository metadata provides revocation status and additional context
+- App bundles are cryptographically verified independently of repository
+- Compromise of repository key cannot forge app signatures
 
 ### 8. Key rotation scenarios (APK v3 style)
 
@@ -897,6 +940,25 @@ $ sol-bundle add-signer Example.app \
   ]
 }
 
+// Revocation cache state machine
+enum CacheState {
+    Fresh,       // age < 24h - use without warning
+    Stale,       // age 24h-48h - use with warning
+    Expired,     // age > 48h - warn loudly, block if policy requires
+    Missing,     // no cache file - offline mode, proceed with warning
+}
+
+fn get_cache_state(cache: &RevocationCache) -> CacheState {
+    let age = SystemTime::now().duration_since(cache.last_sync).unwrap();
+    let hours = age.as_secs() / 3600;
+    
+    match hours {
+        0..=23 => CacheState::Fresh,
+        24..=47 => CacheState::Stale,
+        _ => CacheState::Expired,
+    }
+}
+
 // Verification flow with revocation check
 fn load_revocation_cache() -> Result<Option<RevocationCache>> {
     let path = Path::new("/var/lib/sol/security/revocation-cache.json");
@@ -906,10 +968,21 @@ fn load_revocation_cache() -> Result<Option<RevocationCache>> {
     
     let cache = read_json::<RevocationCache>(path)?;
     
-    // Warn if cache is stale (but don't fail)
-    let age = SystemTime::now().duration_since(cache.last_sync)?;
-    if age > Duration::from_secs(cache.sync_interval_hours * 3600 * 2) {
-        eprintln!("Warning: Revocation cache is {} hours old", age.as_secs() / 3600);
+    // Log cache state but don't fail verification
+    match get_cache_state(&cache) {
+        CacheState::Fresh => {
+            // All good, use cache silently
+        }
+        CacheState::Stale => {
+            eprintln!("Warning: Revocation cache is {} hours old", 
+                     cache.age_hours());
+        }
+        CacheState::Expired => {
+            eprintln!("WARNING: Revocation cache is {} hours old (>48h)", 
+                     cache.age_hours());
+            eprintln!("Run `sol-pkg sync-revocations` to update");
+        }
+        CacheState::Missing => unreachable!(), // handled by !path.exists()
     }
     
     Ok(Some(cache))
@@ -931,6 +1004,7 @@ enum RevocationStatus {
    - Triggers every 24h when network available
    - Downloads latest repository metadata
    - Updates `/var/lib/sol/security/revocation-cache.json`
+   - Retries on network failure: exponential backoff up to 6h interval
 
 2. **Manual sync**:
    ```bash
@@ -938,10 +1012,11 @@ enum RevocationStatus {
    ```
 
 3. **Install-time check**:
-   - If cache exists: use it (fast)
-   - If cache stale (>48h): warn user but proceed
-   - If cache missing + network available: fetch online
-   - If cache missing + offline: proceed without check (log warning)
+   - If cache exists: use it according to state machine
+   - If cache stale (24-48h): warn but proceed
+   - If cache expired (>48h): warn loudly, proceed unless policy blocks
+   - If cache missing + network available: attempt online fetch
+   - If cache missing + offline: proceed with warning logged
 
 **User experience:**
 
@@ -957,7 +1032,14 @@ Installing...
 $ sol-pkg install Example.app
 ✓ Signature valid
 ✓ Lineage verified
-⚠ Revocation cache is 72 hours old (last sync: 2026-08-23)
+⚠ Revocation cache is 36 hours old (last sync: 2026-08-25)
+Installing...
+
+# Cache expired
+$ sol-pkg install Example.app
+✓ Signature valid
+✓ Lineage verified
+⚠ WARNING: Revocation cache is 72 hours old
   Run `sol-pkg sync-revocations` to update
 Installing...
 
@@ -1357,31 +1439,37 @@ $ sol-bundle check-inheritance old-Example.app new-Example.app
 27. ❌ Attacker replaces signature: verification fails (key mismatch)
 28. ❌ Attacker creates fake lineage [X→Y]: rejected (root key mismatch)
 29. ❌ Attacker steals current key but not lineage: cannot create valid lineage
-30. ❌ Replay attack: old signed bundle on newer SOL version with deprecated algorithm
-31. ❌ Downgrade attack: cannot replace newer bundle with older signed version (sol-packaged prevents)
+30. ❌ Replay attack: old signed bundle rejected (version_code check)
+31. ❌ Downgrade attack: installer rejects version_code <= installed_version_code
+32. ❌ Multi-signer attack: attacker adds their signature alongside legitimate one (all-or-nothing verification blocks this)
 
 ### Performance benchmarks (must meet)
-32. ✅ Sign 10MB bundle: < 100ms (Ed25519)
-33. ✅ Verify 10MB bundle: < 50ms
-34. ✅ Verify 100MB bundle: < 200ms
-35. ✅ Verify 1GB bundle: < 2s
-36. ✅ Build lineage (rotate key): < 50ms
-37. ✅ Verify lineage (10 rotations): < 10ms
+33. ✅ Sign 10MB bundle: < 100ms (Ed25519)
+34. ✅ Verify 10MB bundle: < 50ms
+35. ✅ Verify 100MB bundle: < 200ms
+36. ✅ Verify 1GB bundle: < 2s
+37. ✅ Build lineage (rotate key): < 50ms
+38. ✅ Verify lineage (10 rotations): < 10ms
+39. ✅ Verify lineage (100 rotations, DOS limit): < 100ms (timeout enforced)
 
 ### Repository integration (Phase 8.3)
-38. ❌ Repository signs package metadata
-39. ❌ Verify both app signature and repository signature
-40. ❌ Detect compromised key via repository metadata
-41. ❌ Show security advisory for revoked key
-42. ❌ Discontinuous update with repository verification: show trust prompt
+40. ❌ Repository signs package metadata
+41. ❌ Verify both app signature and repository signature
+42. ❌ Detect compromised key via repository metadata
+43. ❌ Show security advisory for revoked key
+44. ❌ Discontinuous update with repository verification: show trust prompt
 
 ### Edge cases
-43. ❌ Empty bundle (no executables): reject or allow?
-44. ❌ Bundle with only resources (no code): allow with warning?
-45. ❌ Signature timestamp in future: reject or warn?
-46. ❌ Multiple signatures with different timestamps: use earliest or latest?
-47. ❌ Lineage rotation within 1 second: ensure ordering by sequence not timestamp
-48. ❌ Maximum lineage depth: reject if > 100 rotations? (DOS protection)
+45. ❌ Empty bundle (no executables): reject
+46. ❌ Bundle with only resources (no code): allow with warning
+47. ❌ Signature timestamp in future: reject (tolerance: 5 minutes for clock skew)
+48. ❌ Multiple signatures with different timestamps: use earliest for validity check
+49. ❌ Lineage rotation within 1 second: ensure ordering by sequence not timestamp
+50. ❌ Maximum lineage depth: reject if > 100 rotations (DOS protection)
+51. ❌ Circular lineage reference (A→B→C→B): reject during verification
+52. ❌ Lineage verification timeout (>100ms): reject (DOS protection)
+53. ❌ Missing lineage file on first signing: create implicit single-node lineage
+54. ❌ Revocation cache states (Fresh/Stale/Expired/Missing): handle all gracefully
 
 ## Tooling
 

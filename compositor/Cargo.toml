@@ -23,6 +23,14 @@ wayland-protocols-wlr = { version = "0.3", default-features = false, features = 
 winit = { version = "0.30", default-features = false, features = ["wayland", "x11", "rwh_06"] }
 smithay-drm-extras = { version = "0.1", default-features = false, optional = true }
 
+# SCP (SOL Compositor Protocol) dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+nix = { version = "0.30", features = ["socket", "uio"] }
+toml = "0.8"
+thiserror = "1.0"
+
 [features]
 # Phase 0 default: the winit backend renders into a window on the surrounding
 # session, so the compositor builds and runs with no DRM grab, no root, and no

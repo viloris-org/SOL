@@ -32,6 +32,7 @@ mod udev_runtime;
 mod window;
 
 use outputs::OutputConfiguration;
+use sol_compositor::scp::ScpServer;
 
 use std::{sync::Arc, time::Instant};
 
@@ -60,6 +61,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         tracing_subscriber::fmt().init();
     }
+
+    // SCP is backend-independent and remains available in winit, udev, and
+    // headless modes. Keep the guard alive for the full compositor lifetime.
+    let _scp_server = ScpServer::bind_from_env()?;
 
     // `--spawn <client>` auto-launches a Wayland client once listening, e.g.
     // `--spawn weston-terminal`. Optional; the token is otherwise ignored so

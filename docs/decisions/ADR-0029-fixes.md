@@ -1,6 +1,238 @@
 # ADR-0029 Technical Issues and Fixes
 
-This document addresses 8 technical issues found in ADR-0029's initial design.
+This document addresses 12 technical issues found in ADR-0029's initial design. **All issues have been resolved in the main ADR-0029 document.**
+
+## Status: ✅ All fixes integrated into ADR-0029
+
+The issues below were identified during technical review and have been corrected in the main document.
+
+## Issue Summary
+
+| Issue | Severity | Status | Fix Location |
+|-------|----------|--------|--------------|
+| #1 Lineage protobuf structure | 🔴 Critical | ✅ Fixed | Line 95-119 |
+| #2 Circular reference detection | 🟡 Medium | ✅ Fixed | Line 153-209 |
+| #3 Multi-signer all-or-nothing | 🔴 Critical | ✅ Fixed | Line 240-301 |
+| #4 Grant inheritance security | 🔴 Critical | ✅ Fixed | Line 441-468 |
+| #5 Replay attack protection | 🔴 Critical | ✅ Fixed | Line 557-598, 620-625 |
+| #6 Timestamp timezone clarity | 🟡 Medium | ✅ Fixed | Line 100-119, 620-625 |
+| #7 Key consistency check | 🔴 Critical | ✅ Fixed | Line 303-346 |
+| #8 First signing lineage semantics | 🟡 Medium | ✅ Fixed | Line 57-61, 312-327 |
+| #9 DOS protection timeout | 🟡 Medium | ✅ Fixed | Line 155-172 |
+| #10 Revocation cache state machine | 🟢 Low | ✅ Fixed | Line 878-1005 |
+| #11 Repository signing trust model | 🟡 Medium | ✅ Fixed | Line 646-673 |
+| #12 X.509 vs raw key clarity | 🟢 Low | ✅ Fixed | Line 76-89, 101 |
+
+---
+
+## Issue #1: Lineage protobuf structure inconsistency
+
+**Problem:** The protobuf definition had `bytes signed_data = 2` as required field, but the last node in a lineage has no next signer.
+
+**Fix Applied:**
+```protobuf
+message SignerConfig {
+  bytes certificate = 1;
+  optional bytes signed_data = 2;         // Now optional - absent for last node
+  repeated Signature signatures = 3;      // Empty for last node
+}
+```
+
+**Verification:** Last node now correctly omits `signed_data` field rather than setting it to NULL.
+
+---
+
+## Issue #2: Circular reference detection incomplete
+
+**Problem:** Only detected duplicate keys, not circular references (A→B→C→B).
+
+**Fix Applied:** Added forward reference check in verification:
+```rust
+// Prevent forward references (circular detection)
+let next_key = extract_public_key(next_cert)?;
+if seen_keys.contains(&next_key.fingerprint()) {
+    return Err(LineageError::CircularReference { 
+        index: i,
+        next_index: i + 1,
+    });
+}
+```
+
+---
+
+## Issue #3: Multi-signer verification strategy clarified
+
+**Problem:** Documentation had conflicting statements about "at least one valid" vs "all-or-nothing".
+
+**Fix Applied:** 
+- Explicitly enforced all-or-nothing verification (line 263-275)
+- Added comment explaining attack prevention
+- Consistent throughout document
+
+---
+
+## Issue #4: Grant inheritance only checks primary signer
+
+**Problem:** Original logic checked ANY old signer vs ANY new signer, allowing attacker to add their signature.
+
+**Fix Applied:**
+```rust
+// CRITICAL: Only check primary signer (signers[0]) for lineage continuity
+// This prevents attacks where attacker adds their signature alongside legitimate one
+let old_primary = &old_identity.publisher_lineage;
+let new_primary = &new_identity.publisher_lineage;
+
+if lineage_extends(new_primary, old_primary) {
+    return GrantInheritance::SameLineage { ... };
+}
+```
+
+**Attack Scenario Prevented:**
+- Old: Company A (single signer)
+- New: Company A + Attacker (multi-signer)
+- Now rejected: only primary lineage continuity matters
+
+---
+
+## Issue #5: Replay attack protection added
+
+**Problem:** Missing protection against downgrade/replay attacks with old signed bundles.
+
+**Fix Applied:**
+1. Added `version_code` field to manifest.json (line 565)
+2. Added `version_code` to SignedData protobuf (line 620)
+3. Added `version_code` to VerifiedIdentity (line 298)
+4. Added test cases (lines 30-31)
+
+**Installer behavior:**
+```rust
+if new_version_code <= installed_version_code {
+    return Err(InstallError::DowngradeAttempt);
+}
+```
+
+---
+
+## Issue #6: Timestamp timezone clarified
+
+**Problem:** Timestamps didn't specify UTC or timezone handling.
+
+**Fix Applied:**
+- Added comment "Unix timestamp in UTC" to RotationMetadata (line 118)
+- Added comment "Unix timestamp in UTC (seconds since epoch)" to SignedData (line 624)
+- Added comment "(all timestamps are Unix epoch UTC)" to verify_signer (line 350)
+
+---
+
+## Issue #7: v2.sig key matches lineage current_key
+
+**Problem:** Missing verification that signer's public_key matches lineage's current key.
+
+**Fix Applied:** Already present in ADR-0029 (lines 333-341):
+```rust
+// CRITICAL: Check v2.sig public_key matches lineage current_key
+if public_key != verified_lineage.current_key {
+    return Err(SignatureError::SignerLineageMismatch { ... });
+}
+```
+
+---
+
+## Issue #8: First signing lineage semantics clarified
+
+**Problem:** Unclear whether lineage.bin is created on first signing or first rotation.
+
+**Fix Applied:**
+- Documentation clarified (lines 57-61): "optional on first signing"
+- Verification creates implicit lineage if file missing (lines 312-327)
+- Added comment: "lineage file is NOT created during first signing, only on first rotate-key"
+
+**Behavior:**
+1. First `sol-bundle sign`: NO lineage.bin created
+2. First `sol-bundle rotate-key`: Creates lineage.bin with [A→B]
+
+---
+
+## Issue #9: DOS protection timeout optimization
+
+**Problem:** Timeout checked only every 10 iterations, allowing individual slow operations.
+
+**Fix Applied:**
+```rust
+for i in 0..lineage.signers.len() {
+    // Check timeout on every iteration (not just every 10)
+    if start.elapsed().as_millis() > MAX_LINEAGE_VERIFY_TIME_MS as u128 {
+        return Err(LineageError::VerificationTimeout);
+    }
+    // ...
+}
+```
+
+---
+
+## Issue #10: Revocation cache state machine added
+
+**Problem:** Cache sync timing and expiration policy unclear.
+
+**Fix Applied:** Added explicit state machine (lines 895-945):
+```rust
+enum CacheState {
+    Fresh,       // age < 24h - use without warning
+    Stale,       // age 24h-48h - use with warning
+    Expired,     // age > 48h - warn loudly
+    Missing,     // no cache file - offline mode
+}
+```
+
+**Sync strategy:**
+- Automatic: every 24h (exponential backoff on failure up to 6h)
+- Manual: `sol-pkg sync-revocations`
+- Install-time: use cache according to state machine
+
+---
+
+## Issue #11: Repository signing trust model clarified
+
+**Problem:** Unclear what repository signature covers.
+
+**Fix Applied:** Explicit documentation (lines 646-673):
+- Repository signs **metadata.json only**
+- App bundles verified **independently** with embedded signatures
+- Repository cannot forge app signatures (lacks publisher private keys)
+- Two-layer trust: repository vouches + publisher proves identity
+
+---
+
+## Issue #12: X.509 certificate usage clarified
+
+**Problem:** Inconsistent use of X.509 certs vs raw public keys.
+
+**Fix Applied:**
+- Unified approach: raw public key is primary (lines 76-89)
+- X.509 certificate is optional (for display name / organizational info)
+- protobuf comment clarifies: "X.509 cert or raw public key (32 bytes for Ed25519)" (line 101)
+
+---
+
+## Additional Improvements
+
+### Algorithm deprecation policy
+- Added note about enforcing minimum algorithm strength per SOL version
+- Future: `min_allowed_algorithm` policy enforcement
+
+### Test coverage expanded
+- Added tests for circular references (#51)
+- Added tests for multi-signer attacks (#32, #57)
+- Added tests for replay/downgrade attacks (#30-31)
+- Added tests for cache state machine (#61-62)
+
+---
+
+## Document History
+
+- **2026-08-26 (initial)**: Identified 8 technical issues in ADR-0029
+- **2026-08-26 (updated)**: Expanded to 12 issues, all fixed in main document
+- **Status**: All fixes integrated - this document serves as historical record
 
 ## Issue #1: Multi-signer lineage承载方式不清晰
 
