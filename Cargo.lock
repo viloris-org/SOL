@@ -4565,7 +4565,6 @@ dependencies = [
 name = "sol-bundle"
 version = "0.1.0"
 dependencies = [
- "base64",
  "clap",
  "ed25519-dalek",
  "hex",

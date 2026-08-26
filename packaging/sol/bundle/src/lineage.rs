@@ -57,11 +57,7 @@ pub fn verify_lineage(lineage: &PublisherLineage) -> Result<VerifiedLineage> {
     let mut chain = Vec::with_capacity(lineage.signers.len());
     let mut rotations = Vec::with_capacity(lineage.signers.len().saturating_sub(1));
     for (index, signer) in lineage.signers.iter().enumerate() {
-        if started.elapsed() > MAX_LINEAGE_VERIFY_TIME {
-            return Err(BundleError::InvalidLineage(
-                "verification exceeded 100 ms".to_owned(),
-            ));
-        }
+        ensure_within_time_budget(started)?;
         if signer.certificate.is_empty() {
             return Err(BundleError::InvalidLineage(format!(
                 "node {index} has an empty public key"
@@ -87,6 +83,11 @@ pub fn verify_lineage(lineage: &PublisherLineage) -> Result<VerifiedLineage> {
             })?;
             let signed = SignedSignerConfig::decode(bytes)
                 .map_err(|error| BundleError::encoding("SignedSignerConfig", error))?;
+            if signed.encode_to_vec() != bytes {
+                return Err(BundleError::InvalidLineage(format!(
+                    "node {index} uses non-canonical signed_data"
+                )));
+            }
             if signed.next_signer_certificate != lineage.signers[index + 1].certificate {
                 return Err(BundleError::InvalidLineage(format!(
                     "node {index} does not name the adjacent next key"
@@ -116,13 +117,14 @@ pub fn verify_lineage(lineage: &PublisherLineage) -> Result<VerifiedLineage> {
                     ))
                 })?;
             }
-            rotations.push(signed.metadata.unwrap_or(RotationMetadata {
-                reason: String::new(),
-                timestamp: 0,
-                description: String::new(),
-            }));
+            let metadata = signed.metadata.ok_or_else(|| {
+                BundleError::InvalidLineage(format!("node {index} is missing rotation metadata"))
+            })?;
+            validate_rotation_metadata(&metadata)?;
+            rotations.push(metadata);
         }
         chain.push(signer.certificate.clone());
+        ensure_within_time_budget(started)?;
     }
     Ok(VerifiedLineage {
         root_key: chain[0].clone(),
@@ -157,6 +159,7 @@ pub fn rotate_lineage(
     new_key: &PrivateKey,
     metadata: RotationMetadata,
 ) -> Result<PublisherLineage> {
+    validate_rotation_metadata(&metadata)?;
     let old_public = old_key.public_key()?;
     let new_public = new_key.public_key()?;
     if old_public == new_public {
@@ -207,4 +210,27 @@ pub fn lineage_extends(new: &VerifiedLineage, old: &VerifiedLineage) -> bool {
     new.root_key == old.root_key
         && new.chain.len() >= old.chain.len()
         && new.chain[..old.chain.len()] == old.chain
+}
+
+fn validate_rotation_metadata(metadata: &RotationMetadata) -> Result<()> {
+    if metadata.reason.trim().is_empty() || metadata.reason != metadata.reason.trim() {
+        return Err(BundleError::InvalidLineage(
+            "rotation reason must be non-empty without surrounding whitespace".to_owned(),
+        ));
+    }
+    if metadata.timestamp < 0 {
+        return Err(BundleError::InvalidLineage(
+            "rotation timestamp must be Unix epoch UTC seconds".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_within_time_budget(started: Instant) -> Result<()> {
+    if started.elapsed() > MAX_LINEAGE_VERIFY_TIME {
+        return Err(BundleError::InvalidLineage(
+            "verification exceeded 100 ms".to_owned(),
+        ));
+    }
+    Ok(())
 }

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use prost::Message as _;
-use sol_bundle::proto::SolSignatureV2;
+use sol_bundle::proto::SolSignatureBlock;
 use sol_bundle::{
     BundleError, CacheState, GrantInheritance, PrivateKey, RevocationCache, RevocationEntry,
     RotationMetadata, SignatureAlgorithm, add_signer, check_grant_inheritance, check_update,
@@ -152,14 +152,43 @@ fn every_signer_must_remain_valid() {
     let identity = add_signer(&bundle, &key_b, None, 200).expect("add signer");
     assert_eq!(identity.all_signers.len(), 2);
 
-    let path = bundle.join(".signatures/v2.sig");
-    let mut block =
-        SolSignatureV2::decode(fs::read(&path).expect("read v2").as_slice()).expect("decode v2");
+    let path = bundle.join(".signatures/signature.bin");
+    let mut block = SolSignatureBlock::decode(fs::read(&path).expect("read signature").as_slice())
+        .expect("decode signature");
     block.signers[1].signatures[0].value[0] ^= 0x80;
     fs::write(&path, block.encode_to_vec()).expect("corrupt second signer");
     assert!(matches!(
         verify_app_bundle(&bundle, None),
         Err(BundleError::InvalidSignature { signer: 1, .. })
+    ));
+}
+
+#[test]
+fn compatibility_floor_and_signature_directory_are_not_malleable() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let bundle = create_bundle(temporary.path(), "Editor.app", 1);
+    let key = generate(
+        temporary.path(),
+        "publisher.pem",
+        SignatureAlgorithm::Ed25519,
+    );
+    sign_bundle(&bundle, &key, None, 7, 100).expect("sign");
+
+    let path = bundle.join(".signatures/signature.bin");
+    let mut block = SolSignatureBlock::decode(fs::read(&path).expect("read signature").as_slice())
+        .expect("decode signature");
+    block.min_sol_version = 1;
+    fs::write(&path, block.encode_to_vec()).expect("change compatibility floor");
+    assert!(matches!(
+        verify_app_bundle(&bundle, None),
+        Err(BundleError::SignedDataMismatch("min_sol_version"))
+    ));
+
+    sign_bundle(&bundle, &key, None, 7, 100).expect("restore signature");
+    fs::write(bundle.join(".signatures/extra.bin"), b"ambiguous").expect("write extra metadata");
+    assert!(matches!(
+        verify_app_bundle(&bundle, None),
+        Err(BundleError::InvalidLayout(message)) if message.contains("unexpected signature-block entry")
     ));
 }
 

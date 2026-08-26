@@ -15,7 +15,6 @@ name = "sol-bundle"
 path = "src/main.rs"
 
 [dependencies]
-base64 = "0.22"
 clap = { version = "4.5", features = ["derive"] }
 ed25519-dalek = { version = "2.2", features = ["pem", "pkcs8", "rand_core"] }
 hex = "0.4"

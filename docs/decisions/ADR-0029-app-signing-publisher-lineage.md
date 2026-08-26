@@ -15,7 +15,7 @@ SOL requires signed `.app` bundles with verified publisher lineage for:
 
 ADR-0021 states: "Publisher-key rotation requires a signature-covered continuity proof from the prior lineage or an explicitly trusted publisher-recovery path."
 
-Android APK Signature Scheme v3+ solved similar problems with:
+Android's signing work solved similar problems with:
 - Per-signer lineage (proof-of-key-rotation)
 - Multiple signing keys with rotation history
 - Backward compatibility during key transitions
@@ -27,7 +27,10 @@ SOL needs a concrete signing format that supports these requirements.
 
 ### 1. Signature scheme overview
 
-SOL uses a **signing block scheme** inspired by Android APK Signature Scheme v2/v3, adapted for SOL's `.app` bundle format:
+SOL uses one **unified application signing scheme** adapted for its `.app`
+bundle format. Content integrity, release signatures, multi-signer policy, and
+publisher lineage are parts of this one scheme; SOL does not expose Android's
+v2/v3 generations as separate modes:
 
 ```text
 Example.app (directory-based bundle on disk)
@@ -37,11 +40,11 @@ Example.app (directory-based bundle on disk)
 ├── resources/                  # assets, icons, localization
 ├── metadata/                   # SBOM, licenses, provenance
 └── .signatures/                # signature block (inspired by APK Signing Block)
-    ├── manifest.json           # content digest tree (like v2 digests)
-    ├── v2.sig                  # SOL signature scheme v2 block
-    └── lineages/               # publisher key rotation proofs (like APK v3)
-        ├── 0.bin               # lineage for v2.sig.signers[0]
-        └── 1.bin               # lineage for v2.sig.signers[1] (if multi-signer)
+    ├── manifest.json           # complete content digest tree
+    ├── signature.bin           # unified SOL signature block
+    └── lineages/               # publisher key rotation proofs
+        ├── 0.bin               # lineage for signature.signers[0]
+        └── 1.bin               # lineage for signature.signers[1] (if multi-signer)
 
 When distributed (archive format):
 Example.app.tar.zst             # compressed bundle
@@ -89,9 +92,9 @@ pub struct KeyValidity {
 }
 ```
 
-#### 5.3 lineage.bin (Publisher Lineage - APK v3 style)
+#### 5.3 lineage.bin (Publisher Lineage)
 
-Binary format (protobuf-encoded, directly inspired by APK Signature Scheme v3):
+Binary format (protobuf-encoded):
 
 ```protobuf
 message PublisherLineage {
@@ -150,7 +153,7 @@ signers[2]: SignerConfig {
 }
 ```
 
-**Verification logic (mirrors APK v3, with DOS protection and circular reference detection):**
+**Verification logic (with DOS protection and circular reference detection):**
 
 ```rust
 const MAX_LINEAGE_LENGTH: usize = 100;  // DOS protection
@@ -260,7 +263,7 @@ Attacker signs v2.0 with Key X (no lineage proof from A)
   → User must explicitly authorize again
 ```
 
-### 6. Complete verification flow (integrating v2 + lineage)
+### 6. Complete verification flow
 
 ```rust
 const MAX_LINEAGE_LENGTH: usize = 100;  // DOS protection
@@ -269,16 +272,16 @@ pub fn verify_app_bundle(bundle: &AppBundle) -> Result<VerifiedIdentity, Signatu
     // 1. Load signature block
     let sig_dir = bundle.path.join(".signatures");
     let manifest = read_json(&sig_dir.join("manifest.json"))?;
-    let v2_sig = read_protobuf::<SolSignatureV2>(&sig_dir.join("v2.sig"))?;
+    let signature_block = read_protobuf::<SolSignatureBlock>(&sig_dir.join("signature.bin"))?;
     
-    // 2. Verify content integrity (APK v2 style - check all sections)
+    // 2. Verify content integrity across all sections
     verify_manifest_digests(&manifest, bundle)?;
     
     // 3. Verify all signers with their lineages (all-or-nothing)
     let mut verified_signers = Vec::new();
     let mut failed_signers = Vec::new();
     
-    for (index, signer) in v2_sig.signers.iter().enumerate() {
+    for (index, signer) in signature_block.signers.iter().enumerate() {
         match verify_signer_with_lineage(signer, index, &manifest, &sig_dir) {
             Ok(verified) => verified_signers.push(verified),
             Err(e) => failed_signers.push((index, e)),
@@ -357,11 +360,11 @@ fn verify_signer_with_lineage(
     // 3. Verify lineage chain
     let verified_lineage = verify_lineage(&lineage)?;
     
-    // 4. CRITICAL: Check v2.sig public_key matches lineage current_key
+    // 4. CRITICAL: Check signature public_key matches lineage current_key
     if public_key != verified_lineage.current_key {
         return Err(SignatureError::SignerLineageMismatch {
             signer_index: index,
-            v2_key: public_key,
+            signature_key: public_key,
             lineage_key: verified_lineage.current_key,
         });
     }
@@ -585,11 +588,11 @@ impl PermissionLedger {
 
 #### 5.1 manifest.json (content digest tree)
 
-Inspired by Android APK v2 digests, covers all bundle content:
+Covers all bundle content:
 
 ```json
 {
-  "format_version": 2,
+  "format_version": 1,
   "app_id": "com.example.editor",
   "version": "2.4.1",
   "version_code": 241,
@@ -624,17 +627,17 @@ Inspired by Android APK v2 digests, covers all bundle content:
 
 **New field: `version_code`** — Monotonically increasing integer for replay attack protection. The installer (sol-packaged) rejects installations where `new_version_code <= installed_version_code`, preventing attackers from downgrading to older signed versions with known vulnerabilities.
 
-**Why section-based?** Inspired by APK v2's "four regions" approach:
+**Why section-based?** It provides:
 - Fast partial verification (check only executables if resources unchanged)
 - Clear separation of content types
 - Easier incremental updates in future (v4-style)
 
-#### 5.2 v2.sig (SOL Signature Scheme v2 block)
+#### 5.2 signature.bin (SOL application signature block)
 
-Binary format (protobuf-encoded, inspired by APK Signature Scheme v2):
+Binary format (protobuf-encoded):
 
 ```protobuf
-message SolSignatureV2 {
+message SolSignatureBlock {
   repeated Signer signers = 1;
   uint32 min_sol_version = 2;  // minimum SOL OS version required
 }
@@ -654,6 +657,7 @@ message SignedData {
   bytes content_digest = 5;        // total_content_hash from manifest
   int64 timestamp = 6;             // Unix timestamp in UTC (seconds since epoch)
   repeated Digest additional_digests = 7;  // future: SHA-512, BLAKE3
+  uint32 min_sol_version = 8;      // signed copy of compatibility floor
 }
 
 message Signature {
@@ -668,7 +672,7 @@ enum SignatureAlgorithm {
 }
 ```
 
-**Verification flow (like APK v2):**
+**Verification flow:**
 1. Extract all `Signer` entries
 2. For each signer:
    - Verify `signature` over `signed_data` using `public_key`
@@ -714,7 +718,7 @@ repository-metadata.json (signed by repo key):
 - App bundles are cryptographically verified independently of repository
 - Compromise of repository key cannot forge app signatures
 
-### 8. Key rotation scenarios (APK v3 style)
+### 8. Key rotation scenarios
 
 #### Scenario A: Planned rotation (key expiry)
 ```text
@@ -865,7 +869,7 @@ $ sol-bundle add-signer Example.app \
     --lineage lineage-b.bin
 
   # Now .signatures/ contains:
-  #   v2.sig (with TWO Signer entries)
+  #   signature.bin (with TWO Signer entries)
   #   lineages/0.bin (Company A's lineage)
   #   lineages/1.bin (Company B's lineage)
 
@@ -1059,7 +1063,7 @@ Installation blocked.
 | Aspect | Android APK | SOL `.app` | Rationale |
 |--------|-------------|------------|-----------|
 | **Format** | ZIP with embedded Signing Block | Directory + `.signatures/` folder | Simpler, no ZIP manipulation |
-| **Signature schemes** | v1 (JAR), v2, v3, v4 | v2 (based on APK v2/v3) | Start modern, no legacy |
+| **Signature schemes** | Multiple generations | **One unified SOL scheme** | No inherited generation split or legacy mode |
 | **Lineage** | APK Signature Scheme v3 | Same concept, adapted format | Core continuity mechanism |
 | **Default algorithm** | RSA-2048 | **Ed25519** | Faster, smaller, more secure |
 | **Content protection** | 4 APK regions | Section-based (app_toml, executables, libs, resources) | Clearer structure |
@@ -1112,7 +1116,7 @@ Installation blocked.
 - [ ] ECDSA P-256 signing (using `p256` crate)
 - [ ] RSA-4096 verification only (using `rsa` crate)
 - [ ] manifest.json generation (content digest tree)
-- [ ] v2.sig generation and verification
+- [ ] `signature.bin` generation and verification
 - [ ] CLI: `sol-bundle sign`, `sol-bundle verify`
 - [ ] Unit tests: sign/verify round-trip, tamper detection
 
@@ -1202,7 +1206,7 @@ $ sol-bundle check-inheritance old-Example.app new-Example.app
 - **Compromise recovery**: discontinuous keys force re-authorization
 - **Cryptographic agility**: multiple algorithms supported (Ed25519, ECDSA, RSA)
 - **Auditable**: lineage history is transparent and inspectable
-- **Fast verification**: section-based digests avoid per-file overhead (APK v2 approach)
+- **Fast verification**: section-based digests avoid per-file overhead
 - **Modern defaults**: Ed25519 is smaller and faster than Android's RSA-2048
 - **Simple format**: `.signatures/` directory is easier to inspect than binary blocks
 
@@ -1220,8 +1224,8 @@ $ sol-bundle check-inheritance old-Example.app new-Example.app
 
 ### Security properties
 1. **Non-repudiation**: signatures bind publisher to specific release (same as APK)
-2. **Integrity**: content digests detect tampering (APK v2 full-content protection)
-3. **Authenticity**: lineage proves publisher continuity (APK v3 core feature)
+2. **Integrity**: content digests detect tampering
+3. **Authenticity**: lineage proves publisher continuity
 4. **Revocability**: compromised keys can be marked revoked (better than Android)
 5. **Forward security**: old key compromise doesn't invalidate new signatures (lineage property)
 
@@ -1409,7 +1413,7 @@ $ sol-bundle check-inheritance old-Example.app new-Example.app
 3. ✅ Verify bundle signed with RSA-4096 (verification only, no signing)
 4. ❌ Detect tampered content (modified binary after signing)
 5. ❌ Detect tampered manifest (modified manifest.json after signing)
-6. ❌ Detect tampered signature (modified v2.sig after signing)
+6. ❌ Detect tampered signature (modified signature.bin after signing)
 7. ❌ Reject expired signing keys
 8. ❌ Reject not-yet-valid signing keys
 9. ✅ Multi-signer: verify bundle with 2 valid signatures

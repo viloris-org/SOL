@@ -1,8 +1,8 @@
 use prost::{Enumeration, Message};
 
-/// On-disk SOL signature scheme v2 block.
+/// On-disk SOL application signature block.
 #[derive(Clone, PartialEq, Eq, Message)]
-pub struct SolSignatureV2 {
+pub struct SolSignatureBlock {
     /// Every signer must verify successfully.
     #[prost(message, repeated, tag = "1")]
     pub signers: Vec<Signer>,
@@ -52,6 +52,9 @@ pub struct SignedData {
     /// Reserved algorithm-agility digests.
     #[prost(message, repeated, tag = "7")]
     pub additional_digests: Vec<Digest>,
+    /// Signature-covered copy of the outer block compatibility floor.
+    #[prost(uint32, tag = "8")]
+    pub min_sol_version: u32,
 }
 
 /// An optional additional digest.

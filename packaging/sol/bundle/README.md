@@ -9,12 +9,18 @@ Implemented security properties:
 - Canonical, sectioned `manifest.json` covering every regular bundle file.
 - Ed25519 and ECDSA P-256 signing and verification.
 - RSA-4096/SHA-256 signing and verification for legacy publishers.
-- Canonical protobuf `v2.sig` with all-or-nothing multi-signer verification.
+- Canonical protobuf `signature.bin` with all-or-nothing multi-signer verification.
+- A signature-covered minimum SOL version (protobuf field 8), preventing the
+  outer compatibility floor from being lowered without a publisher key.
 - Publisher key rotation and bounded, cycle-resistant lineage verification.
 - Strict `version_code` anti-replay checks and primary-lineage grant continuity.
 - Optional cached key revocation checks.
 - Rejection of symbolic links, undeclared executable content, added unsigned
   files, non-canonical signature metadata, and unexpected lineage entries.
+
+The format reserves the ADR's optional X.509 certificate field, but this first
+implementation rejects populated certificates until full certificate-chain and
+validity validation is available; raw publisher keys remain authoritative.
 
 An application manifest must contain the signed identity fields:
 

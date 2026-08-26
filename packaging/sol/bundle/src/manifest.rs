@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 use crate::error::{BundleError, Result};
 
 /// Current content-manifest format.
-pub const CONTENT_MANIFEST_VERSION: u32 = 2;
+pub const CONTENT_MANIFEST_VERSION: u32 = 1;
 
 /// The application identity fields sourced from `App.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +188,11 @@ impl ContentManifest {
             if expected.get(&path) != found.get(&path) {
                 return Err(BundleError::DigestMismatch(path));
             }
+        }
+        if self.bundle_sections != actual.bundle_sections {
+            return Err(BundleError::DigestMismatch(
+                "bundle section classification".to_owned(),
+            ));
         }
         if self.total_content_hash != actual.total_content_hash {
             return Err(BundleError::DigestMismatch("total_content_hash".to_owned()));
@@ -386,7 +391,7 @@ fn section_for_path<'a>(sections: &'a mut BundleSections, path: &str) -> &'a mut
 
 fn total_content_hash(inventory: &BTreeMap<String, FileRecord>) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"SOL-BUNDLE-CONTENT-V2\0");
+    hasher.update(b"SOL-BUNDLE-CONTENT\0");
     for record in inventory.values() {
         let path = record.path.as_bytes();
         hasher.update(u32::try_from(path.len()).unwrap_or(u32::MAX).to_be_bytes());

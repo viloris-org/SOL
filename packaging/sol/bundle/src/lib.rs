@@ -1,8 +1,8 @@
 //! Signing, verification, publisher lineage, and update identity for SOL `.app` bundles.
 //!
 //! The implementation follows ADR-0029: every regular bundle file is bound by a
-//! canonical JSON content manifest, release signatures use the protobuf v2
-//! block, and publisher rotation uses independently verified lineage protobufs.
+//! canonical JSON content manifest, release signatures and publisher rotation
+//! form one unified protocol, and each lineage is independently verified.
 
 mod error;
 mod key;
@@ -29,11 +29,11 @@ pub use proto::{PublisherLineage, RotationMetadata, SignatureAlgorithm};
 pub use revocation::{CacheState, RevocationCache, RevocationEntry};
 use sha2::{Digest as _, Sha256};
 
-use crate::proto::{SignedData, Signer, SolSignatureV2};
+use crate::proto::{SignedData, Signer, SolSignatureBlock};
 
 const SIGNATURE_DIRECTORY: &str = ".signatures";
 const CONTENT_MANIFEST_FILE: &str = "manifest.json";
-const V2_SIGNATURE_FILE: &str = "v2.sig";
+const SIGNATURE_FILE: &str = "signature.bin";
 const LINEAGES_DIRECTORY: &str = "lineages";
 
 /// A release signer whose signature and complete lineage have been verified.
@@ -119,8 +119,8 @@ pub fn sign_bundle(
     if verified_lineage.current_key != public_key {
         return Err(BundleError::SignerLineageMismatch);
     }
-    let signer = create_signer(&manifest, &manifest_bytes, key, timestamp)?;
-    let block = SolSignatureV2 {
+    let signer = create_signer(&manifest, &manifest_bytes, key, timestamp, min_sol_version)?;
+    let block = SolSignatureBlock {
         signers: vec![signer],
         min_sol_version,
     };
@@ -149,8 +149,8 @@ pub fn add_signer(
     let signature_dir = bundle.join(SIGNATURE_DIRECTORY);
     let manifest_bytes = read_regular_file(&signature_dir.join(CONTENT_MANIFEST_FILE))?;
     let manifest = ContentManifest::from_canonical_bytes(&manifest_bytes)?;
-    let block_bytes = read_regular_file(&signature_dir.join(V2_SIGNATURE_FILE))?;
-    let mut block = decode_canonical::<SolSignatureV2>(&block_bytes, "v2.sig")?;
+    let block_bytes = read_regular_file(&signature_dir.join(SIGNATURE_FILE))?;
+    let mut block = decode_canonical::<SolSignatureBlock>(&block_bytes, "signature.bin")?;
     let new_public = key.public_key()?;
     let new_lineage = lineage
         .cloned()
@@ -158,9 +158,13 @@ pub fn add_signer(
     if verify_lineage(&new_lineage)?.current_key != new_public {
         return Err(BundleError::SignerLineageMismatch);
     }
-    block
-        .signers
-        .push(create_signer(&manifest, &manifest_bytes, key, timestamp)?);
+    block.signers.push(create_signer(
+        &manifest,
+        &manifest_bytes,
+        key,
+        timestamp,
+        block.min_sol_version,
+    )?);
 
     let mut lineages = BTreeMap::new();
     for index in 0..block.signers.len() - 1 {
@@ -194,8 +198,8 @@ pub fn verify_app_bundle(
     let manifest_bytes = read_regular_file(&signature_dir.join(CONTENT_MANIFEST_FILE))?;
     let manifest = ContentManifest::from_canonical_bytes(&manifest_bytes)?;
     manifest.verify_content(bundle)?;
-    let signature_bytes = read_regular_file(&signature_dir.join(V2_SIGNATURE_FILE))?;
-    let block = decode_canonical::<SolSignatureV2>(&signature_bytes, "v2.sig")?;
+    let signature_bytes = read_regular_file(&signature_dir.join(SIGNATURE_FILE))?;
+    let block = decode_canonical::<SolSignatureBlock>(&signature_bytes, "signature.bin")?;
     if block.signers.is_empty() {
         return Err(BundleError::NoSigners);
     }
@@ -206,15 +210,15 @@ pub fn verify_app_bundle(
     let mut verified_signers = Vec::with_capacity(block.signers.len());
     let mut lineage_bytes = Vec::new();
     for (index, signer) in block.signers.iter().enumerate() {
-        let verified = verify_release_signer(
-            signer,
-            index,
-            &manifest,
-            &manifest_digest,
-            &content_digest,
-            &signature_dir,
-            block.signers.len(),
-        )?;
+        let context = SignerVerificationContext {
+            manifest: &manifest,
+            manifest_digest: &manifest_digest,
+            content_digest: &content_digest,
+            signature_dir: &signature_dir,
+            signer_count: block.signers.len(),
+            min_sol_version: block.min_sol_version,
+        };
+        let verified = verify_release_signer(signer, index, &context)?;
         if let Some(cache) = revocations {
             cache.check_signer(&verified)?;
         }
@@ -315,6 +319,7 @@ fn create_signer(
     manifest_bytes: &[u8],
     key: &PrivateKey,
     timestamp: i64,
+    min_sol_version: u32,
 ) -> Result<Signer> {
     let signed_data = SignedData {
         app_id: manifest.app_id.clone(),
@@ -324,6 +329,7 @@ fn create_signer(
         content_digest: manifest.content_digest()?,
         timestamp,
         additional_digests: Vec::new(),
+        min_sol_version,
     }
     .encode_to_vec();
     Ok(Signer {
@@ -334,34 +340,47 @@ fn create_signer(
     })
 }
 
+struct SignerVerificationContext<'a> {
+    manifest: &'a ContentManifest,
+    manifest_digest: &'a [u8],
+    content_digest: &'a [u8],
+    signature_dir: &'a Path,
+    signer_count: usize,
+    min_sol_version: u32,
+}
+
 fn verify_release_signer(
     signer: &Signer,
     index: usize,
-    manifest: &ContentManifest,
-    manifest_digest: &[u8],
-    content_digest: &[u8],
-    signature_dir: &Path,
-    signer_count: usize,
+    context: &SignerVerificationContext<'_>,
 ) -> Result<VerifiedSigner> {
+    if signer.certificate.is_some() {
+        return Err(BundleError::InvalidLayout(format!(
+            "signer {index} contains an X.509 certificate, but certificate-chain validation is not implemented"
+        )));
+    }
     if signer.signatures.is_empty() {
         return Err(BundleError::NoSignatures(index));
     }
     let release_data = decode_canonical::<SignedData>(&signer.signed_data, "SignedData")?;
     validate_timestamp(release_data.timestamp)?;
-    if release_data.app_id != manifest.app_id {
+    if release_data.app_id != context.manifest.app_id {
         return Err(BundleError::SignedDataMismatch("app_id"));
     }
-    if release_data.version != manifest.version {
+    if release_data.version != context.manifest.version {
         return Err(BundleError::SignedDataMismatch("version"));
     }
-    if release_data.version_code != manifest.version_code {
+    if release_data.version_code != context.manifest.version_code {
         return Err(BundleError::SignedDataMismatch("version_code"));
     }
-    if release_data.manifest_digest != manifest_digest {
+    if release_data.manifest_digest != context.manifest_digest {
         return Err(BundleError::SignedDataMismatch("manifest_digest"));
     }
-    if release_data.content_digest != content_digest {
+    if release_data.content_digest != context.content_digest {
         return Err(BundleError::SignedDataMismatch("content_digest"));
+    }
+    if release_data.min_sol_version != context.min_sol_version {
+        return Err(BundleError::SignedDataMismatch("min_sol_version"));
     }
     let first_algorithm = signer.signatures[0].algorithm;
     for signature in &signer.signatures {
@@ -380,12 +399,13 @@ fn verify_release_signer(
     }
     let algorithm = SignatureAlgorithm::try_from(first_algorithm)
         .map_err(|_| BundleError::UnsupportedAlgorithm(first_algorithm))?;
-    let lineage_path = signature_dir
+    let lineage_path = context
+        .signature_dir
         .join(LINEAGES_DIRECTORY)
         .join(format!("{index}.bin"));
     let lineage = if lineage_path.exists() {
         read_lineage(&lineage_path)?
-    } else if signer_count == 1 {
+    } else if context.signer_count == 1 {
         initial_lineage(signer.public_key.clone())
     } else {
         return Err(BundleError::InvalidLineage(format!(
@@ -436,6 +456,18 @@ fn validate_signature_directory(path: &Path) -> Result<()> {
             path.display()
         )));
     }
+    for entry in fs::read_dir(path).map_err(|error| BundleError::io(path, error))? {
+        let entry = entry.map_err(|error| BundleError::io(path, error))?;
+        let name = entry.file_name();
+        let allowed =
+            name == CONTENT_MANIFEST_FILE || name == SIGNATURE_FILE || name == LINEAGES_DIRECTORY;
+        if !allowed {
+            return Err(BundleError::InvalidLayout(format!(
+                "unexpected signature-block entry {}",
+                name.to_string_lossy()
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -483,7 +515,7 @@ fn validate_lineage_files(signature_dir: &Path, signer_count: usize) -> Result<(
 fn replace_signature_block(
     bundle: &Path,
     manifest: &[u8],
-    v2: &[u8],
+    signature: &[u8],
     lineages: &BTreeMap<usize, PublisherLineage>,
 ) -> Result<()> {
     let target = bundle.join(SIGNATURE_DIRECTORY);
@@ -493,7 +525,7 @@ fn replace_signature_block(
     }
     fs::create_dir(&staging).map_err(|error| BundleError::io(&staging, error))?;
     write_atomic_file(&staging.join(CONTENT_MANIFEST_FILE), manifest)?;
-    write_atomic_file(&staging.join(V2_SIGNATURE_FILE), v2)?;
+    write_atomic_file(&staging.join(SIGNATURE_FILE), signature)?;
     if !lineages.is_empty() {
         let directory = staging.join(LINEAGES_DIRECTORY);
         fs::create_dir(&directory).map_err(|error| BundleError::io(&directory, error))?;
@@ -522,11 +554,11 @@ fn replace_signature_block(
     Ok(())
 }
 
-fn compute_bundle_hash(manifest: &[u8], v2: &[u8], lineages: &[(usize, Vec<u8>)]) -> String {
+fn compute_bundle_hash(manifest: &[u8], signature: &[u8], lineages: &[(usize, Vec<u8>)]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"SOL-SIGNED-BUNDLE-V2\0");
+    hasher.update(b"SOL-SIGNED-BUNDLE\0");
     update_length_delimited(&mut hasher, manifest);
-    update_length_delimited(&mut hasher, v2);
+    update_length_delimited(&mut hasher, signature);
     for (index, bytes) in lineages {
         hasher.update(u64::try_from(*index).unwrap_or(u64::MAX).to_be_bytes());
         update_length_delimited(&mut hasher, bytes);

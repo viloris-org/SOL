@@ -4,6 +4,9 @@ This document addresses 12 technical issues found in ADR-0029's initial design. 
 
 ## Status: ✅ All fixes integrated into ADR-0029
 
+SOL exposes one unified signing scheme. Android generation labels are historical
+design context only and are not protocol modes or filenames in SOL.
+
 The issues below were identified during technical review and have been corrected in the main document.
 
 ## Issue Summary
@@ -124,13 +127,13 @@ if new_version_code <= installed_version_code {
 
 ---
 
-## Issue #7: v2.sig key matches lineage current_key
+## Issue #7: signature key matches lineage current_key
 
 **Problem:** Missing verification that signer's public_key matches lineage's current key.
 
 **Fix Applied:** Already present in ADR-0029 (lines 333-341):
 ```rust
-// CRITICAL: Check v2.sig public_key matches lineage current_key
+// CRITICAL: Check signature public_key matches lineage current_key
 if public_key != verified_lineage.current_key {
     return Err(SignatureError::SignerLineageMismatch { ... });
 }
@@ -245,7 +248,7 @@ enum CacheState {
 ```text
 .signatures/
   manifest.json
-  v2.sig              # Contains multiple Signer entries
+  signature.bin       # Contains multiple Signer entries
   lineages/
     0.bin             # Company A's lineage [A→A'→A'']
     1.bin             # Company B's lineage [B→B'→B'']
@@ -268,17 +271,17 @@ message Signer {
 ```rust
 fn verify_bundle(bundle: &AppBundle) -> Result<Vec<VerifiedSigner>> {
     let sig_dir = bundle.path.join(".signatures");
-    let v2_sig = read_proto::<SolSignatureV2>(&sig_dir.join("v2.sig"))?;
+    let signature_block = read_proto::<SolSignatureBlock>(&sig_dir.join("signature.bin"))?;
     let manifest = read_json::<Manifest>(&sig_dir.join("manifest.json"))?;
     
     let mut verified_signers = Vec::new();
     
-    for signer in &v2_sig.signers {
+    for signer in &signature_block.signers {
         // 1. Verify signature
         let public_key = verify_signer(signer, &manifest)?;
         
         // 2. Load corresponding lineage
-        let lineage_path = if v2_sig.signers.len() == 1 {
+        let lineage_path = if signature_block.signers.len() == 1 {
             // Single signer: lineage.bin (backward compat)
             sig_dir.join("lineage.bin")
         } else {
@@ -382,9 +385,9 @@ $ sol-bundle sign Example.app --key publisher-2.key --lineage lineage.bin
 
 ---
 
-## Issue #3: v2.sig 中的 public_key 与 lineage 当前证书的一致性未检查
+## Issue #3: signature.bin 中的 public_key 与 lineage 当前证书的一致性未检查
 
-**Problem:** If `v2.sig.public_key` differs from `lineage.current_certificate.public_key`, attacker could exploit inconsistency.
+**Problem:** If `signature.bin.public_key` differs from `lineage.current_certificate.public_key`, attacker could exploit inconsistency.
 
 **Fix:** Add explicit consistency check:
 
@@ -523,13 +526,13 @@ fn verify_signature_with_algo(
 
 ```rust
 fn verify_bundle(bundle: &AppBundle) -> Result<Vec<VerifiedSigner>> {
-    let v2_sig = read_proto::<SolSignatureV2>(&sig_path)?;
+    let signature_block = read_proto::<SolSignatureBlock>(&sig_path)?;
     let manifest = read_json::<Manifest>(&manifest_path)?;
     
     let mut verified_signers = Vec::new();
     let mut any_failed = false;
     
-    for signer in &v2_sig.signers {
+    for signer in &signature_block.signers {
         match verify_signer(signer, &manifest) {
             Ok(verified) => verified_signers.push(verified),
             Err(e) => {
@@ -542,7 +545,7 @@ fn verify_bundle(bundle: &AppBundle) -> Result<Vec<VerifiedSigner>> {
     // CRITICAL: All signers must be valid
     if any_failed || verified_signers.is_empty() {
         return Err(SignatureError::InvalidSigners {
-            total: v2_sig.signers.len(),
+            total: signature_block.signers.len(),
             valid: verified_signers.len(),
         });
     }
@@ -657,7 +660,7 @@ fn verify_with_revocation_check(bundle: &AppBundle) -> Result<VerifiedIdentity> 
 |-------|--------|-----|
 | #1 Multi-signer lineage | 🔴 Critical | Use `lineages/` directory |
 | #2 Initial release lineage | 🟡 Medium | Make `lineage.bin` optional |
-| #3 Key consistency | 🔴 Critical | Check v2.sig.public_key == lineage.current_key |
+| #3 Key consistency | 🔴 Critical | Check signature.bin.public_key == lineage.current_key |
 | #4 Timestamp validity | 🟡 Medium | Enforce `not_before` / `not_after` |
 | #5 Lineage signature algo | 🟡 Medium | Use explicit algorithm field |
 | #6 Multi-signer security | 🔴 Critical | All-or-nothing verification |
@@ -678,7 +681,7 @@ Add tests for these fixes:
 52. ✅ First update after rotation: lineage.bin created
 
 # Issue #3: Key consistency
-53. ❌ v2.sig.public_key != lineage.current_key: reject
+53. ❌ signature.bin.public_key != lineage.current_key: reject
 
 # Issue #4: Timestamp validity
 54. ❌ Signature timestamp before not_before: reject
