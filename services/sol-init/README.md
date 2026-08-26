@@ -20,7 +20,10 @@ systemd (system PID 1)
 └── sol-session@.service (wrapper)
     └── sol-init (SOL session manager)
         ├── sol-compositor (core, always first)
+        ├── sol-audio (PipeWire, protected DSP scheduling)
         ├── sol-shell (core, after compositor)
+        ├── sol-networkd (protected network service)
+        ├── sol-portal (trusted authorization broker)
         ├── sol-settingsd (on-demand, D-Bus)
         └── sol-notificationd (on-demand, D-Bus)
 ```
@@ -55,7 +58,7 @@ capabilities = [
 [Environment]
 WAYLAND_DISPLAY = "sol-0"
 
-[Resources]  # Phase 2+
+[Resources]  # Per-daemon overrides (pending)
 memory_limit = "512M"
 cpu_share = 1024
 ```
@@ -151,8 +154,15 @@ publisher = "My Company"
 - `core`/`system` daemons: capabilities are advisory (trusted code)
 - `application` daemons: capabilities are checked at runtime and must pass app store review
 
-### Resource Limits
-Phase 2+ adds cgroup-based resource limits:
+### Resource Scheduling
+
+ADR-0029 Phase 1 creates fixed, trusted cgroup classes for the compositor,
+audio, shell, network, system, foreground, background, and build workloads.
+`sol-init` also applies class-specific nice, OOM, and I/O protection and scans
+for build tools every 500 ms. Application daemon metadata cannot select an
+elevated class.
+
+Fine-grained legacy per-daemon overrides remain pending:
 
 ```toml
 [Resources]
@@ -196,5 +206,6 @@ cargo test -p sol-init -- test_topological_sort
 - `src/lib.rs` - Main `SolInit` struct and high-level logic
 - `src/daemon.rs` - Daemon definition parsing and dependency resolution
 - `src/process.rs` - Process lifecycle management (spawn/wait/restart)
+- `../sol-scheduler/` - Trusted scheduling policy and PipeWire RT drop-in
 - `src/main.rs` - CLI entry point
 - `daemons/` - System daemon definitions (installed to `/usr/share/sol/daemons/`)

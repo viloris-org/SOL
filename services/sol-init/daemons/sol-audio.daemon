@@ -1,0 +1,16 @@
+[Daemon]
+name = "sol-audio"
+exec = "/usr/bin/pipewire"
+type = "core"
+start_mode = "boot"
+restart_policy = "always"
+
+after = []
+requires = []
+
+capabilities = [
+    "audio.server",
+    "audio.devices"
+]
+
+[Environment]

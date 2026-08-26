@@ -5529,6 +5529,7 @@ name = "sol-session"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
+ "sol-scheduler",
 ]
 
 [[package]]

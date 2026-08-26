@@ -75,10 +75,12 @@ package_sol-compositor() {
 
 package_sol-session() {
   pkgdesc='SOL TTY/udev session launcher'
-  depends=('sol-compositor' 'sol-notificationd' 'sol-portal' 'sol-settingsd' 'sol-shell')
+  depends=('pipewire' 'sol-compositor' 'sol-notificationd' 'sol-portal' 'sol-settingsd' 'sol-shell')
   _package_binary sol-session
   install -Dm644 "${srcdir}/${_source_dir}/session/assets/sol.desktop" \
     "${pkgdir}/usr/share/wayland-sessions/sol.desktop"
+  install -Dm644 "${srcdir}/${_source_dir}/services/sol-scheduler/pipewire/10-sol-scheduling.conf" \
+    "${pkgdir}/usr/share/pipewire/pipewire.conf.d/10-sol-scheduling.conf"
 }
 
 package_sol-shell() {

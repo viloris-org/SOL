@@ -33,7 +33,7 @@ mod window;
 
 use outputs::OutputConfiguration;
 use sol_compositor::scp::ScpServer;
-use sol_scheduler::FrameWatchdog;
+use sol_scheduler::{COMPOSITOR_RT_PRIORITY, FrameWatchdog};
 
 use std::{sync::Arc, time::Instant};
 
@@ -148,7 +148,7 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
     let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
 
     let mut frame_watchdog = FrameWatchdog::for_refresh_millihz(60_000);
-    if let Err(error) = frame_watchdog.enable_realtime(2) {
+    if let Err(error) = frame_watchdog.enable_realtime(COMPOSITOR_RT_PRIORITY) {
         tracing::warn!(%error, "SCHED_FIFO priority 2 unavailable; compositor remains on CFS");
     } else {
         tracing::info!("compositor render/present event loop elevated to SCHED_FIFO priority 2");
@@ -324,13 +324,14 @@ pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>
         if let Some(input_at) = pending_input_at.take() {
             frame_watchdog.note_input_age(input_at.elapsed());
         }
-        let observation = frame_watchdog.observe(frame_started.elapsed())?;
-        if observation.watchdog_downgraded {
-            tracing::error!(
+        match frame_watchdog.observe(frame_started.elapsed()) {
+            Ok(observation) if observation.watchdog_downgraded => tracing::error!(
                 frame_time_us = frame_started.elapsed().as_micros(),
                 budget_us = frame_watchdog.frame_budget().as_micros(),
                 "compositor exceeded watchdog budget and was downgraded to SCHED_OTHER"
-            );
+            ),
+            Ok(_) => {}
+            Err(error) => tracing::error!(%error, "failed to downgrade compositor scheduler"),
         }
         let telemetry = frame_watchdog.telemetry();
         if telemetry.presented_frames.is_multiple_of(600) {

@@ -61,7 +61,7 @@ use smithay::{
     wayland::shell::xdg::ToplevelSurface,
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
-use sol_scheduler::FrameWatchdog;
+use sol_scheduler::{COMPOSITOR_RT_PRIORITY, FrameWatchdog};
 
 use crate::{
     CLEAR_BACKGROUND, accept_clients,
@@ -153,7 +153,7 @@ pub fn run(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
 
     let session_active = session.is_active();
     let mut frame_watchdog = FrameWatchdog::for_refresh_millihz(60_000);
-    if let Err(error) = frame_watchdog.enable_realtime(2) {
+    if let Err(error) = frame_watchdog.enable_realtime(COMPOSITOR_RT_PRIORITY) {
         tracing::warn!(%error, "SCHED_FIFO priority 2 unavailable; compositor remains on CFS");
     } else {
         tracing::info!("compositor render/present event loop elevated to SCHED_FIFO priority 2");

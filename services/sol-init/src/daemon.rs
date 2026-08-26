@@ -5,10 +5,11 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DaemonDefinition {
+    #[serde(rename = "Daemon", alias = "daemon")]
     pub daemon: DaemonConfig,
-    #[serde(default)]
+    #[serde(rename = "Environment", alias = "environment", default)]
     pub environment: HashMap<String, String>,
-    #[serde(default)]
+    #[serde(rename = "Resources", alias = "resources", default)]
     pub resources: ResourceConfig,
 }
 
@@ -201,5 +202,22 @@ mod tests {
             compositor_idx < shell_idx,
             "compositor must start before shell"
         );
+    }
+
+    #[test]
+    fn scheduling_daemon_definitions_are_valid() {
+        for (name, definition) in [
+            ("sol-audio", include_str!("../daemons/sol-audio.daemon")),
+            (
+                "sol-networkd",
+                include_str!("../daemons/sol-networkd.daemon"),
+            ),
+            ("sol-portal", include_str!("../daemons/sol-portal.daemon")),
+        ] {
+            assert!(
+                toml::from_str::<DaemonDefinition>(definition).is_ok(),
+                "invalid daemon definition: {name}"
+            );
+        }
     }
 }

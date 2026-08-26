@@ -9,3 +9,4 @@ publish = false
 
 [dependencies]
 ctrlc = { version = "3", features = ["termination"] }
+sol-scheduler = { path = "../services/sol-scheduler" }

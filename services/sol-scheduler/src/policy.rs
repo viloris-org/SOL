@@ -1,5 +1,12 @@
 //! The single, reviewable policy table implementing ADR-0029 Phase 1.
 
+/// `PipeWire`/`sol-audio` DSP and mixing thread FIFO priority.
+pub const AUDIO_RT_PRIORITY: i32 = 10;
+/// Compositor render/present event-loop FIFO priority.
+pub const COMPOSITOR_RT_PRIORITY: i32 = 2;
+/// Shell UI event-loop FIFO priority.
+pub const SHELL_RT_PRIORITY: i32 = 1;
+
 /// A cgroup v2 CPU bandwidth limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CpuLimit {
@@ -28,8 +35,8 @@ pub enum IoPriority {
     Idle,
 }
 
-/// Trusted scheduler classes. These are assigned by `sol-init`, never parsed
-/// from application-controlled metadata.
+/// Trusted scheduler classes. These are assigned by `sol-session`/`sol-init`,
+/// never parsed from application-controlled metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProcessClass {
     Compositor,
@@ -64,16 +71,14 @@ impl ProcessClass {
     #[must_use]
     pub const fn process_policy(self) -> ProcessPolicy {
         match self {
-            Self::Compositor => ProcessPolicy::new(0, -900, IoPriority::Realtime),
-            Self::Audio => ProcessPolicy::new(0, -900, IoPriority::Realtime),
+            Self::Compositor | Self::Audio => ProcessPolicy::new(0, -900, IoPriority::Realtime),
             Self::Shell => ProcessPolicy::new(0, -800, IoPriority::BestEffort(0)),
             Self::Network => ProcessPolicy::new(-10, -800, IoPriority::BestEffort(1)),
             Self::System => ProcessPolicy::new(-10, -500, IoPriority::BestEffort(2)),
             Self::Notification => ProcessPolicy::new(-5, -500, IoPriority::BestEffort(2)),
             Self::Foreground => ProcessPolicy::new(0, 0, IoPriority::BestEffort(4)),
             Self::ForegroundGame => ProcessPolicy::new(-10, 0, IoPriority::BestEffort(4)),
-            Self::Background => ProcessPolicy::new(10, 100, IoPriority::Idle),
-            Self::Build => ProcessPolicy::new(10, 100, IoPriority::Idle),
+            Self::Background | Self::Build => ProcessPolicy::new(10, 100, IoPriority::Idle),
         }
     }
 }
@@ -217,13 +222,15 @@ mod tests {
 
     #[test]
     fn cpu_limits_use_kernel_syntax() {
-        let background = cgroup_profiles()
+        let Some(background) = cgroup_profiles()
             .iter()
             .find(|profile| profile.name == "sol-background")
-            .unwrap();
-        assert_eq!(
-            background.cpu_limit.unwrap().as_cgroup_value(),
-            "20000 100000"
-        );
+        else {
+            panic!("background profile must exist");
+        };
+        assert!(matches!(
+            background.cpu_limit,
+            Some(limit) if limit.as_cgroup_value() == "20000 100000"
+        ));
     }
 }

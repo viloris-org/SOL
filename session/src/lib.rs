@@ -4,6 +4,7 @@
 //! not seat/login management. The compositor remains responsible for opening a
 //! real DRM/libseat session when its `--tty-udev` backend is selected.
 
+use sol_scheduler::{ProcessClass, SchedulingManager};
 use std::{
     env,
     ffi::OsString,
@@ -33,6 +34,7 @@ pub struct SessionEnvironment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramPaths {
     pub compositor: PathBuf,
+    pub audio: PathBuf,
     pub shell: PathBuf,
     pub settingsd: PathBuf,
     pub notificationd: PathBuf,
@@ -44,6 +46,7 @@ impl ProgramPaths {
     pub fn from_environment() -> Self {
         Self {
             compositor: env_path("SOL_COMPOSITOR_BIN", "sol-compositor"),
+            audio: env_path("SOL_AUDIO_BIN", "pipewire"),
             shell: env_path("SOL_SHELL_BIN", "sol-shell"),
             settingsd: env_path("SOL_SETTINGSD_BIN", "sol-settingsd"),
             notificationd: env_path("SOL_NOTIFICATIOND_BIN", "sol-notificationd"),
@@ -62,6 +65,7 @@ pub struct ProcessPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchPlan {
     pub compositor: ProcessPlan,
+    pub audio: ProcessPlan,
     pub shell: ProcessPlan,
     pub settingsd: ProcessPlan,
     pub notificationd: ProcessPlan,
@@ -240,6 +244,11 @@ impl LaunchPlan {
                     (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
                 ],
             },
+            audio: ProcessPlan {
+                program: programs.audio.clone(),
+                arguments: Vec::new(),
+                environment: desktop_environment.clone(),
+            },
             shell: ProcessPlan {
                 program: programs.shell.clone(),
                 arguments: Vec::new(),
@@ -260,12 +269,13 @@ impl LaunchPlan {
     #[must_use]
     pub fn dry_run_output(&self) -> String {
         format!(
-            "compositor: {} --tty-udev\ncompositor env: XDG_RUNTIME_DIR={} SOL_WAYLAND_SOCKET={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nsettingsd: {} --dbus\nnotificationd: {} --dbus\nportal: {} --dbus\nshell: {}\nshell env: XDG_RUNTIME_DIR={} WAYLAND_DISPLAY={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nwait for socket: {}\n",
+            "compositor: {} --tty-udev\ncompositor env: XDG_RUNTIME_DIR={} SOL_WAYLAND_SOCKET={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\naudio: {}\nsettingsd: {} --dbus\nnotificationd: {} --dbus\nportal: {} --dbus\nshell: {}\nshell env: XDG_RUNTIME_DIR={} WAYLAND_DISPLAY={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nwait for socket: {}\n",
             self.compositor.program.display(),
             value(&self.compositor.environment[0].1),
             value(&self.compositor.environment[1].1),
             value(&self.compositor.environment[2].1),
             value(&self.compositor.environment[3].1),
+            self.audio.program.display(),
             self.settingsd.program.display(),
             self.notificationd.program.display(),
             self.portal.program.display(),
@@ -278,11 +288,16 @@ impl LaunchPlan {
         )
     }
 
-    fn services(&self) -> [(&'static str, &ProcessPlan); 3] {
+    fn services(&self) -> [(&'static str, &ProcessPlan, ProcessClass); 4] {
         [
-            ("settingsd", &self.settingsd),
-            ("notificationd", &self.notificationd),
-            ("portal", &self.portal),
+            ("audio", &self.audio, ProcessClass::Audio),
+            ("settingsd", &self.settingsd, ProcessClass::System),
+            (
+                "notificationd",
+                &self.notificationd,
+                ProcessClass::Notification,
+            ),
+            ("portal", &self.portal, ProcessClass::System),
         ]
     }
 }
@@ -381,17 +396,30 @@ pub fn run(plan: &LaunchPlan) -> Result<(), String> {
     ctrlc::set_handler(move || interrupted.store(false, Ordering::SeqCst))
         .map_err(|error| format!("cannot install shutdown handler: {error}"))?;
 
-    let mut compositor = spawn(&plan.compositor)?;
+    let cgroup_root = env::var_os("SOL_CGROUP_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/sys/fs/cgroup/sol"));
+    let mut scheduling = SchedulingManager::new(cgroup_root);
+    let build_containment_enabled = scheduling
+        .provision()
+        .map_err(|error| {
+            eprintln!("sol-session: cgroup hierarchy unavailable: {error}");
+            error
+        })
+        .is_ok();
+
+    let mut compositor = spawn(&plan.compositor, &scheduling, ProcessClass::Compositor)?;
     if let Err(error) = wait_for_socket(&mut compositor, &plan.socket_path, &running) {
         stop(&mut compositor);
         return Err(error);
     }
     let mut companions = Vec::new();
-    for (name, child_plan) in plan.services() {
-        match spawn(child_plan) {
+    for (name, child_plan, class) in plan.services() {
+        match spawn(child_plan, &scheduling, class) {
             Ok(child) => companions.push(ManagedChild {
                 name,
                 plan: child_plan,
+                class,
                 child,
             }),
             Err(error) => {
@@ -406,10 +434,11 @@ pub fn run(plan: &LaunchPlan) -> Result<(), String> {
         stop_all(&mut companions);
         return Err(error);
     }
-    match spawn(&plan.shell) {
+    match spawn(&plan.shell, &scheduling, ProcessClass::Shell) {
         Ok(child) => companions.push(ManagedChild {
             name: "shell",
             plan: &plan.shell,
+            class: ProcessClass::Shell,
             child,
         }),
         Err(error) => {
@@ -419,7 +448,13 @@ pub fn run(plan: &LaunchPlan) -> Result<(), String> {
         }
     }
 
-    let result = supervise(&mut compositor, &mut companions, &running);
+    let result = supervise(
+        &mut compositor,
+        &mut companions,
+        &running,
+        &mut scheduling,
+        build_containment_enabled,
+    );
     stop(&mut compositor);
     stop_all(&mut companions);
     result
@@ -428,17 +463,30 @@ pub fn run(plan: &LaunchPlan) -> Result<(), String> {
 struct ManagedChild<'a> {
     name: &'static str,
     plan: &'a ProcessPlan,
+    class: ProcessClass,
     child: Child,
 }
 
-fn spawn(plan: &ProcessPlan) -> Result<Child, String> {
+fn spawn(
+    plan: &ProcessPlan,
+    scheduling: &SchedulingManager,
+    class: ProcessClass,
+) -> Result<Child, String> {
     let mut command = Command::new(&plan.program);
     command
         .args(&plan.arguments)
         .envs(plan.environment.iter().cloned());
-    command
+    let child = command
         .spawn()
-        .map_err(|error| format!("failed to start {}: {error}", plan.program.display()))
+        .map_err(|error| format!("failed to start {}: {error}", plan.program.display()))?;
+    let pid = child.id();
+    for failure in scheduling.apply(pid, class).failures {
+        eprintln!(
+            "sol-session: {class:?} PID {pid} {} unavailable: {}",
+            failure.control, failure.error
+        );
+    }
+    Ok(child)
 }
 
 fn wait_for_services(
@@ -504,7 +552,10 @@ fn supervise(
     compositor: &mut Child,
     companions: &mut [ManagedChild<'_>],
     running: &AtomicBool,
+    scheduling: &mut SchedulingManager,
+    build_containment_enabled: bool,
 ) -> Result<(), String> {
+    let mut next_build_scan = Instant::now();
     while running.load(Ordering::SeqCst) {
         if let Some(status) = compositor.try_wait().map_err(child_error("compositor"))? {
             return Err(format!(
@@ -518,13 +569,20 @@ fn supervise(
                 .map_err(child_error(companion.name))?
             {
                 tracing_restart(companion.name, status);
-                companion.child = spawn(companion.plan).map_err(|error| {
-                    format!(
-                        "could not restart {} after {status}: {error}",
-                        companion.name
-                    )
-                })?;
+                companion.child =
+                    spawn(companion.plan, scheduling, companion.class).map_err(|error| {
+                        format!(
+                            "could not restart {} after {status}: {error}",
+                            companion.name
+                        )
+                    })?;
             }
+        }
+        if build_containment_enabled && Instant::now() >= next_build_scan {
+            if let Err(error) = scheduling.contain_build_processes() {
+                eprintln!("sol-session: build-process scan failed: {error}");
+            }
+            next_build_scan = Instant::now() + Duration::from_millis(500);
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -572,6 +630,7 @@ mod tests {
         };
         let programs = ProgramPaths {
             compositor: PathBuf::from("/usr/bin/sol-compositor"),
+            audio: PathBuf::from("/usr/bin/pipewire"),
             shell: PathBuf::from("/usr/bin/sol-shell"),
             settingsd: PathBuf::from("/usr/bin/sol-settingsd"),
             notificationd: PathBuf::from("/usr/bin/sol-notificationd"),
@@ -579,6 +638,7 @@ mod tests {
         };
         let plan = LaunchPlan::new(&environment, &programs);
         assert_eq!(plan.compositor.arguments, [OsString::from("--tty-udev")]);
+        assert!(plan.audio.arguments.is_empty());
         for (_, service) in [
             ("settingsd", &plan.settingsd),
             ("notificationd", &plan.notificationd),
@@ -622,6 +682,7 @@ mod tests {
             &environment,
             &ProgramPaths {
                 compositor: PathBuf::from("sol-compositor"),
+                audio: PathBuf::from("pipewire"),
                 shell: PathBuf::from("sol-shell"),
                 settingsd: PathBuf::from("sol-settingsd"),
                 notificationd: PathBuf::from("sol-notificationd"),
@@ -630,7 +691,7 @@ mod tests {
         );
         assert_eq!(
             plan.dry_run_output(),
-            "compositor: sol-compositor --tty-udev\ncompositor env: XDG_RUNTIME_DIR=/run/user/42 SOL_WAYLAND_SOCKET=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nsettingsd: sol-settingsd --dbus\nnotificationd: sol-notificationd --dbus\nportal: sol-portal --dbus\nshell: sol-shell\nshell env: XDG_RUNTIME_DIR=/run/user/42 WAYLAND_DISPLAY=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: /run/user/42/wayland-sol\n"
+            "compositor: sol-compositor --tty-udev\ncompositor env: XDG_RUNTIME_DIR=/run/user/42 SOL_WAYLAND_SOCKET=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\naudio: pipewire\nsettingsd: sol-settingsd --dbus\nnotificationd: sol-notificationd --dbus\nportal: sol-portal --dbus\nshell: sol-shell\nshell env: XDG_RUNTIME_DIR=/run/user/42 WAYLAND_DISPLAY=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: /run/user/42/wayland-sol\n"
         );
     }
 

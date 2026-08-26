@@ -24,7 +24,7 @@ pub struct FrameObservation {
     pub watchdog_downgraded: bool,
 }
 
-/// SCHED_FIFO guard and telemetry for one render/present event-loop thread.
+/// `SCHED_FIFO` guard and telemetry for one render/present event-loop thread.
 pub struct FrameWatchdog {
     frame_budget: Duration,
     watchdog_budget: Duration,
@@ -52,6 +52,11 @@ impl FrameWatchdog {
 
     /// Elevate the calling render/present thread. Permission denial is
     /// returned to the caller so development and CI can explicitly degrade.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the priority is invalid or the caller lacks
+    /// real-time scheduling permission.
     pub fn enable_realtime(&mut self, priority: i32) -> io::Result<()> {
         promote_current_thread(priority)?;
         self.realtime_enabled = true;
@@ -59,11 +64,16 @@ impl FrameWatchdog {
     }
 
     /// Record the age of the newest input event at the next presentation.
-    pub fn note_input_age(&mut self, age: Duration) {
+    pub const fn note_input_age(&mut self, age: Duration) {
         self.pending_input_age = Some(age);
     }
 
     /// Record a frame and automatically downgrade a misbehaving RT thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns an operating-system error if a watchdog-triggered demotion
+    /// cannot be applied to the calling thread.
     pub fn observe(&mut self, frame_time: Duration) -> io::Result<FrameObservation> {
         self.telemetry.presented_frames += 1;
         self.telemetry.total_frame_time += frame_time;
@@ -126,9 +136,11 @@ mod tests {
     fn collects_frame_and_input_metrics_without_rt_privileges() {
         let mut watchdog = FrameWatchdog::for_refresh_millihz(60_000);
         watchdog.note_input_age(Duration::from_millis(4));
-        let observation = watchdog.observe(Duration::from_millis(17)).unwrap();
-        assert!(observation.missed_vsync);
-        assert!(!observation.watchdog_downgraded);
+        let observation = watchdog.observe(Duration::from_millis(17));
+        assert!(matches!(
+            observation,
+            Ok(observation) if observation.missed_vsync && !observation.watchdog_downgraded
+        ));
         assert_eq!(watchdog.telemetry().presented_frames, 1);
         assert_eq!(watchdog.telemetry().input_latency_samples, 1);
     }

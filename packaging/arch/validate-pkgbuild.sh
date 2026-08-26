@@ -5,7 +5,7 @@ set -euo pipefail
 readonly package_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly pkgbuild="${package_dir}/PKGBUILD"
 readonly expected_packages='sol-compositor sol-session sol-shell sol-settingsd sol-notificationd sol-portal sol-ime sol-files sol-terminal sol-settings sol-desktop'
-readonly expected_session_dependencies='sol-compositor sol-notificationd sol-portal sol-settingsd sol-shell'
+readonly expected_session_dependencies='pipewire sol-compositor sol-notificationd sol-portal sol-settingsd sol-shell'
 readonly expected_desktop_dependencies='sol-compositor sol-session sol-shell sol-settingsd sol-notificationd sol-portal sol-ime sol-files sol-terminal sol-settings'
 
 bash -n "${pkgbuild}"

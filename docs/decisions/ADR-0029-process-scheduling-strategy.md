@@ -1,12 +1,13 @@
 # ADR-0029: Process Scheduling Strategy
 
-**Status**: Accepted (Phase 1 implemented)  
+**Status**: Accepted (Phase 1 core implemented)
 **Date**: 2026-08-26  
 **Authors**: rownix  
 
-**Implementation**: Phase 1 lives in `services/sol-scheduler` and is enforced by
-`sol-init`, `sol-compositor`, and `sol-shell`. Later phases remain incremental
-work as described below.
+**Implementation**: Phase 1 core lives in `services/sol-scheduler` and is
+enforced by `sol-session`/`sol-init`, `sol-compositor`, `sol-shell`, and the
+PipeWire scheduling drop-in. Thread separation, priority inheritance, hardware
+stress validation, and later phases remain incremental work as described below.
 
 ## Context
 

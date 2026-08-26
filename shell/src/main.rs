@@ -40,7 +40,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 use client::Globals;
 use sol_design::color::Color;
 use sol_diagnostics::{DiagnosticSource, SolComponent, install_default_panic_capture};
-use sol_scheduler::promote_current_thread;
+use sol_scheduler::{SHELL_RT_PRIORITY, promote_current_thread};
 
 /// The logical height of the top bar.
 const BAR_HEIGHT: i32 = 40;
@@ -316,7 +316,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let once = std::env::args().any(|a| a == "--once");
     tracing::info!(once, "sol-shell starting");
 
-    if let Err(error) = promote_current_thread(1) {
+    if let Err(error) = promote_current_thread(SHELL_RT_PRIORITY) {
         tracing::warn!(%error, "SCHED_FIFO priority 1 unavailable; shell UI loop remains on CFS");
     } else {
         tracing::info!("shell UI event loop elevated to SCHED_FIFO priority 1");

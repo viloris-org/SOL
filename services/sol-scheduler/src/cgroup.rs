@@ -29,6 +29,11 @@ impl CgroupHierarchy {
     }
 
     /// Create all policy leaves and configure every available controller.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the hierarchy cannot be created or a
+    /// supported controller rejects its policy value.
     pub fn provision(&self) -> io::Result<()> {
         if let Some(parent) = self.root.parent() {
             enable_controllers_if_present(parent)?;
@@ -41,9 +46,10 @@ impl CgroupHierarchy {
             let leaf = self.root.join(profile.name);
             fs::create_dir_all(&leaf)?;
             write_profile_control(&leaf.join("cpu.weight"), profile.cpu_weight, kernel_cgroup)?;
-            let cpu_max = profile
-                .cpu_limit
-                .map_or_else(|| "max 100000".to_owned(), |limit| limit.as_cgroup_value());
+            let cpu_max = profile.cpu_limit.map_or_else(
+                || "max 100000".to_owned(),
+                super::policy::CpuLimit::as_cgroup_value,
+            );
             write_profile_control(&leaf.join("cpu.max"), cpu_max, kernel_cgroup)?;
             write_profile_control(
                 &leaf.join("io.weight"),
@@ -58,6 +64,10 @@ impl CgroupHierarchy {
     }
 
     /// Atomically migrate a process between class leaves through cgroup.procs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the kernel rejects the migration.
     pub fn move_process(&self, pid: u32, class: ProcessClass) -> io::Result<()> {
         write_control(
             &self.root.join(class.cgroup_name()).join("cgroup.procs"),
@@ -72,7 +82,21 @@ fn enable_controllers_if_present(directory: &Path) -> io::Result<()> {
     if !available.exists() && !subtree.exists() {
         return Ok(());
     }
-    write_control(&subtree, CONTROLLERS)
+    if !available.exists() {
+        return write_control(&subtree, CONTROLLERS);
+    }
+    let available = fs::read_to_string(available)?;
+    let requested = ["cpu", "io", "memory"]
+        .into_iter()
+        .filter(|controller| available.split_whitespace().any(|item| item == *controller))
+        .map(|controller| format!("+{controller}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if requested.is_empty() {
+        Ok(())
+    } else {
+        write_control(&subtree, requested)
+    }
 }
 
 fn write_control(path: &Path, value: impl std::fmt::Display) -> io::Result<()> {
@@ -102,7 +126,7 @@ pub struct BuildContainment {
     pub failures: Vec<(u32, io::Error)>,
 }
 
-/// High-level owner used by `sol-init`.
+/// High-level owner used by `sol-session` and `sol-init`.
 pub struct SchedulingManager {
     hierarchy: CgroupHierarchy,
     proc_root: PathBuf,
@@ -124,6 +148,11 @@ impl SchedulingManager {
         }
     }
 
+    /// Provision the configured hierarchy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error forwarded by [`CgroupHierarchy::provision`].
     pub fn provision(&self) -> io::Result<()> {
         self.hierarchy.provision()
     }
@@ -138,13 +167,16 @@ impl SchedulingManager {
 
     /// Detect known compiler/build executables and contain newly observed
     /// process generations. PID start time prevents PID-reuse mistakes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the procfs root cannot be enumerated. Races
+    /// with individual exiting processes are intentionally ignored.
     pub fn contain_build_processes(&mut self) -> io::Result<BuildContainment> {
         let mut containment = BuildContainment::default();
+        let mut observed_builds = HashSet::new();
         for entry in fs::read_dir(&self.proc_root)? {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
+            let Ok(entry) = entry else { continue };
             let Some(pid) = entry
                 .file_name()
                 .to_str()
@@ -152,17 +184,16 @@ impl SchedulingManager {
             else {
                 continue;
             };
-            let comm = match fs::read_to_string(entry.path().join("comm")) {
-                Ok(comm) => comm,
-                Err(_) => continue,
+            let Ok(comm) = fs::read_to_string(entry.path().join("comm")) else {
+                continue;
             };
             if !is_build_tool(comm.trim()) {
                 continue;
             }
-            let start_time = match process_start_time(&entry.path().join("stat")) {
-                Ok(start_time) => start_time,
-                Err(_) => continue,
+            let Ok(start_time) = process_start_time(&entry.path().join("stat")) else {
+                continue;
             };
+            observed_builds.insert((pid, start_time));
             if !self.contained_builds.insert((pid, start_time)) {
                 continue;
             }
@@ -175,6 +206,8 @@ impl SchedulingManager {
                 }
             }
         }
+        self.contained_builds
+            .retain(|process| observed_builds.contains(process));
         Ok(containment)
     }
 }
@@ -221,13 +254,11 @@ fn is_build_tool(command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn temp_root(label: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
             "sol-scheduler-{label}-{}-{unique}",
             std::process::id()
@@ -235,25 +266,26 @@ mod tests {
     }
 
     #[test]
-    fn provisions_phase_one_hierarchy() {
+    fn provisions_phase_one_hierarchy() -> io::Result<()> {
         let parent = temp_root("hierarchy");
         let root = parent.join("sol");
         let hierarchy = CgroupHierarchy::new(&root);
-        hierarchy.provision().unwrap();
+        hierarchy.provision()?;
 
         assert_eq!(
-            fs::read_to_string(root.join("sol-compositor/cpu.weight")).unwrap(),
+            fs::read_to_string(root.join("sol-compositor/cpu.weight"))?,
             "1000"
         );
         assert_eq!(
-            fs::read_to_string(root.join("sol-background/cpu.max")).unwrap(),
+            fs::read_to_string(root.join("sol-background/cpu.max"))?,
             "20000 100000"
         );
         assert_eq!(
-            fs::read_to_string(root.join("sol-network/memory.min")).unwrap(),
+            fs::read_to_string(root.join("sol-network/memory.min"))?,
             (64 * 1024 * 1024).to_string()
         );
-        fs::remove_dir_all(parent).unwrap();
+        fs::remove_dir_all(parent)?;
+        Ok(())
     }
 
     #[test]
@@ -265,14 +297,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_start_time_when_command_contains_spaces() {
+    fn parses_start_time_when_command_contains_spaces() -> io::Result<()> {
         let root = temp_root("stat");
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&root)?;
         let stat = root.join("stat");
         let mut fields = vec!["S"; 20];
         fields[19] = "98765";
-        fs::write(&stat, format!("42 (build worker) {}", fields.join(" "))).unwrap();
-        assert_eq!(process_start_time(&stat).unwrap(), 98_765);
-        fs::remove_dir_all(root).unwrap();
+        fs::write(&stat, format!("42 (build worker) {}", fields.join(" ")))?;
+        assert_eq!(process_start_time(&stat)?, 98_765);
+        fs::remove_dir_all(root)?;
+        Ok(())
     }
 }

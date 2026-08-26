@@ -1,4 +1,4 @@
-//! Small Linux syscall boundary. All unsafe code is contained in this module.
+//! Small safe Linux scheduling adapter used by the privileged session manager.
 
 use std::{
     fs, io,
@@ -29,7 +29,7 @@ pub struct ApplyReport {
 
 impl ApplyReport {
     #[must_use]
-    pub fn is_success(&self) -> bool {
+    pub const fn is_success(&self) -> bool {
         self.failures.is_empty()
     }
 
@@ -41,6 +41,11 @@ impl ApplyReport {
 }
 
 /// Elevate only the calling Linux thread to `SCHED_FIFO`.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for priorities outside 1–99, or the operating
+/// system error when the caller lacks real-time scheduling permission.
 pub fn promote_current_thread(priority: i32) -> io::Result<()> {
     if !(1..=99).contains(&priority) {
         return Err(io::Error::new(
@@ -48,7 +53,9 @@ pub fn promote_current_thread(priority: i32) -> io::Result<()> {
             "SCHED_FIFO priority must be between 1 and 99",
         ));
     }
-    let value = ThreadPriorityValue::try_from(priority as u8)
+    let raw_priority = u8::try_from(priority)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let value = ThreadPriorityValue::try_from(raw_priority)
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
     set_thread_priority_and_policy(
         thread_native_id(),
@@ -59,6 +66,11 @@ pub fn promote_current_thread(priority: i32) -> io::Result<()> {
 }
 
 /// Return the calling Linux thread to the normal CFS scheduler.
+///
+/// # Errors
+///
+/// Returns the operating system error if the calling thread's policy cannot
+/// be changed.
 pub fn demote_current_thread() -> io::Result<()> {
     set_thread_priority_and_policy(
         thread_native_id(),
@@ -71,11 +83,7 @@ pub fn demote_current_thread() -> io::Result<()> {
     .map_err(io::Error::other)
 }
 
-pub(crate) fn apply_process_controls(
-    proc_root: &Path,
-    pid: u32,
-    class: ProcessClass,
-) -> ApplyReport {
+pub fn apply_process_controls(proc_root: &Path, pid: u32, class: ProcessClass) -> ApplyReport {
     let policy = class.process_policy();
     let mut report = ApplyReport::default();
     report.capture("nice", set_process_nice(pid, policy.nice));
@@ -156,13 +164,13 @@ mod tests {
 
     #[test]
     fn realtime_priority_is_validated_before_syscall() {
-        assert_eq!(
-            promote_current_thread(0).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
-        assert_eq!(
-            promote_current_thread(100).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
+        assert!(matches!(
+            promote_current_thread(0),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
+        assert!(matches!(
+            promote_current_thread(100),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
     }
 }
