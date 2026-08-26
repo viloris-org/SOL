@@ -97,41 +97,41 @@ impl PermissionManager {
         }
 
         // Check manifest
-        if let Ok(manifests) = self.manifests.read() {
-            if let Some(manifest) = manifests.get(app_id) {
-                // Check if explicitly forbidden
-                if manifest.is_forbidden(capability) {
-                    self.audit
-                        .log_capability_denied(app_id, capability, "Forbidden in manifest");
-                    return Decision::Denied {
-                        reason: "Capability is forbidden in the app manifest".to_string(),
-                    };
-                }
+        if let Ok(manifests) = self.manifests.read()
+            && let Some(manifest) = manifests.get(app_id)
+        {
+            // Check if explicitly forbidden
+            if manifest.is_forbidden(capability) {
+                self.audit
+                    .log_capability_denied(app_id, capability, "Forbidden in manifest");
+                return Decision::Denied {
+                    reason: "Capability is forbidden in the app manifest".to_string(),
+                };
+            }
 
-                // Check if statically declared
-                if manifest.static_capabilities().contains(capability) {
-                    let token = self.security.issue_token(app_id, capability);
-                    self.audit
-                        .log_capability_granted(app_id, capability, "static");
-                    return Decision::Granted {
-                        token,
-                        expires_at: None,
-                    };
-                }
+            // Check if statically declared
+            if manifest.static_capabilities().contains(capability) {
+                let token = self.security.issue_token(app_id, capability);
+                self.audit
+                    .log_capability_granted(app_id, capability, "static");
+                return Decision::Granted {
+                    token,
+                    expires_at: None,
+                };
+            }
 
-                // Check if declared in dynamic section
-                let is_dynamic = manifest
-                    .dynamic_capabilities()
-                    .iter()
-                    .any(|(cap, _)| cap == capability);
+            // Check if declared in dynamic section
+            let is_dynamic = manifest
+                .dynamic_capabilities()
+                .iter()
+                .any(|(cap, _)| cap == capability);
 
-                if !is_dynamic {
-                    self.audit
-                        .log_capability_denied(app_id, capability, "Not in manifest");
-                    return Decision::Denied {
-                        reason: "Capability not declared in app manifest".to_string(),
-                    };
-                }
+            if !is_dynamic {
+                self.audit
+                    .log_capability_denied(app_id, capability, "Not in manifest");
+                return Decision::Denied {
+                    reason: "Capability not declared in app manifest".to_string(),
+                };
             }
         }
 

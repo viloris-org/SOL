@@ -5,7 +5,8 @@ use crate::scp::{
     capability::{Capability, CapabilityGrant, CapabilityToken, Decision},
     input::InputState,
     output::OutputManager,
-    protocol::{ClientMessage, CompositorMessage, SessionId, SurfaceId},
+    popup::{position_popup, Popup},
+    protocol::{BufferId, ClientMessage, CompositorMessage, PopupId, Rect, SessionId, SurfaceId},
     security::{AppId, AuditOutcome, SecurityCoordinator, StubSecurityCoordinator},
     surface::SurfaceManager,
 };
@@ -74,7 +75,11 @@ pub struct ScpState {
     buffer_manager: BufferManager,
     input_state: InputState,
     output_manager: OutputManager,
+    popups: HashMap<PopupId, Popup>,
+    next_popup_id: PopupId,
+    next_buffer_id: BufferId,
     focused_surface: Option<(SessionId, SurfaceId)>,
+    cursor_surface: Option<(SessionId, SurfaceId)>,
     next_serial: u32,
 }
 
@@ -92,7 +97,11 @@ impl ScpState {
             buffer_manager: BufferManager::new(),
             input_state: InputState::new(),
             output_manager: OutputManager::new(),
+            popups: HashMap::new(),
+            next_popup_id: 1,
+            next_buffer_id: 1,
             focused_surface: None,
+            cursor_surface: None,
             next_serial: 1,
         }
     }
@@ -101,6 +110,12 @@ impl ScpState {
         let serial = self.next_serial;
         self.next_serial = self.next_serial.wrapping_add(1);
         serial
+    }
+
+    fn next_buffer_id(&mut self) -> BufferId {
+        let id = self.next_buffer_id;
+        self.next_buffer_id += 1;
+        id
     }
 
     pub fn input_state(&self) -> &InputState {
@@ -267,11 +282,13 @@ impl ScpState {
             } => {
                 self.validate_buffer(buffer_fd, width, height, stride)?;
                 self.verify_surface_ownership(session_id, surface_id)?;
+                let buffer_id = self.next_buffer_id();
                 let surface = self
                     .surface_manager
                     .get_surface_mut(session_id, surface_id)
                     .ok_or("Surface not found")?;
                 surface.attach_buffer(crate::scp::surface::SurfaceBuffer {
+                    buffer_id,
                     fd: buffer_fd,
                     width,
                     height,
@@ -280,12 +297,23 @@ impl ScpState {
                 });
                 Ok(vec![])
             }
-            ClientMessage::Commit { surface_id } => {
+            ClientMessage::Commit {
+                surface_id,
+                frame_callback,
+            } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
-                self.surface_manager
+
+                let surface = self
+                    .surface_manager
                     .get_surface_mut(session_id, surface_id)
-                    .ok_or("Surface not found")?
-                    .commit();
+                    .ok_or("Surface not found")?;
+
+                // Register frame callback if requested
+                if let Some(callback_id) = frame_callback {
+                    surface.request_frame(callback_id);
+                }
+
+                surface.commit();
                 Ok(vec![])
             }
             ClientMessage::RequestCapability {
@@ -434,20 +462,37 @@ impl ScpState {
                 height,
             } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
-                // TODO: Track damage regions for optimization
-                tracing::trace!(?surface_id, ?x, ?y, ?width, ?height, "Surface damage");
+                if let Some(surface) = self
+                    .surface_manager
+                    .get_surface_mut(session_id, surface_id)
+                {
+                    surface.add_damage(Rect {
+                        x,
+                        y,
+                        width,
+                        height,
+                    });
+                }
                 Ok(vec![])
             }
             ClientMessage::SetInputRegion { surface_id, rects } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
-                // TODO: Implement input region management
-                tracing::debug!(?surface_id, num_rects = ?rects.len(), "SetInputRegion - not yet implemented");
+                if let Some(surface) = self
+                    .surface_manager
+                    .get_surface_mut(session_id, surface_id)
+                {
+                    surface.set_input_region(rects);
+                }
                 Ok(vec![])
             }
             ClientMessage::SetOpaqueRegion { surface_id, rects } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
-                // TODO: Implement opaque region management for rendering optimization
-                tracing::debug!(?surface_id, num_rects = ?rects.len(), "SetOpaqueRegion - not yet implemented");
+                if let Some(surface) = self
+                    .surface_manager
+                    .get_surface_mut(session_id, surface_id)
+                {
+                    surface.set_opaque_region(rects);
+                }
                 Ok(vec![])
             }
 
@@ -455,31 +500,177 @@ impl ScpState {
             ClientMessage::CreatePopup {
                 surface_id,
                 parent_id,
-                positioner: _,
+                positioner,
                 grab,
             } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
                 self.verify_surface_ownership(session_id, parent_id)?;
-                // TODO: Implement popup positioning algorithm
+
+                // Get parent surface geometry for positioning
+                let parent_surface = self
+                    .surface_manager
+                    .get_surface(session_id, parent_id)
+                    .ok_or("Parent surface not found")?;
+
+                let parent_rect = if let Some(buffer) = &parent_surface.buffer {
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        width: buffer.width,
+                        height: buffer.height,
+                    }
+                } else {
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        width: 800,
+                        height: 600,
+                    }
+                };
+
+                // Get output bounds for constraint resolution
+                let output_rect = self
+                    .output_manager
+                    .primary_output()
+                    .map(|output| output.geometry.clone())
+                    .unwrap_or(Rect {
+                        x: 0,
+                        y: 0,
+                        width: 1920,
+                        height: 1080,
+                    });
+
+                // Calculate popup position
+                let geometry = position_popup(&positioner, &parent_rect, &output_rect);
+
+                // Create popup
+                let popup_id = self.next_popup_id;
+                self.next_popup_id = self
+                    .next_popup_id
+                    .checked_add(1)
+                    .ok_or("Popup ID space exhausted")?;
+
+                let mut popup = Popup::new(surface_id, parent_id, grab);
+                popup.geometry = geometry.clone();
+                self.popups.insert(popup_id, popup);
+
                 tracing::debug!(
+                    ?popup_id,
                     ?surface_id,
                     ?parent_id,
-                    ?grab,
-                    "CreatePopup - not yet implemented"
+                    x = geometry.x,
+                    y = geometry.y,
+                    "Popup created"
                 );
-                Ok(vec![])
+
+                Ok(vec![CompositorMessage::ConfigurePopup {
+                    popup_id,
+                    x: geometry.x,
+                    y: geometry.y,
+                    width: geometry.width,
+                    height: geometry.height,
+                }])
             }
 
             // Toplevel state management
             ClientMessage::SetToplevelState { toplevel_id, state } => {
                 self.verify_toplevel_ownership(session_id, toplevel_id)?;
-                // TODO: Implement state change handling (maximize, minimize, fullscreen)
-                tracing::debug!(
-                    ?toplevel_id,
-                    ?state,
-                    "SetToplevelState - not yet implemented"
-                );
-                Ok(vec![])
+
+                use crate::scp::protocol::ToplevelStateRequest;
+
+                let serial = self.next_serial();
+
+                let toplevel = self
+                    .surface_manager
+                    .get_toplevel_mut(toplevel_id)
+                    .ok_or("Toplevel not found")?;
+
+                let (width, height, states) = match state {
+                    ToplevelStateRequest::Maximize => {
+                        toplevel.set_maximized(true);
+                        // Use primary output dimensions
+                        let output = self.output_manager.primary_output();
+                        let (w, h) = if let Some(output) = output {
+                            (output.geometry.width, output.geometry.height)
+                        } else {
+                            (1920, 1080)
+                        };
+                        (w, h, crate::scp::surface::ToplevelStates {
+                            activated: toplevel.states.activated,
+                            maximized: true,
+                            fullscreen: false,
+                            minimized: false,
+                            resizing: false,
+                        })
+                    }
+                    ToplevelStateRequest::Minimize => {
+                        toplevel.set_minimized(true);
+                        // Keep current dimensions, just mark as minimized
+                        (toplevel.geometry.width, toplevel.geometry.height, crate::scp::surface::ToplevelStates {
+                            activated: false,
+                            maximized: toplevel.states.maximized,
+                            fullscreen: toplevel.states.fullscreen,
+                            minimized: true,
+                            resizing: false,
+                        })
+                    }
+                    ToplevelStateRequest::Fullscreen { output_id } => {
+                        toplevel.set_fullscreen(true);
+                        let output = if let Some(id) = output_id {
+                            self.output_manager.get_output(id)
+                        } else {
+                            self.output_manager.primary_output()
+                        };
+                        let (w, h) = if let Some(output) = output {
+                            (output.geometry.width, output.geometry.height)
+                        } else {
+                            (1920, 1080)
+                        };
+                        (w, h, crate::scp::surface::ToplevelStates {
+                            activated: toplevel.states.activated,
+                            maximized: false,
+                            fullscreen: true,
+                            minimized: false,
+                            resizing: false,
+                        })
+                    }
+                    ToplevelStateRequest::UnsetMaximize => {
+                        toplevel.set_maximized(false);
+                        (800, 600, crate::scp::surface::ToplevelStates {
+                            activated: toplevel.states.activated,
+                            maximized: false,
+                            fullscreen: toplevel.states.fullscreen,
+                            minimized: toplevel.states.minimized,
+                            resizing: false,
+                        })
+                    }
+                    ToplevelStateRequest::UnsetFullscreen => {
+                        toplevel.set_fullscreen(false);
+                        (toplevel.geometry.width, toplevel.geometry.height, crate::scp::surface::ToplevelStates {
+                            activated: toplevel.states.activated,
+                            maximized: toplevel.states.maximized,
+                            fullscreen: false,
+                            minimized: toplevel.states.minimized,
+                            resizing: false,
+                        })
+                    }
+                };
+
+                toplevel.configure(serial, width, height, states.clone());
+
+                Ok(vec![CompositorMessage::ConfigureToplevel {
+                    toplevel_id,
+                    serial,
+                    width,
+                    height,
+                    decoration_height: if states.fullscreen { 0 } else { 32 },
+                    states: crate::scp::protocol::ToplevelStates {
+                        activated: states.activated,
+                        maximized: states.maximized,
+                        fullscreen: states.fullscreen,
+                        resizing: states.resizing,
+                    },
+                }])
             }
             ClientMessage::SetToplevelAppId {
                 toplevel_id,
@@ -500,14 +691,25 @@ impl ScpState {
                 hotspot_x,
                 hotspot_y,
             } => {
-                // TODO: Implement cursor image setting
-                tracing::trace!(
-                    ?serial,
-                    ?surface_id,
-                    ?hotspot_x,
-                    ?hotspot_y,
-                    "SetCursor - not yet implemented"
-                );
+                // Verify serial is valid (from a recent enter/button event)
+                if serial > self.next_serial {
+                    return Err("Invalid cursor serial".to_string());
+                }
+
+                if let Some(surface_id) = surface_id {
+                    self.verify_surface_ownership(session_id, surface_id)?;
+                    self.cursor_surface = Some((session_id, surface_id));
+                    tracing::trace!(
+                        ?surface_id,
+                        ?hotspot_x,
+                        ?hotspot_y,
+                        "Cursor surface set"
+                    );
+                } else {
+                    // Hide cursor
+                    self.cursor_surface = None;
+                    tracing::trace!("Cursor hidden");
+                }
                 Ok(vec![])
             }
         }
@@ -644,12 +846,32 @@ impl ScpState {
 
     pub fn disconnect(&mut self, session_id: SessionId) {
         self.sessions.remove(&session_id);
+
+        // Remove popups owned by surfaces from this session
+        let mut popups_to_remove = Vec::new();
+        for (popup_id, popup) in &self.popups {
+            if let Some(_surface) = self.surface_manager.get_surface(session_id, popup.surface_id) {
+                // This popup belongs to the disconnecting session
+                popups_to_remove.push(*popup_id);
+            }
+        }
+        for popup_id in popups_to_remove {
+            self.popups.remove(&popup_id);
+        }
+
         self.surface_manager.destroy_session(session_id);
+
         if self
             .focused_surface
             .is_some_and(|(owner, _)| owner == session_id)
         {
             self.focused_surface = None;
+        }
+        if self
+            .cursor_surface
+            .is_some_and(|(owner, _)| owner == session_id)
+        {
+            self.cursor_surface = None;
         }
     }
 
@@ -657,8 +879,39 @@ impl ScpState {
         self.surface_manager.iter_toplevels()
     }
 
+    /// Send frame callbacks to all surfaces that requested them.
+    /// Called after rendering a frame.
+    pub fn send_frame_callbacks(&mut self, timestamp_ms: u64) -> Vec<(SessionId, CompositorMessage)> {
+        let mut messages = Vec::new();
+
+        for (session_id, surface_id, callback_id) in self.surface_manager.take_frame_callbacks() {
+            messages.push((
+                session_id,
+                CompositorMessage::FrameCallback {
+                    surface_id,
+                    callback_id,
+                    timestamp_ms,
+                },
+            ));
+        }
+
+        messages
+    }
+
     pub const fn get_focused_surface(&self) -> Option<(SessionId, SurfaceId)> {
         self.focused_surface
+    }
+
+    pub const fn get_cursor_surface(&self) -> Option<(SessionId, SurfaceId)> {
+        self.cursor_surface
+    }
+
+    pub fn get_popup(&self, popup_id: PopupId) -> Option<&Popup> {
+        self.popups.get(&popup_id)
+    }
+
+    pub fn dismiss_popup(&mut self, popup_id: PopupId) -> Option<Popup> {
+        self.popups.remove(&popup_id)
     }
 }
 

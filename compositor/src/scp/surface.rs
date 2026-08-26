@@ -1,7 +1,7 @@
 //! SCP surface management.
 
 use crate::scp::{
-    protocol::{BufferFormat, SessionId, SurfaceId, ToplevelId},
+    protocol::{BufferFormat, BufferId, Rect, SessionId, SurfaceId, ToplevelId},
     security::AppId,
 };
 use std::collections::HashMap;
@@ -14,10 +14,18 @@ pub struct ScpSurface {
     pub buffer: Option<SurfaceBuffer>,
     pub pending_buffer: Option<SurfaceBuffer>,
     pub role: SurfaceRole,
+    pub damage: Vec<Rect>,
+    pub pending_damage: Vec<Rect>,
+    pub input_region: Option<Vec<Rect>>,
+    pub opaque_region: Option<Vec<Rect>>,
+    pub frame_callbacks: Vec<u32>,
+    pub pending_frame_callbacks: Vec<u32>,
+    pub old_buffers: Vec<SurfaceBuffer>,
 }
 
 #[derive(Debug)]
 pub struct SurfaceBuffer {
+    pub buffer_id: BufferId,
     pub fd: i32,
     pub width: i32,
     pub height: i32,
@@ -49,17 +57,57 @@ impl ScpSurface {
             buffer: None,
             pending_buffer: None,
             role: SurfaceRole::None,
+            damage: Vec::new(),
+            pending_damage: Vec::new(),
+            input_region: None,
+            opaque_region: None,
+            frame_callbacks: Vec::new(),
+            pending_frame_callbacks: Vec::new(),
+            old_buffers: Vec::new(),
         }
+    }
+
+    pub fn request_frame(&mut self, callback_id: u32) {
+        self.pending_frame_callbacks.push(callback_id);
     }
 
     pub fn attach_buffer(&mut self, buffer: SurfaceBuffer) {
         self.pending_buffer = Some(buffer);
     }
 
+    pub fn add_damage(&mut self, rect: Rect) {
+        self.pending_damage.push(rect);
+    }
+
+    pub fn set_input_region(&mut self, rects: Vec<Rect>) {
+        self.input_region = Some(rects);
+    }
+
+    pub fn set_opaque_region(&mut self, rects: Vec<Rect>) {
+        self.opaque_region = Some(rects);
+    }
+
     pub fn commit(&mut self) {
         if let Some(buffer) = self.pending_buffer.take() {
-            self.buffer = Some(buffer);
+            // Keep old buffer for release after render
+            if let Some(old) = self.buffer.replace(buffer) {
+                self.old_buffers.push(old);
+            }
         }
+        self.damage = std::mem::take(&mut self.pending_damage);
+
+        // Move pending frame callbacks to active
+        self.frame_callbacks.append(&mut self.pending_frame_callbacks);
+    }
+
+    /// Take frame callbacks that should fire after this frame renders.
+    pub fn take_frame_callbacks(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.frame_callbacks)
+    }
+
+    /// Take old buffers that can now be released back to the client.
+    pub fn take_old_buffers(&mut self) -> Vec<SurfaceBuffer> {
+        std::mem::take(&mut self.old_buffers)
     }
 
     pub fn assign_role(&mut self, role: SurfaceRole) -> Result<(), String> {
@@ -68,6 +116,39 @@ impl ScpSurface {
         }
         self.role = role;
         Ok(())
+    }
+
+    /// Check if a point is inside the input region.
+    pub fn contains_point(&self, x: i32, y: i32) -> bool {
+        if let Some(regions) = &self.input_region {
+            regions.iter().any(|rect| {
+                x >= rect.x
+                    && x < rect.x + rect.width
+                    && y >= rect.y
+                    && y < rect.y + rect.height
+            })
+        } else {
+            // Default: entire surface is input region
+            if let Some(buffer) = &self.buffer {
+                x >= 0 && x < buffer.width && y >= 0 && y < buffer.height
+            } else {
+                false
+            }
+        }
+    }
+
+    /// Check if a region is fully opaque.
+    pub fn is_opaque_at(&self, x: i32, y: i32) -> bool {
+        if let Some(regions) = &self.opaque_region {
+            regions.iter().any(|rect| {
+                x >= rect.x
+                    && x < rect.x + rect.width
+                    && y >= rect.y
+                    && y < rect.y + rect.height
+            })
+        } else {
+            false
+        }
     }
 }
 
@@ -82,6 +163,7 @@ pub struct Toplevel {
     pub geometry: ToplevelGeometry,
     pub states: ToplevelStates,
     pub pending_configure: Option<PendingConfigure>,
+    pub parent: Option<ToplevelId>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +190,8 @@ pub struct ToplevelStates {
     pub activated: bool,
     pub maximized: bool,
     pub fullscreen: bool,
+    pub minimized: bool,
+    pub resizing: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +219,7 @@ impl Toplevel {
             geometry: ToplevelGeometry::default(),
             states: ToplevelStates::default(),
             pending_configure: None,
+            parent: None,
         }
     }
 
@@ -143,9 +228,11 @@ impl Toplevel {
     }
 
     pub fn set_app_id(&mut self, app_id: String) {
-        // Store user-provided app_id for grouping and icon lookup
-        // Note: This is different from the authenticated AppId
         tracing::debug!(toplevel_id = ?self.id, ?app_id, "Toplevel app_id updated");
+    }
+
+    pub fn set_parent(&mut self, parent: Option<ToplevelId>) {
+        self.parent = parent;
     }
 
     pub fn configure(&mut self, serial: u32, width: i32, height: i32, states: ToplevelStates) {
@@ -168,6 +255,22 @@ impl Toplevel {
             return true;
         }
         false
+    }
+
+    pub fn set_maximized(&mut self, maximized: bool) {
+        self.states.maximized = maximized;
+    }
+
+    pub fn set_fullscreen(&mut self, fullscreen: bool) {
+        self.states.fullscreen = fullscreen;
+    }
+
+    pub fn set_minimized(&mut self, minimized: bool) {
+        self.states.minimized = minimized;
+    }
+
+    pub fn set_activated(&mut self, activated: bool) {
+        self.states.activated = activated;
     }
 }
 
@@ -268,5 +371,17 @@ impl SurfaceManager {
         self.surfaces.retain(|(owner, _), _| *owner != session_id);
         self.toplevels
             .retain(|_, toplevel| toplevel.session_id != session_id);
+    }
+
+    /// Collect and clear all pending frame callbacks from all surfaces.
+    /// Returns (session_id, surface_id, callback_id) tuples.
+    pub fn take_frame_callbacks(&mut self) -> Vec<(SessionId, SurfaceId, u32)> {
+        let mut callbacks = Vec::new();
+        for ((session_id, surface_id), surface) in &mut self.surfaces {
+            for callback_id in surface.frame_callbacks.drain(..) {
+                callbacks.push((*session_id, *surface_id, callback_id));
+            }
+        }
+        callbacks
     }
 }

@@ -121,11 +121,11 @@ impl AuditLog {
             }
 
             // Persist to disk
-            if let Some(file) = &mut state.log_file {
-                if let Ok(json) = serde_json::to_string(&event) {
-                    let _ = writeln!(file, "{}", json);
-                    let _ = file.flush();
-                }
+            if let Some(file) = &mut state.log_file
+                && let Ok(json) = serde_json::to_string(&event)
+            {
+                let _ = writeln!(file, "{}", json);
+                let _ = file.flush();
             }
         }
     }

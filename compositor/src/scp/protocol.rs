@@ -40,7 +40,11 @@ pub enum ClientMessage {
     },
 
     /// Commit pending surface state
-    Commit { surface_id: SurfaceId },
+    Commit {
+        surface_id: SurfaceId,
+        /// Optional callback ID for frame timing
+        frame_callback: Option<u32>,
+    },
 
     /// Request capability authorization
     RequestCapability {
@@ -195,6 +199,7 @@ pub enum CompositorMessage {
     /// Frame callback — client can submit next frame
     FrameCallback {
         surface_id: SurfaceId,
+        callback_id: u32,
         timestamp_ms: u64,
     },
 

@@ -54,11 +54,11 @@ pub fn position_popup(
         height: positioner.size.1,
     };
 
-    if !is_fully_visible(&popup_rect, output_bounds) {
-        if let Some(adjusted) = apply_constraints(positioner, &popup_rect, output_bounds, parent_geometry) {
-            x = adjusted.x;
-            y = adjusted.y;
-        }
+    if !is_fully_visible(&popup_rect, output_bounds)
+        && let Some(adjusted) = apply_constraints(positioner, &popup_rect, output_bounds, parent_geometry)
+    {
+        x = adjusted.x;
+        y = adjusted.y;
     }
 
     PopupGeometry {

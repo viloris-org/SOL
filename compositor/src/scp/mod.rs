@@ -34,6 +34,7 @@ pub mod input;
 pub mod manifest;
 pub mod output;
 pub mod permission_manager;
+pub mod popup;
 pub mod protocol;
 pub mod revocation;
 pub mod security;

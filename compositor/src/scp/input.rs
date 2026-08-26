@@ -18,6 +18,7 @@ pub struct InputState {
 #[derive(Debug, Clone)]
 struct TouchPoint {
     id: i32,
+    #[allow(dead_code)]
     surface: (SessionId, SurfaceId),
     x: f64,
     y: f64,

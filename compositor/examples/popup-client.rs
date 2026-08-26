@@ -10,7 +10,7 @@ use wayland_client::{
     protocol::{wl_compositor, wl_registry, wl_seat, wl_surface},
 };
 use wayland_protocols::xdg::shell::client::{
-    xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
+    xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
 
 fn main() {
@@ -175,4 +175,5 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for PopupState {
 delegate_noop!(PopupState: ignore wl_compositor::WlCompositor);
 delegate_noop!(PopupState: ignore wl_surface::WlSurface);
 delegate_noop!(PopupState: ignore wl_seat::WlSeat);
-delegate_noop!(PopupState: ignore xdg_wm_base::XdgWmBase);
+delegate_noop!(PopupState: ignore xdg_positioner::XdgPositioner);
+delegate_noop!(PopupState: ignore xdg_popup::XdgPopup);
