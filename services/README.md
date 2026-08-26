@@ -12,6 +12,7 @@ protocols to the compositor, shell, and apps.
 | `sol-portal` | `services/sol-portal/` | Permission-bound document/capture authorization and `org.sol.Portal1` session-bus adapter | Phase 5 foundation; XDG portal/PipeWire adapters pending |
 | `sol-ime` | `services/sol-ime/` | First-party IME frontend + fcitx5 engine bridge | Phase 0 scaffold → Phase 1 |
 | `sol-diagnostics` | `services/sol-diagnostics/` | Typed, redacted, bounded local diagnostics store | Phase 5 foundation |
+| `sol-ntpd` | `services/sol-ntpd/` | NTPv4 time sampling, multi-source selection, and bounded privileged clock synchronization | Bootstrap implementation; NTS and frequency discipline pending |
 
 ## Architecture principles
 

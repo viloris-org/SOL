@@ -19,6 +19,7 @@ members = [
     "services/sol-portal",
     "services/sol-ime",
     "services/sol-diagnostics",
+    "services/sol-ntpd",
     "apps/sol-files",
     "apps/sol-terminal",
     "apps/sol-settings",

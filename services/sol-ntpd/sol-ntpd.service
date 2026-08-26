@@ -1,0 +1,26 @@
+[Unit]
+Description=SOL network time synchronization
+Documentation=https://www.rfc-editor.org/rfc/rfc5905
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sol-ntpd
+Restart=on-failure
+RestartSec=30s
+Environment=SOL_NTP_SERVERS=0.pool.ntp.org,1.pool.ntp.org,2.pool.ntp.org
+DynamicUser=yes
+AmbientCapabilities=CAP_SYS_TIME
+CapabilityBoundingSet=CAP_SYS_TIME
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
