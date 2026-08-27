@@ -11,7 +11,7 @@ impl Builtin for Echo {
     fn name(&self) -> &str {
         "echo"
     }
-    
+
     async fn execute(
         &self,
         args: Vec<Value>,
@@ -28,7 +28,7 @@ impl Builtin for Echo {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        
+
         println!("{}", output);
         Ok(Value::Null)
     }
@@ -41,7 +41,7 @@ impl Builtin for Pwd {
     fn name(&self) -> &str {
         "pwd"
     }
-    
+
     async fn execute(
         &self,
         _args: Vec<Value>,
@@ -61,7 +61,7 @@ impl Builtin for Cd {
     fn name(&self) -> &str {
         "cd"
     }
-    
+
     async fn execute(
         &self,
         args: Vec<Value>,
@@ -77,11 +77,11 @@ impl Builtin for Cd {
                     return Err(RuntimeError::TypeError {
                         expected: "string".to_string(),
                         got: args[0].type_name().to_string(),
-                    })
+                    });
                 }
             }
         };
-        
+
         std::env::set_current_dir(&path)?;
         Ok(Value::Null)
     }
@@ -94,7 +94,7 @@ impl Builtin for Exit {
     fn name(&self) -> &str {
         "exit"
     }
-    
+
     async fn execute(
         &self,
         args: Vec<Value>,
@@ -108,7 +108,7 @@ impl Builtin for Exit {
                 _ => 0,
             }
         };
-        
+
         std::process::exit(code);
     }
 }
@@ -120,7 +120,7 @@ impl Builtin for Ls {
     fn name(&self) -> &str {
         "ls"
     }
-    
+
     async fn execute(
         &self,
         args: Vec<Value>,
@@ -134,7 +134,7 @@ impl Builtin for Ls {
                 _ => std::env::current_dir()?,
             }
         };
-        
+
         let show_hidden = flags
             .get("all")
             .or_else(|| flags.get("a"))
@@ -143,7 +143,7 @@ impl Builtin for Ls {
                 _ => None,
             })
             .unwrap_or(false);
-        
+
         let long_format = flags
             .get("long")
             .or_else(|| flags.get("l"))
@@ -152,24 +152,24 @@ impl Builtin for Ls {
                 _ => None,
             })
             .unwrap_or(false);
-        
+
         let mut entries = Vec::new();
-        
+
         for entry in std::fs::read_dir(&path)? {
             let entry = entry?;
             let file_name = entry.file_name();
             let name = file_name.to_string_lossy().to_string();
-            
+
             // 跳过隐藏文件
             if !show_hidden && name.starts_with('.') {
                 continue;
             }
-            
+
             if long_format {
                 let metadata = entry.metadata()?;
                 let size = metadata.len();
                 let _modified = metadata.modified()?;
-                
+
                 let file_type = if metadata.is_dir() {
                     "dir"
                 } else if metadata.is_symlink() {
@@ -177,12 +177,12 @@ impl Builtin for Ls {
                 } else {
                     "file"
                 };
-                
+
                 let mut row = HashMap::new();
                 row.insert("name".to_string(), Value::String(name));
                 row.insert("type".to_string(), Value::String(file_type.to_string()));
                 row.insert("size".to_string(), Value::Number(size as f64));
-                
+
                 entries.push(row);
             } else {
                 let mut row = HashMap::new();
@@ -190,15 +190,11 @@ impl Builtin for Ls {
                 entries.push(row);
             }
         }
-        
+
         if long_format {
             // 表格格式输出
-            let columns = vec![
-                "name".to_string(),
-                "type".to_string(),
-                "size".to_string(),
-            ];
-            
+            let columns = vec!["name".to_string(), "type".to_string(), "size".to_string()];
+
             Ok(Value::Table {
                 columns,
                 rows: entries,
@@ -210,7 +206,7 @@ impl Builtin for Ls {
                     println!("{}", name);
                 }
             }
-            
+
             Ok(Value::Table {
                 columns: vec!["name".to_string()],
                 rows: entries,

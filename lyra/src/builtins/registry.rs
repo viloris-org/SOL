@@ -22,21 +22,21 @@ impl BuiltinRegistry {
         let mut registry = Self {
             commands: HashMap::new(),
         };
-        
+
         // 注册内建命令
         registry.register(Box::new(crate::builtins::Echo));
         registry.register(Box::new(crate::builtins::Ls));
         registry.register(Box::new(crate::builtins::Cd));
         registry.register(Box::new(crate::builtins::Pwd));
         registry.register(Box::new(crate::builtins::Exit));
-        
+
         registry
     }
-    
+
     pub fn register(&mut self, builtin: Box<dyn Builtin>) {
         self.commands.insert(builtin.name().to_string(), builtin);
     }
-    
+
     pub async fn execute(
         &self,
         name: &str,
@@ -50,11 +50,11 @@ impl BuiltinRegistry {
             crate::builtins::external::execute_external(name, args, flags).await
         }
     }
-    
+
     pub fn has_command(&self, name: &str) -> bool {
         self.commands.contains_key(name)
     }
-    
+
     pub fn command_names(&self) -> Vec<&str> {
         self.commands.keys().map(|s| s.as_str()).collect()
     }

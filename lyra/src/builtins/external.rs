@@ -20,11 +20,11 @@ pub async fn execute_external(
                 return Err(RuntimeError::TypeError {
                     expected: "string, number, or bool".to_string(),
                     got: arg.type_name().to_string(),
-                })
+                });
             }
         }
     }
-    
+
     // 执行外部命令
     let output = Command::new(name)
         .args(&cmd_args)
@@ -40,7 +40,7 @@ pub async fn execute_external(
                 RuntimeError::IoError(e)
             }
         })?;
-    
+
     if output.status.success() {
         Ok(Value::Null)
     } else {

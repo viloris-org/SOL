@@ -1,14 +1,14 @@
+pub mod builtins;
 pub mod lexer;
 pub mod parser;
-pub mod runtime;
-pub mod builtins;
 pub mod prompt;
+pub mod runtime;
 
+use anyhow::Result;
 use parser::Parser;
-use runtime::Evaluator;
 use prompt::PromptRenderer;
 use reedline::{DefaultPrompt, Reedline, Signal};
-use anyhow::Result;
+use runtime::Evaluator;
 
 pub struct Lyra {
     evaluator: Evaluator,
@@ -22,27 +22,27 @@ impl Lyra {
             prompt: PromptRenderer::new(),
         }
     }
-    
+
     pub async fn run(&mut self) -> Result<()> {
         let mut line_editor = Reedline::create();
-        
+
         loop {
             let prompt_text = self.prompt.render();
             let prompt = DefaultPrompt::new(
                 reedline::DefaultPromptSegment::Basic(prompt_text),
                 reedline::DefaultPromptSegment::Empty,
             );
-            
+
             let sig = line_editor.read_line(&prompt)?;
-            
+
             match sig {
                 Signal::Success(buffer) => {
                     let line = buffer.trim();
-                    
+
                     if line.is_empty() {
                         continue;
                     }
-                    
+
                     match self.execute(line).await {
                         Ok(_) => {}
                         Err(e) => {
@@ -56,37 +56,39 @@ impl Lyra {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     pub async fn execute(&mut self, input: &str) -> Result<()> {
         let mut parser = Parser::new(input);
         let stmts = parser.parse()?;
-        
+
         let result = self.evaluator.eval_stmts(&stmts).await?;
-        
+
         // 如果结果是表格，打印表格
         if let parser::Value::Table { columns, rows } = result {
             self.print_table(&columns, &rows);
         }
-        
+
         Ok(())
     }
-    
-    fn print_table(&self, columns: &[String], rows: &[std::collections::HashMap<String, parser::Value>]) {
+
+    fn print_table(
+        &self,
+        columns: &[String],
+        rows: &[std::collections::HashMap<String, parser::Value>],
+    ) {
         use parser::Value;
-        
+
         if rows.is_empty() {
             return;
         }
-        
+
         // 计算列宽
-        let mut widths: std::collections::HashMap<String, usize> = columns
-            .iter()
-            .map(|c| (c.clone(), c.len()))
-            .collect();
-        
+        let mut widths: std::collections::HashMap<String, usize> =
+            columns.iter().map(|c| (c.clone(), c.len())).collect();
+
         for row in rows {
             for col in columns {
                 if let Some(val) = row.get(col) {
@@ -97,12 +99,11 @@ impl Lyra {
                         Value::Null => 4, // "null"
                         _ => 10,
                     };
-                    widths.entry(col.clone())
-                        .and_modify(|w| *w = (*w).max(len));
+                    widths.entry(col.clone()).and_modify(|w| *w = (*w).max(len));
                 }
             }
         }
-        
+
         // 打印表头
         print!("│");
         for col in columns {
@@ -110,7 +111,7 @@ impl Lyra {
             print!(" {:width$} │", col, width = width);
         }
         println!();
-        
+
         // 打印分隔线
         print!("├");
         for col in columns {
@@ -118,7 +119,7 @@ impl Lyra {
             print!("─{}─┼", "─".repeat(*width));
         }
         println!("\x08┤");
-        
+
         // 打印数据行
         for row in rows {
             print!("│");
