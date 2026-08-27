@@ -2,19 +2,21 @@ use anyhow::Result;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod manager;
-mod device;
-mod profile;
-mod netlink;
-mod dhcp;
-mod dns;
 mod captive_portal;
 mod dbus;
-mod security;
+mod device;
+mod dhcp;
+mod dns;
+mod manager;
+mod netlink;
 mod nts;
+mod profile;
+mod queue;
+mod security;
+mod state_file;
 
-use manager::NetworkManager;
 use dbus::DbusService;
+use manager::NetworkManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {

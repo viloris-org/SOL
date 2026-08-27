@@ -17,6 +17,18 @@ The service now has a tested reliability baseline for its core control path:
 
 Run the focused test suite with `cargo test -p sol-networkd --all-targets`.
 
+## systemd-networkd inspired improvements (2026-08)
+
+Inspired by systemd-networkd's robust architecture, the following enhancements have been implemented:
+
+- **Extended netlink event handling** - Now monitors link state changes, neighbor updates, routing rules, and detailed route/address events with full attribute extraction
+- **Enhanced device state tracking** - Devices now track ifindex, carrier status, MAC address, MTU, and IP address lists
+- **State file persistence** - Runtime state saved to `/run/sol-networkd/state` (similar to systemd's `/run/systemd/netif/state`) with operational/carrier/address/online state aggregation
+- **Configuration request queue** - Serialized configuration operations prevent race conditions during concurrent network changes
+- **Comprehensive event handlers** - Separate handlers for link up/down/change, address add/remove, and route changes with automatic state persistence
+
+See [IMPROVEMENTS-SYSTEMD.md](./IMPROVEMENTS-SYSTEMD.md) for detailed comparison with systemd-networkd architecture.
+
 ### Known implementation boundaries
 
 - iwd integration still needs validation and hardening against a real iwd daemon, including hidden and enterprise networks.

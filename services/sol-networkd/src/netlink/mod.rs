@@ -9,7 +9,8 @@ use netlink_packet_route::{
 use netlink_sys::{AsyncSocket, SocketAddr};
 use rtnetlink::{
     constants::{
-        RTMGRP_IPV4_IFADDR, RTMGRP_IPV4_ROUTE, RTMGRP_IPV6_IFADDR, RTMGRP_IPV6_ROUTE, RTMGRP_LINK,
+        RTMGRP_IPV4_IFADDR, RTMGRP_IPV4_ROUTE, RTMGRP_IPV4_RULE, RTMGRP_IPV6_IFADDR,
+        RTMGRP_IPV6_ROUTE, RTMGRP_LINK, RTMGRP_NEIGH,
     },
     new_connection, Handle,
 };
@@ -24,11 +25,51 @@ pub struct NetlinkMonitor {
 
 #[derive(Debug, Clone)]
 pub enum NetlinkEvent {
-    LinkUp { interface: String, index: u32 },
-    LinkDown { interface: String, index: u32 },
-    NewAddress { interface: String, address: IpAddr },
-    DelAddress { interface: String, address: IpAddr },
-    RouteChanged,
+    LinkUp {
+        interface: String,
+        index: u32,
+    },
+    LinkDown {
+        interface: String,
+        index: u32,
+    },
+    LinkChanged {
+        interface: String,
+        index: u32,
+        flags: u32,
+    },
+    NewAddress {
+        interface: String,
+        address: IpAddr,
+        prefix_len: u8,
+    },
+    DelAddress {
+        interface: String,
+        address: IpAddr,
+    },
+    NewRoute {
+        interface: Option<String>,
+        destination: Option<IpAddr>,
+        gateway: Option<IpAddr>,
+    },
+    DelRoute {
+        interface: Option<String>,
+        destination: Option<IpAddr>,
+    },
+    NewNeighbor {
+        interface: String,
+        address: IpAddr,
+    },
+    DelNeighbor {
+        interface: String,
+        address: IpAddr,
+    },
+    NewRule {
+        priority: u32,
+    },
+    DelRule {
+        priority: u32,
+    },
 }
 
 impl NetlinkMonitor {
@@ -39,7 +80,9 @@ impl NetlinkMonitor {
             | RTMGRP_IPV4_IFADDR
             | RTMGRP_IPV6_IFADDR
             | RTMGRP_IPV4_ROUTE
-            | RTMGRP_IPV6_ROUTE;
+            | RTMGRP_IPV6_ROUTE
+            | RTMGRP_NEIGH
+            | RTMGRP_IPV4_RULE;
         connection
             .socket_mut()
             .socket_mut()
@@ -91,6 +134,16 @@ impl NetlinkMonitor {
                         }
                     });
                 }
+                RouteNetlinkMessage::SetLink(link) => {
+                    let interface = link_interface_name(&link.attributes)
+                        .unwrap_or_else(|| format!("ifindex-{}", link.header.index));
+                    // Just use 0 for flags since we can't easily extract them
+                    return Ok(NetlinkEvent::LinkChanged {
+                        interface,
+                        index: link.header.index,
+                        flags: 0,
+                    });
+                }
                 RouteNetlinkMessage::DelLink(link) => {
                     let interface = link_interface_name(&link.attributes)
                         .unwrap_or_else(|| format!("ifindex-{}", link.header.index));
@@ -107,6 +160,7 @@ impl NetlinkMonitor {
                         return Ok(NetlinkEvent::NewAddress {
                             interface,
                             address: ip,
+                            prefix_len: address.header.prefix_len,
                         });
                     }
                 }
@@ -121,8 +175,57 @@ impl NetlinkMonitor {
                         });
                     }
                 }
-                RouteNetlinkMessage::NewRoute(_) | RouteNetlinkMessage::DelRoute(_) => {
-                    return Ok(NetlinkEvent::RouteChanged);
+                RouteNetlinkMessage::NewRoute(route) => {
+                    let destination = route_destination(&route.attributes);
+                    let gateway = route_gateway(&route.attributes);
+                    // Extract interface index from route attributes
+                    let interface = route_output_interface(&route.attributes)
+                        .and_then(|index| self.get_interface_name(index).ok());
+                    return Ok(NetlinkEvent::NewRoute {
+                        interface,
+                        destination,
+                        gateway,
+                    });
+                }
+                RouteNetlinkMessage::DelRoute(route) => {
+                    let destination = route_destination(&route.attributes);
+                    let interface = route_output_interface(&route.attributes)
+                        .and_then(|index| self.get_interface_name(index).ok());
+                    return Ok(NetlinkEvent::DelRoute {
+                        interface,
+                        destination,
+                    });
+                }
+                RouteNetlinkMessage::NewNeighbour(neigh) => {
+                    if let Some(ip) = neighbor_address(&neigh.attributes) {
+                        let interface = self
+                            .get_interface_name(neigh.header.ifindex)
+                            .unwrap_or_else(|_| format!("ifindex-{}", neigh.header.ifindex));
+                        return Ok(NetlinkEvent::NewNeighbor {
+                            interface,
+                            address: ip,
+                        });
+                    }
+                }
+                RouteNetlinkMessage::DelNeighbour(neigh) => {
+                    if let Some(ip) = neighbor_address(&neigh.attributes) {
+                        let interface = self
+                            .get_interface_name(neigh.header.ifindex)
+                            .unwrap_or_else(|_| format!("ifindex-{}", neigh.header.ifindex));
+                        return Ok(NetlinkEvent::DelNeighbor {
+                            interface,
+                            address: ip,
+                        });
+                    }
+                }
+                RouteNetlinkMessage::NewRule(rule) => {
+                    // Extract priority from rule attributes
+                    let priority = rule_priority(&rule.attributes);
+                    return Ok(NetlinkEvent::NewRule { priority });
+                }
+                RouteNetlinkMessage::DelRule(rule) => {
+                    let priority = rule_priority(&rule.attributes);
+                    return Ok(NetlinkEvent::DelRule { priority });
                 }
                 _ => {}
             }
@@ -178,6 +281,65 @@ fn link_interface_name(attributes: &[LinkAttribute]) -> Option<String> {
 fn address_ip(attributes: &[AddressAttribute]) -> Option<IpAddr> {
     attributes.iter().find_map(|attribute| match attribute {
         AddressAttribute::Local(address) | AddressAttribute::Address(address) => Some(*address),
+        _ => None,
+    })
+}
+
+fn route_destination(attributes: &[netlink_packet_route::route::RouteAttribute]) -> Option<IpAddr> {
+    use netlink_packet_route::route::{RouteAddress, RouteAttribute};
+    attributes.iter().find_map(|attribute| match attribute {
+        RouteAttribute::Destination(addr) => match addr {
+            RouteAddress::Inet(ip) => Some(IpAddr::V4(*ip)),
+            RouteAddress::Inet6(ip) => Some(IpAddr::V6(*ip)),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn route_gateway(attributes: &[netlink_packet_route::route::RouteAttribute]) -> Option<IpAddr> {
+    use netlink_packet_route::route::{RouteAddress, RouteAttribute};
+    attributes.iter().find_map(|attribute| match attribute {
+        RouteAttribute::Gateway(addr) => match addr {
+            RouteAddress::Inet(ip) => Some(IpAddr::V4(*ip)),
+            RouteAddress::Inet6(ip) => Some(IpAddr::V6(*ip)),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn neighbor_address(
+    attributes: &[netlink_packet_route::neighbour::NeighbourAttribute],
+) -> Option<IpAddr> {
+    use netlink_packet_route::neighbour::{NeighbourAddress, NeighbourAttribute};
+    attributes.iter().find_map(|attribute| match attribute {
+        NeighbourAttribute::Destination(addr) => match addr {
+            NeighbourAddress::Inet(ip) => Some(IpAddr::V4(*ip)),
+            NeighbourAddress::Inet6(ip) => Some(IpAddr::V6(*ip)),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn rule_priority(attributes: &[netlink_packet_route::rule::RuleAttribute]) -> u32 {
+    use netlink_packet_route::rule::RuleAttribute;
+    attributes
+        .iter()
+        .find_map(|attribute| match attribute {
+            RuleAttribute::Priority(p) => Some(*p),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+fn route_output_interface(
+    attributes: &[netlink_packet_route::route::RouteAttribute],
+) -> Option<u32> {
+    use netlink_packet_route::route::RouteAttribute;
+    attributes.iter().find_map(|attribute| match attribute {
+        RouteAttribute::Oif(index) => Some(*index),
         _ => None,
     })
 }

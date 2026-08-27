@@ -1,5 +1,5 @@
-use zbus::interface;
 use std::collections::HashMap;
+use zbus::interface;
 
 use crate::device::{Device, DeviceType};
 
@@ -48,7 +48,9 @@ impl DeviceInterface {
     }
 
     /// Get available networks (WiFi only)
-    async fn get_networks(&self) -> zbus::fdo::Result<Vec<HashMap<String, zbus::zvariant::Value<'static>>>> {
+    async fn get_networks(
+        &self,
+    ) -> zbus::fdo::Result<Vec<HashMap<String, zbus::zvariant::Value<'static>>>> {
         if self.device.device_type != DeviceType::WiFi {
             return Err(zbus::fdo::Error::NotSupported(
                 "GetNetworks only supported on WiFi devices".into(),

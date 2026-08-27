@@ -1,6 +1,6 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn};
+use anyhow::{Context, Result};
 use std::time::SystemTime;
+use tracing::{info, warn};
 
 /// Network Time Security (NTS) client
 /// Provides secure time synchronization with authenticated NTP
@@ -103,14 +103,10 @@ impl NtsClient {
 
 #[derive(Debug, Clone)]
 pub struct TimeInfo {
-    pub current_time: u64,  // Unix timestamp
+    pub current_time: u64, // Unix timestamp
     pub synchronized: bool,
     pub server: String,
 }
 
 /// Default NTS servers (Cloudflare)
-pub const DEFAULT_NTS_SERVERS: &[&str] = &[
-    "time.cloudflare.com",
-    "nts.ntp.se",
-    "ntpmon.dcs1.biz",
-];
+pub const DEFAULT_NTS_SERVERS: &[&str] = &["time.cloudflare.com", "nts.ntp.se", "ntpmon.dcs1.biz"];

@@ -1,9 +1,9 @@
-use anyhow::{Result, Context, anyhow};
-use tracing::{info, warn, debug};
-use std::net::IpAddr;
-use wireguard_control::{Backend, DeviceUpdate, InterfaceName, Key, PeerConfigBuilder};
-use std::str::FromStr;
+use anyhow::{anyhow, Context, Result};
 use ipnet::IpNet;
+use std::net::IpAddr;
+use std::str::FromStr;
+use tracing::{debug, info, warn};
+use wireguard_control::{Backend, DeviceUpdate, InterfaceName, Key, PeerConfigBuilder};
 
 use crate::device::Device;
 
@@ -23,12 +23,14 @@ impl VpnDevice {
     }
 
     pub async fn connect(&self, config: &VpnConfig) -> Result<()> {
-        info!("Connecting VPN: {} ({})", config.name, config.vpn_type_str());
+        info!(
+            "Connecting VPN: {} ({})",
+            config.name,
+            config.vpn_type_str()
+        );
 
         match &config.vpn_type {
-            VpnType::WireGuard(wg_config) => {
-                self.connect_wireguard(wg_config).await
-            }
+            VpnType::WireGuard(wg_config) => self.connect_wireguard(wg_config).await,
             VpnType::OpenVpn => {
                 warn!("OpenVPN support not yet implemented");
                 Err(anyhow!("OpenVPN not supported"))
@@ -43,16 +45,14 @@ impl VpnDevice {
     async fn connect_wireguard(&self, config: &WireGuardConfig) -> Result<()> {
         info!("Setting up WireGuard interface: {}", self.device.interface);
 
-        let interface = InterfaceName::from_str(&self.device.interface)
-            .context("Invalid interface name")?;
+        let interface =
+            InterfaceName::from_str(&self.device.interface).context("Invalid interface name")?;
 
         // Parse private key
-        let private_key = Key::from_base64(&config.private_key)
-            .context("Invalid private key")?;
+        let private_key = Key::from_base64(&config.private_key).context("Invalid private key")?;
 
         // Create device configuration
-        let mut device_update = DeviceUpdate::new()
-            .set_private_key(private_key);
+        let mut device_update = DeviceUpdate::new().set_private_key(private_key);
 
         if let Some(port) = config.listen_port {
             device_update = device_update.set_listen_port(port);
@@ -60,19 +60,18 @@ impl VpnDevice {
 
         // Add peers
         for peer in &config.peers {
-            let public_key = Key::from_base64(&peer.public_key)
-                .context("Invalid peer public key")?;
+            let public_key =
+                Key::from_base64(&peer.public_key).context("Invalid peer public key")?;
 
             let mut peer_builder = PeerConfigBuilder::new(&public_key);
 
             if let Some(ref endpoint) = peer.endpoint {
-                peer_builder = peer_builder.set_endpoint(endpoint.parse()
-                    .context("Invalid peer endpoint")?);
+                peer_builder =
+                    peer_builder.set_endpoint(endpoint.parse().context("Invalid peer endpoint")?);
             }
 
             if let Some(ref psk) = peer.preshared_key {
-                let psk_key = Key::from_base64(psk)
-                    .context("Invalid preshared key")?;
+                let psk_key = Key::from_base64(psk).context("Invalid preshared key")?;
                 peer_builder = peer_builder.set_preshared_key(psk_key);
             }
 
@@ -82,8 +81,7 @@ impl VpnDevice {
 
             // Add allowed IPs
             for allowed_ip in &peer.allowed_ips {
-                let ip_net: IpNet = allowed_ip.parse()
-                    .context("Invalid allowed IP")?;
+                let ip_net: IpNet = allowed_ip.parse().context("Invalid allowed IP")?;
                 peer_builder = peer_builder.add_allowed_ip(ip_net.addr(), ip_net.prefix_len());
             }
 
@@ -91,7 +89,8 @@ impl VpnDevice {
         }
 
         // Apply configuration
-        device_update.apply(&interface, self.backend)
+        device_update
+            .apply(&interface, self.backend)
             .context("Failed to apply WireGuard configuration")?;
 
         // Configure interface IP address
@@ -128,15 +127,18 @@ impl VpnDevice {
             return Err(anyhow!("Failed to bring interface up: {}", stderr));
         }
 
-        debug!("Configured {} with address {}", self.device.interface, address);
+        debug!(
+            "Configured {} with address {}",
+            self.device.interface, address
+        );
         Ok(())
     }
 
     pub async fn disconnect(&self) -> Result<()> {
         info!("Disconnecting VPN on {}", self.device.interface);
 
-        let interface = InterfaceName::from_str(&self.device.interface)
-            .context("Invalid interface name")?;
+        let interface =
+            InterfaceName::from_str(&self.device.interface).context("Invalid interface name")?;
 
         // Get current device info
         if let Ok(device_info) = wireguard_control::Device::get(&interface, self.backend) {
@@ -146,7 +148,8 @@ impl VpnDevice {
                 device_update = device_update.remove_peer_by_key(&peer.config.public_key);
             }
 
-            device_update.apply(&interface, self.backend)
+            device_update
+                .apply(&interface, self.backend)
                 .context("Failed to remove WireGuard peers")?;
         }
 
@@ -167,8 +170,8 @@ impl VpnDevice {
     }
 
     pub async fn get_status(&self) -> Result<VpnStatus> {
-        let interface = InterfaceName::from_str(&self.device.interface)
-            .context("Invalid interface name")?;
+        let interface =
+            InterfaceName::from_str(&self.device.interface).context("Invalid interface name")?;
 
         match wireguard_control::Device::get(&interface, self.backend) {
             Ok(device_info) => {
@@ -181,23 +184,20 @@ impl VpnDevice {
                         endpoint: peer.config.endpoint.map(|e| e.to_string()),
                         rx_bytes: peer.stats.rx_bytes,
                         tx_bytes: peer.stats.tx_bytes,
-                        last_handshake: peer.stats.last_handshake_time
+                        last_handshake: peer
+                            .stats
+                            .last_handshake_time
                             .and_then(|t| t.elapsed().ok())
                             .map(|d| d.as_secs()),
                     });
                 }
 
-                Ok(VpnStatus {
-                    connected,
-                    peers,
-                })
+                Ok(VpnStatus { connected, peers })
             }
-            Err(_) => {
-                Ok(VpnStatus {
-                    connected: false,
-                    peers: Vec::new(),
-                })
-            }
+            Err(_) => Ok(VpnStatus {
+                connected: false,
+                peers: Vec::new(),
+            }),
         }
     }
 }
@@ -227,8 +227,8 @@ pub enum VpnType {
 
 #[derive(Debug, Clone)]
 pub struct WireGuardConfig {
-    pub private_key: String,  // Base64-encoded
-    pub address: Option<String>,  // CIDR notation (e.g., "10.0.0.2/24")
+    pub private_key: String,     // Base64-encoded
+    pub address: Option<String>, // CIDR notation (e.g., "10.0.0.2/24")
     pub listen_port: Option<u16>,
     pub peers: Vec<WireGuardPeer>,
     pub dns: Vec<IpAddr>,
@@ -236,11 +236,11 @@ pub struct WireGuardConfig {
 
 #[derive(Debug, Clone)]
 pub struct WireGuardPeer {
-    pub public_key: String,  // Base64-encoded
-    pub preshared_key: Option<String>,  // Base64-encoded
-    pub endpoint: Option<String>,  // "host:port"
-    pub allowed_ips: Vec<String>,  // CIDR notation
-    pub persistent_keepalive: Option<u16>,  // Seconds
+    pub public_key: String,                // Base64-encoded
+    pub preshared_key: Option<String>,     // Base64-encoded
+    pub endpoint: Option<String>,          // "host:port"
+    pub allowed_ips: Vec<String>,          // CIDR notation
+    pub persistent_keepalive: Option<u16>, // Seconds
 }
 
 impl WireGuardConfig {
@@ -287,7 +287,7 @@ pub struct PeerStatus {
     pub endpoint: Option<String>,
     pub rx_bytes: u64,
     pub tx_bytes: u64,
-    pub last_handshake: Option<u64>,  // Seconds ago
+    pub last_handshake: Option<u64>, // Seconds ago
 }
 
 /// Generate a new WireGuard keypair
@@ -299,11 +299,12 @@ pub fn generate_keypair() -> Result<(String, String)> {
     rng.fill(&mut private_key)
         .map_err(|_| anyhow!("Failed to generate random key"))?;
 
-    let private_key_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, private_key);
+    let private_key_base64 =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, private_key);
 
     // Derive public key from private key
-    let key = Key::from_base64(&private_key_base64)
-        .context("Failed to parse generated private key")?;
+    let key =
+        Key::from_base64(&private_key_base64).context("Failed to parse generated private key")?;
     let public_key = key.get_public();
     let public_key_base64 = public_key.to_base64();
 

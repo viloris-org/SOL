@@ -10,6 +10,8 @@ use crate::dns::DnsManager;
 use crate::netlink::NetlinkMonitor;
 use crate::nts::{NtsClient, DEFAULT_NTS_SERVERS};
 use crate::profile::{Profile, ProfileId, ProfileStore};
+use crate::queue::RequestQueue;
+use crate::state_file::{OperationalState, StateFile};
 
 /// Network manager core - handles connection policy and coordination
 #[derive(Clone)]
@@ -19,6 +21,7 @@ pub struct NetworkManager {
 
 struct NetworkManagerInner {
     devices: HashMap<DeviceId, Device>,
+    devices_by_ifindex: HashMap<u32, DeviceId>,
     profiles: ProfileStore,
     state: NetworkState,
     connectivity: PortalState,
@@ -27,6 +30,8 @@ struct NetworkManagerInner {
     dns_manager: DnsManager,
     captive_portal: CaptivePortalDetector,
     nts_client: NtsClient,
+    request_queue: RequestQueue,
+    state_file: StateFile,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,8 +69,16 @@ impl NetworkManager {
         let mut dns_manager = DnsManager::new();
         let _ = dns_manager.init().await; // Don't fail if systemd-resolved is unavailable
 
+        // Load state file
+        let state_file = StateFile::load().await.unwrap_or_default();
+        info!(
+            "Loaded network state: operational={:?}, online={:?}",
+            state_file.operational_state, state_file.online_state
+        );
+
         let inner = NetworkManagerInner {
             devices: HashMap::new(),
+            devices_by_ifindex: HashMap::new(),
             profiles,
             state: NetworkState::Disconnected,
             connectivity: PortalState::None,
@@ -74,6 +87,8 @@ impl NetworkManager {
             dns_manager,
             captive_portal: CaptivePortalDetector::new(),
             nts_client: NtsClient::new(DEFAULT_NTS_SERVERS[0].to_string()),
+            request_queue: RequestQueue::new(),
+            state_file,
         };
 
         let manager = Self {
@@ -115,7 +130,8 @@ impl NetworkManager {
                 let device = Device::new(
                     DeviceId(format!("{}:{}", device_type_str(&device_type), index)),
                     device_type,
-                    name,
+                    name.clone(),
+                    index,
                 );
                 inner.devices.insert(device.id.clone(), device);
             }
@@ -187,11 +203,14 @@ impl NetworkManager {
                 {
                     let mut inner = self.inner.write().await;
                     let id = DeviceId(format!("{}:{}", device_type_str(&device_type), index));
-                    let device = inner
-                        .devices
-                        .entry(id.clone())
-                        .or_insert_with(|| Device::new(id, device_type.clone(), interface.clone()));
+
+                    let device = inner.devices.entry(id.clone()).or_insert_with(|| {
+                        Device::new(id.clone(), device_type.clone(), interface.clone(), index)
+                    });
+
+                    device.carrier = true;
                     device.state = DeviceState::Disconnected;
+                    inner.devices_by_ifindex.insert(index, id);
                 }
 
                 if let Some(profile_id) = self
@@ -219,6 +238,7 @@ impl NetworkManager {
                     .values_mut()
                     .find(|device| device.interface == interface)
                     .map(|device| {
+                        device.carrier = false;
                         device.state = DeviceState::Unavailable;
                         device.device_type.clone()
                     });
@@ -234,8 +254,12 @@ impl NetworkManager {
                     inner.active_profile = None;
                 }
             }
-            crate::netlink::NetlinkEvent::NewAddress { interface, address } => {
-                info!("New address on {}: {}", interface, address);
+            crate::netlink::NetlinkEvent::NewAddress {
+                interface,
+                address,
+                prefix_len,
+            } => {
+                info!("New address on {}: {}/{}", interface, address, prefix_len);
                 if let Some(device) = self
                     .inner
                     .write()
@@ -244,13 +268,65 @@ impl NetworkManager {
                     .values_mut()
                     .find(|device| device.interface == interface)
                 {
-                    device.state = DeviceState::Active;
+                    if !device.ip_addresses.contains(&address) {
+                        device.ip_addresses.push(address);
+                    }
+                    if device.state == DeviceState::IpConfig {
+                        device.state = DeviceState::Active;
+                    }
                 }
             }
             crate::netlink::NetlinkEvent::DelAddress { interface, address } => {
                 info!("Address removed from {}: {}", interface, address);
+                if let Some(device) = self
+                    .inner
+                    .write()
+                    .await
+                    .devices
+                    .values_mut()
+                    .find(|device| device.interface == interface)
+                {
+                    device.ip_addresses.retain(|a| a != &address);
+                }
             }
-            _ => {}
+            crate::netlink::NetlinkEvent::NewRoute {
+                interface,
+                destination,
+                gateway,
+            } => {
+                info!(
+                    "New route: interface={:?}, dest={:?}, gateway={:?}",
+                    interface, destination, gateway
+                );
+            }
+            crate::netlink::NetlinkEvent::DelRoute {
+                interface,
+                destination,
+            } => {
+                info!(
+                    "Route removed: interface={:?}, dest={:?}",
+                    interface, destination
+                );
+            }
+            crate::netlink::NetlinkEvent::NewNeighbor { interface, address } => {
+                info!("New neighbor on {}: {}", interface, address);
+            }
+            crate::netlink::NetlinkEvent::DelNeighbor { interface, address } => {
+                info!("Neighbor removed from {}: {}", interface, address);
+            }
+            crate::netlink::NetlinkEvent::NewRule { priority } => {
+                info!("New routing rule with priority {}", priority);
+            }
+            crate::netlink::NetlinkEvent::DelRule { priority } => {
+                info!("Routing rule removed with priority {}", priority);
+            }
+            crate::netlink::NetlinkEvent::LinkChanged {
+                interface,
+                index,
+                flags,
+            } => {
+                info!("Link changed: {} ({}) flags={}", interface, index, flags);
+            }
         }
     }
 
@@ -779,6 +855,21 @@ fn classify_interface(interface: &str) -> Option<DeviceType> {
         Some(DeviceType::Ethernet)
     } else {
         None
+    }
+}
+
+fn device_state_to_operational(state: &DeviceState) -> OperationalState {
+    match state {
+        DeviceState::Unavailable => OperationalState::Off,
+        DeviceState::Disconnected => OperationalState::NoCarrier,
+        DeviceState::Preparing | DeviceState::Configuring | DeviceState::NeedAuth => {
+            OperationalState::Dormant
+        }
+        DeviceState::IpConfig => OperationalState::DegradedCarrier,
+        DeviceState::IpCheck => OperationalState::Carrier,
+        DeviceState::Active => OperationalState::Routable,
+        DeviceState::Deactivating => OperationalState::Degraded,
+        DeviceState::Failed => OperationalState::Off,
     }
 }
 

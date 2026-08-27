@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WiFiProfile {
     pub ssid: String,
-    pub bssid: Option<String>,  // MAC address of specific AP (optional)
+    pub bssid: Option<String>, // MAC address of specific AP (optional)
     pub security: WiFiSecurity,
-    pub passphrase_encrypted: Option<Vec<u8>>,  // Encrypted passphrase
+    pub passphrase_encrypted: Option<Vec<u8>>, // Encrypted passphrase
     pub hidden: bool,
-    pub priority: u32,  // Higher = preferred
+    pub priority: u32, // Higher = preferred
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

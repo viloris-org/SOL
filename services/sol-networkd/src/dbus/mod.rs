@@ -1,12 +1,12 @@
-pub mod manager;
 pub mod device;
+pub mod manager;
 pub mod profile;
-pub mod wifi;
 pub mod vpn;
+pub mod wifi;
 
 use anyhow::Result;
-use zbus::Connection;
 use tracing::info;
+use zbus::Connection;
 
 use crate::manager::NetworkManager;
 
@@ -52,9 +52,7 @@ impl DbusService {
             .await?;
 
         // Request well-known name
-        connection
-            .request_name("org.sol.Network1")
-            .await?;
+        connection.request_name("org.sol.Network1").await?;
 
         info!("D-Bus service registered at org.sol.Network1");
 

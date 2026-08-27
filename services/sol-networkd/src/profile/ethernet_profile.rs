@@ -3,7 +3,7 @@ use std::net::Ipv4Addr;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EthernetProfile {
-    pub interface: Option<String>,  // Specific interface, or None for any
+    pub interface: Option<String>, // Specific interface, or None for any
     pub ip_config: IpConfig,
 }
 

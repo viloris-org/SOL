@@ -2,7 +2,6 @@
 ///
 /// This demonstrates the high-level API for WiFi connection.
 /// Run with: cargo run --example wifi_connect
-
 use std::env;
 
 #[tokio::main]
