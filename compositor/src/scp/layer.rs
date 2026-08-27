@@ -96,7 +96,7 @@ mod tests {
             CompositorMessage::Connected {
                 session_id,
                 capability_tokens,
-                granted_capabilities,
+                granted_capabilities: _,
             } => {
                 // First, request layer-shell capability if not auto-granted
                 if !capability_tokens.contains_key("layer-shell") {

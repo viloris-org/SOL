@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn gets_peer_credentials() {
-        let (client, server) = UnixStream::pair().expect("create socket pair");
+        let (_client, server) = UnixStream::pair().expect("create socket pair");
 
         let (pid, uid, gid) =
             get_peer_credentials(server.as_raw_fd()).expect("get peer credentials");

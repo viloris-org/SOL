@@ -315,7 +315,7 @@ mod tests {
         device.start_drag(1, 100, vec!["text/plain".to_string()]);
         assert!(device.active_drag().is_some());
 
-        device.finish_drag();
+        let _ = device.finish_drag();
         assert!(device.active_drag().is_none());
     }
 

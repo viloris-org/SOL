@@ -108,7 +108,6 @@ const fn pixel(red: u8, green: u8, blue: u8) -> sol_boot::BootPixel {
 const BLACK: sol_boot::BootPixel = pixel(0, 0, 0);
 const WHITE: sol_boot::BootPixel = pixel(255, 255, 255);
 const TRACK_COLOR: sol_boot::BootPixel = pixel(60, 60, 67);
-const FILL_COLOR: sol_boot::BootPixel = pixel(255, 255, 255);
 
 fn count(frame: &[sol_boot::BootPixel], expected: sol_boot::BootPixel) -> usize {
     frame
@@ -198,8 +197,8 @@ fn progress_capsule_tracks_stages_and_fills_monotonically() {
     assert_eq!(count(&hidden, TRACK_COLOR), 0);
     assert!(count(&empty, TRACK_COLOR) > 0);
 
-    // Since FILL_COLOR is now white (same as the logo), count fill pixels
-    // by comparing frames: empty should have fewer white pixels than quarter.
+    // The fill is white, same as the logo ink, so count fill pixels by
+    // comparing frames: empty should have fewer white pixels than quarter.
     let white_in_empty = count(&empty, WHITE);
     let white_in_quarter = count(&quarter, WHITE);
     let white_in_three_quarters = count(&three_quarters, WHITE);
