@@ -50,13 +50,14 @@ decisions in their own right.
 | 27 | SOL Compositor Protocol (SCP) - capability-based security | Accepted (architecture) | Phases 1–2 | [0027](0027-sol-compositor-protocol.md) |
 | 28 | Drop Wayland compatibility layer | Accepted (product) | Phase 1 | [0028](0028-drop-wayland-compatibility.md) |
 | 29 | Process scheduling strategy | Accepted (Phase 1 core implemented) | Phase 1 | [0029](0029-process-scheduling-strategy.md) |
-| 30 | Application signing and publisher lineage | Proposed | Phase 8 | [0030](0030-application-signing-publisher-lineage.md) |
-| 30a | Technical fixes for 0030 (all integrated into 0030) | — | — | [0030a](0030-application-signing-technical-fixes.md) |
-| 31 | Device control plane and hotplug lifecycle | Proposed | Phase 5 | [0031](0031-device-control-plane-and-hotplug.md) |
-| 31a | 0031 implementation summary (companion, not a decision) | — | — | [0031a](0031-device-control-plane-implementation-summary.md) |
-| 32 | Smithay-to-SCP complete migration | Accepted | Phases 1–2 | [0032](0032-smithay-to-scp-migration.md) |
-| 33 | Compositor-rendered window decorations and IME popups | Accepted | Phase 1 | [0033](0033-compositor-rendered-decorations.md) |
-| 34 | Capability-based permission model | Proposed | Phase 8 | [0034](0034-capability-based-permissions.md) |
+| 30 | ISO build system architecture | Accepted | Phase 0 | [ADR-0030](ADR-0030-iso-build-system.md) |
+| 31 | Application signing and publisher lineage | Proposed | Phase 8 | [0030](0030-application-signing-publisher-lineage.md) |
+| 31a | Technical fixes for 0031 (all integrated into 0031) | — | — | [0030a](0030-application-signing-technical-fixes.md) |
+| 32 | Device control plane and hotplug lifecycle | Proposed | Phase 5 | [0031](0031-device-control-plane-and-hotplug.md) |
+| 32a | 0032 implementation summary (companion, not a decision) | — | — | [0031a](0031-device-control-plane-implementation-summary.md) |
+| 33 | Smithay-to-SCP complete migration | Accepted | Phases 1–2 | [0032](0032-smithay-to-scp-migration.md) |
+| 34 | Compositor-rendered window decorations and IME popups | Accepted | Phase 1 | [0033](0033-compositor-rendered-decorations.md) |
+| 35 | Capability-based permission model | Proposed | Phase 8 | [0034](0034-capability-based-permissions.md) |
 
 ## Decision register (PRD §41)
 

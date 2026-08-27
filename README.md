@@ -106,6 +106,8 @@ assistive-technology validation remain open.
 
 ## Build
 
+### Development Build
+
 ```bash
 # Whole workspace (SCP-only; no Wayland/Smithay dependency).
 cargo check --workspace
@@ -117,6 +119,22 @@ cargo run -p sol-compositor
 
 The compositor binds `$XDG_RUNTIME_DIR/sol-compositor-0` (override with
 `SOL_SCP_SOCKET`) and serves authenticated SCP clients on it.
+
+### ISO Build
+
+To build a bootable ISO image with the latest stable kernel:
+
+```bash
+# Build complete ISO (kernel + platform + rootfs + ISO generation)
+./scripts/build-iso.sh
+
+# Test the ISO in QEMU
+qemu-system-x86_64 -m 2G -smp 2 -cdrom build/iso/sol-*.iso
+```
+
+The ISO build system automatically fetches the latest stable kernel from kernel.org
+and creates a hybrid BIOS/UEFI bootable image. See [docs/iso-build.md](docs/iso-build.md)
+for detailed documentation and CI/CD setup.
 
 ## Principles (from PRD §4)
 

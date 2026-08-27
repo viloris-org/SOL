@@ -1,5 +1,4 @@
 # Build artifacts
-/target/
 /build/kernel/linux-*
 /build/rootfs-staging/
 /build/iso-staging/
@@ -10,17 +9,6 @@
 /build/.rootfs-base-done
 /build/kernel-version.txt
 
-# Rust
-Cargo.lock
-*.rs.bk
-
-# IDEs
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
+# Keep configuration files
+!/build/kernel/sol.config
+!/build/rootfs/

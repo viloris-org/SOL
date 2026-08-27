@@ -1,0 +1,8 @@
+# Example overlay files for customizing the SOL ISO
+# Files placed here will be copied into the root filesystem
+
+# Directory structure examples:
+# etc/sol/           - SOL configuration files
+# usr/share/sol/     - Data files, themes, icons
+# usr/local/bin/     - Custom scripts
+# home/sol/          - Default user home directory content

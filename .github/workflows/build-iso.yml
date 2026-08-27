@@ -1,0 +1,188 @@
+name: Build ISO
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override (optional)'
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_VERSION: 1.98.0
+
+permissions:
+  contents: write
+
+jobs:
+  build-iso:
+    name: Build SOL ISO (x86_64)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+      options: --privileged
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            curl wget git jq rsync bc kmod cpio flex bison \
+            build-essential pkg-config libssl-dev libelf-dev \
+            debootstrap squashfs-tools xorriso grub-pc-bin \
+            grub-efi-amd64-bin mtools dosfstools dracut \
+            qemu-system-x86 \
+            libegl1 libgles2 libgbm1 libgl1-mesa-dri \
+            libwayland-dev libxkbcommon-dev libdbus-1-dev \
+            ca-certificates sudo
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: iso-build
+      
+      - name: Cache kernel source
+        uses: actions/cache@v4
+        with:
+          path: build/kernel/linux-*.tar.xz
+          key: kernel-latest-stable
+      
+      - name: Cache base rootfs
+        uses: actions/cache@v4
+        with:
+          path: build/.rootfs-base-done
+          key: rootfs-bookworm-${{ hashFiles('scripts/iso/assemble-rootfs.sh') }}
+      
+      - name: Build kernel
+        run: |
+          ./scripts/iso/build-kernel.sh
+        timeout-minutes: 60
+      
+      - name: Build SOL platform
+        run: |
+          cargo build --workspace --release --locked
+          ./scripts/iso/build-platform.sh
+        timeout-minutes: 45
+      
+      - name: Assemble root filesystem
+        run: |
+          ./scripts/iso/assemble-rootfs.sh
+        timeout-minutes: 30
+      
+      - name: Create ISO image
+        run: |
+          ./scripts/iso/create-iso.sh
+        timeout-minutes: 20
+      
+      - name: Test ISO boot
+        run: |
+          ./scripts/iso/test-boot.sh
+        timeout-minutes: 5
+        continue-on-error: true
+      
+      - name: Generate release notes
+        run: |
+          KERNEL_VERSION=$(cat build/kernel-version.txt)
+          SOL_VERSION=$(cat VERSION)
+          SOL_CODENAME=$(cat CODENAME)
+          
+          cat > build/iso/RELEASE_NOTES.md <<EOF
+          # SOL OS ${SOL_VERSION} "${SOL_CODENAME}"
+          
+          > 北极星 (Polaris) - 指引方向的第一道光
+          
+          ## System Information
+          - **Version**: ${SOL_VERSION} (${SOL_CODENAME})
+          - **Kernel**: Linux ${KERNEL_VERSION}
+          - **Architecture**: x86_64
+          - **Build Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Compositor**: SOL Compositor Protocol (SCP)
+          
+          ## Components
+          - sol-compositor: SCP-native compositor
+          - sol-shell: Desktop shell
+          - sol-settingsd: Settings daemon
+          - sol-notificationd: Notification service
+          
+          ## Boot Instructions
+          
+          ### QEMU/VM
+          \`\`\`bash
+          qemu-system-x86_64 -m 2G -smp 2 -cdrom sol-${SOL_VERSION}-x86_64.iso
+          \`\`\`
+          
+          ### USB Boot
+          \`\`\`bash
+          sudo dd if=sol-${SOL_VERSION}-x86_64.iso of=/dev/sdX bs=4M status=progress
+          \`\`\`
+          
+          ## Verification
+          \`\`\`bash
+          sha256sum -c SHA256SUMS
+          \`\`\`
+          
+          ## Status
+          
+          Phase 0/1 - Foundation and Development Build
+          
+          This is a **pre-alpha development build** for testing and evaluation.
+          Not intended for production use.
+          
+          ---
+          
+          **What's SOL?**
+          
+          SOL is a modern Linux Family OS (like Android/Chrome OS) - not a Linux distribution.
+          - Native SCP compositor protocol (no Wayland compatibility)
+          - Application-first with curated app ecosystem
+          - Atomic image-based updates
+          - Built-in capability-based security
+          
+          Learn more: https://github.com/solOS/sol
+          EOF
+      
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sol-iso-x86_64
+          path: |
+            build/iso/*.iso
+            build/iso/SHA256SUMS
+            build/iso/MD5SUMS
+            build/iso/RELEASE_NOTES.md
+          retention-days: 30
+      
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/iso/*.iso
+            build/iso/SHA256SUMS
+            build/iso/MD5SUMS
+          body_path: build/iso/RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload to artifact store
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "==> ISO ready for distribution"
+          echo "To upload to CDN/artifact store, add your upload logic here"
+          ls -lh build/iso/

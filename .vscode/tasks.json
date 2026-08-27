@@ -1,0 +1,63 @@
+{
+  "version": "0.2.0",
+  "tasks": [
+    {
+      "label": "Build SOL ISO",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/build-iso.sh",
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Kernel Only",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/iso/build-kernel.sh",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Platform Only",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/iso/build-platform.sh",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test ISO in QEMU",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/iso/test-boot.sh",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean ISO Build",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/iso/clean.sh",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
