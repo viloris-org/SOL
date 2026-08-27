@@ -32,13 +32,14 @@ jobs:
      runs-on: ubuntu-latest
      steps:
        - uses: actions/checkout@v5
-       - name: Install system libs (EGL/Wayland for the compositor winit backend)
+       - name: Install system libs
          run: |
            sudo apt-get update
            sudo apt-get install -y \
              libegl1 libgles2 libgbm1 libgl1-mesa-dri \
              libwayland-dev libwayland-bin \
              libxkbcommon-dev \
+             libdbus-1-dev \
              xwayland xvfb
        - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
@@ -62,7 +63,8 @@ jobs:
            sudo apt-get install -y \
              libegl1 libgles2 libgbm1 libgl1-mesa-dri \
              libwayland-dev libwayland-bin \
-             libxkbcommon-dev
+             libxkbcommon-dev \
+             libdbus-1-dev
        - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
@@ -92,7 +94,8 @@ jobs:
            sudo apt-get install -y \
              libegl1 libgles2 libgbm1 libgl1-mesa-dri \
              libwayland-dev libwayland-bin \
-             libxkbcommon-dev
+             libxkbcommon-dev \
+             libdbus-1-dev
        - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
