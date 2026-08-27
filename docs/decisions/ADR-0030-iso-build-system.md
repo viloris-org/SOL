@@ -1,8 +1,15 @@
 # ADR-0030: ISO Build System Architecture
 
-**Status:** Accepted  
+**Status:** Accepted (revised 2026-08-27 for sol-boot / sol-init boot path)  
 **Date:** 2024-01-27  
 **Context:** Phase 0 - Foundation
+
+> **2026-08-27 revision:** this ADR originally standardized on GRUB, dracut and
+> systemd units. Since then SOL shipped its own UEFI bootloader (`sol-boot`,
+> ADR-0026) and daemon supervisor (`sol-init`), and dropped third-party runtime
+> components from the platform (ADR-0028). The ISO build now uses sol-boot for
+> the bootloader, a busybox initramfs instead of dracut, and sol-init instead
+> of systemd units; the boot target is UEFI-only (no legacy BIOS/GRUB).
 
 ## Context
 
@@ -13,8 +20,8 @@ SOL needs a reproducible, automated ISO build pipeline for:
 - Developer onboarding
 
 The ISO must be:
-- Bootable on real hardware (BIOS and UEFI)
-- Testable in QEMU/VMs
+- Bootable on real hardware (UEFI)
+- Testable in QEMU/VMs (OVMF)
 - Built from the latest stable kernel
 - Include all SOL platform components
 - Reproducible across environments
@@ -32,25 +39,24 @@ We implement a **staged build pipeline** with five distinct phases:
 ### 2. Platform Build
 - Build all Rust workspace components in release mode
 - Install binaries to staging rootfs
-- Generate systemd service files
 - Install SDK libraries
+- Install sol-init daemon definitions (`.daemon`) and D-Bus activation files
+- No systemd units are generated
 
 ### 3. RootFS Assembly
-- Use Debian bookworm minimal as base system
-- Apply SOL overlay from `build/rootfs/`
-- Configure systemd, users, and autologin
-- Enable SOL services
+- Use Debian bookworm minbase WITHOUT systemd
+- Merge kernel-staging and platform-staging into the rootfs
+- Install the SOL `/sbin/init` bringup (hands control to sol-init)
 
 ### 4. ISO Creation
 - Create squashfs from rootfs (xz compression)
-- Generate initramfs with dracut (overlayfs support)
-- Install GRUB with hybrid BIOS/UEFI
-- Generate checksums
+- Generate the busybox initramfs (locates the live squashfs, overlays it)
+- Provision the signed sol-boot ESP (UKI + manifest + deployment + state)
+- Generate the UEFI-only ISO with xorriso (no GRUB)
 
 ### 5. Boot Testing
-- Launch QEMU with the ISO
-- Validate compositor startup
-- Check system boot markers
+- Launch QEMU + OVMF with the ISO
+- Validate sol-init startup (daemon supervision markers)
 
 ### Architecture Choices
 
@@ -66,9 +72,11 @@ We implement a **staged build pipeline** with five distinct phases:
 - Reasoning: Best compression ratio, read-only root safety
 - Alternative: erofs (faster but less mature tooling)
 
-**Bootloader:** GRUB 2 with hybrid support
-- Reasoning: Universal compatibility, BIOS + UEFI in one ISO
-- Alternative: systemd-boot (UEFI-only, simpler but less compatible)
+**Bootloader:** sol-boot (UEFI, signed slots)
+- Reasoning: SOL owns its boot policy (ADR-0026); GRUB cannot verify the
+  SOL deployment envelope or drive A/B trials
+- Alternative considered: GRUB 2 (rejected: third-party runtime component,
+  BIOS legacy mode, no slot awareness)
 
 **CI Platform:** GitHub Actions
 - Reasoning: Native integration, generous free tier, good caching
@@ -79,10 +87,11 @@ We implement a **staged build pipeline** with five distinct phases:
 ### Scripts
 - `scripts/build-iso.sh` - Master orchestrator
 - `scripts/iso/build-kernel.sh` - Kernel build stage
-- `scripts/iso/build-platform.sh` - SOL components
-- `scripts/iso/assemble-rootfs.sh` - Filesystem assembly
-- `scripts/iso/create-iso.sh` - ISO generation
-- `scripts/iso/test-boot.sh` - QEMU validation
+- `scripts/iso/build-platform.sh` - SOL components (all services + daemons)
+- `scripts/iso/assemble-rootfs.sh` - Filesystem assembly (systemd-free)
+- `scripts/iso/build-initramfs.sh` - busybox initramfs generation
+- `scripts/iso/create-iso.sh` - ISO generation (sol-boot ESP + xorriso)
+- `scripts/iso/test-boot.sh` - QEMU/OVMF validation
 - `scripts/iso/clean.sh` - Artifact cleanup
 
 ### Configuration
@@ -110,16 +119,18 @@ Build times:
 - Testable in QEMU before hardware deployment
 
 ### Negative
-- Requires significant dependencies (kernel build tools, GRUB, etc.)
+- Requires significant dependencies (kernel build tools, dosfstools/mtools,
+  OVMF for the boot test, etc.)
 - First build is slow (~45min)
 - Requires root/sudo for debootstrap
 - Large disk space requirement (~15GB for full build)
+- UEFI-only: legacy BIOS machines are out of scope (sol-boot is UEFI)
 
 ### Neutral
 - Uses Debian base (not a from-scratch rootfs)
   - Acceptable for Phase 0, may build custom base later
-- GRUB instead of systemd-boot
-  - Broader compatibility at cost of complexity
+- The kernel carries CONFIG_CMDLINE with the initrd path
+  - sol-boot transfers control without a loaded-image command line
 - x86_64 only initially
   - aarch64 can be added later with matrix builds
 

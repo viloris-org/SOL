@@ -1,0 +1,14 @@
+[Daemon]
+name = "dbus"
+exec = "/usr/lib/sol/sol-dbus"
+type = "system"
+start_mode = "boot"
+restart_policy = "on-failure"
+
+after = []
+requires = []
+
+dbus_name = "org.freedesktop.DBus"
+
+[Environment]
+DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/sol-session.sock"

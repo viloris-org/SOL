@@ -1,0 +1,18 @@
+[Daemon]
+name = "sol-ntpd"
+exec = "/usr/bin/sol-ntpd"
+type = "system"
+start_mode = "boot"
+restart_policy = "on-failure"
+
+after = ["sol-networkd"]
+requires = []
+
+dbus_name = "org.sol.Time1"
+
+capabilities = [
+    "network.access",
+    "system.clock"
+]
+
+[Environment]

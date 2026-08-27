@@ -16,7 +16,7 @@ echo ""
 echo "==> Checking dependencies..."
 MISSING_DEPS=()
 
-for tool in curl jq cargo mksquashfs grub-mkrescue debootstrap; do
+for tool in curl jq cargo mksquashfs debootstrap mkfs.vfat mcopy xorriso gzip; do
     if ! command -v $tool &> /dev/null; then
         MISSING_DEPS+=($tool)
     fi
@@ -27,8 +27,8 @@ if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
     echo ""
     echo "Install them with:"
     echo "  Ubuntu/Debian:"
-    echo "    sudo apt-get install curl jq cargo squashfs-tools grub-pc-bin \\"
-    echo "      grub-efi-amd64-bin xorriso debootstrap dracut"
+    echo "    sudo apt-get install curl jq cargo squashfs-tools debootstrap \\"
+    echo "      dosfstools mtools xorriso busybox-static binutils"
     exit 1
 fi
 
@@ -42,24 +42,25 @@ echo "╚═══════════════════════�
 "${SCRIPT_DIR}/iso/build-kernel.sh"
 echo ""
 
-# Stage 2: Build SOL platform
+# Stage 2: Build SOL platform (installs all SOL services + sol-init daemons)
 echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║ Stage 2: Building SOL Platform                                ║"
+echo "║ Stage 2: Building SOL Platform (sol-init supervised)          ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 "${SCRIPT_DIR}/iso/build-platform.sh"
 echo ""
 
-# Stage 3: Assemble rootfs
+# Stage 3: Assemble rootfs (systemd-free base)
 echo "╔═══════════════════════════════════════════════════════════════╗"
 echo "║ Stage 3: Assembling Root Filesystem                           ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 "${SCRIPT_DIR}/iso/assemble-rootfs.sh"
 echo ""
 
-# Stage 4: Create ISO
+# Stage 4: Create ISO (sol-boot UEFI, busybox initramfs)
 echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║ Stage 4: Creating ISO Image                                   ║"
+echo "║ Stage 4: Creating ISO Image (sol-boot + initramfs)           ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
+"${SCRIPT_DIR}/iso/build-initramfs.sh" >/dev/null 2>&1 || true
 "${SCRIPT_DIR}/iso/create-iso.sh"
 echo ""
 

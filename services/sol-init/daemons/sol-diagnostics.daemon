@@ -1,0 +1,17 @@
+[Daemon]
+name = "sol-diagnostics"
+exec = "/usr/bin/sol-diagnostics"
+type = "system"
+start_mode = "boot"
+restart_policy = "on-failure"
+
+after = []
+requires = []
+
+dbus_name = "org.sol.Diagnostics1"
+
+capabilities = [
+    "system.diagnostics"
+]
+
+[Environment]

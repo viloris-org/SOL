@@ -1,0 +1,18 @@
+[Daemon]
+name = "sol-deviced"
+exec = "/usr/bin/sol-deviced"
+type = "system"
+start_mode = "boot"
+restart_policy = "on-failure"
+
+after = []
+requires = []
+
+dbus_name = "org.sol.Device1"
+
+capabilities = [
+    "system.hotplug",
+    "system.io"
+]
+
+[Environment]

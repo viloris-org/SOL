@@ -1,6 +1,14 @@
 # Build artifacts
 /build/kernel/linux-*
+/build/kernel-staging/
+/build/kernel-artifacts/
 /build/rootfs-staging/
+/build/platform-staging/
+/build/initramfs/
+/build/initramfs-staging/
+/build/esp/
+/build/esp.img
+/build/esp-keys/
 /build/iso-staging/
 /build/iso/*.iso
 /build/iso/SHA256SUMS

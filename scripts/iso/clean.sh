@@ -20,6 +20,15 @@ if [ -d "${BUILD_DIR}/rootfs-staging" ]; then
     sudo rm -rf "${BUILD_DIR}/rootfs-staging"
 fi
 
+# Clean platform/kernel/initramfs staging
+for dir in platform-staging kernel-staging kernel-artifacts initramfs initramfs-staging esp esp-keys; do
+    if [ -d "${BUILD_DIR}/${dir}" ]; then
+        echo "  Removing ${dir}..."
+        sudo rm -rf "${BUILD_DIR}/${dir}"
+    fi
+done
+rm -f "${BUILD_DIR}/esp.img"
+
 # Clean ISO staging
 if [ -d "${BUILD_DIR}/iso-staging" ]; then
     echo "  Removing ISO staging..."

@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 KERNEL_BUILD_DIR="${BUILD_DIR}/kernel"
+KERNEL_STAGING="${BUILD_DIR}/kernel-staging"
 ROOTFS_DIR="${BUILD_DIR}/rootfs-staging"
 
 echo "==> Fetching latest stable kernel version..."
@@ -67,15 +68,21 @@ echo "==> Building kernel with $(nproc) cores..."
 make -j$(nproc) bzImage modules
 
 # Install modules
+# Stage kernel artifacts into kernel-staging/ (not rootfs-staging: the base
+# filesystem must be debootstrap'ed into an empty rootfs-staging later).
 echo "==> Installing kernel modules..."
-mkdir -p "${ROOTFS_DIR}"
-INSTALL_MOD_PATH="${ROOTFS_DIR}" make modules_install
+mkdir -p "${KERNEL_STAGING}"
+INSTALL_MOD_PATH="${KERNEL_STAGING}" make modules_install
 
 # Install kernel image
 echo "==> Installing kernel image..."
-mkdir -p "${ROOTFS_DIR}/boot"
-cp arch/x86/boot/bzImage "${ROOTFS_DIR}/boot/vmlinuz-${KERNEL_VERSION}"
-ln -sf "vmlinuz-${KERNEL_VERSION}" "${ROOTFS_DIR}/boot/vmlinuz-sol"
+mkdir -p "${KERNEL_STAGING}/boot"
+cp arch/x86/boot/bzImage "${KERNEL_STAGING}/boot/vmlinuz-${KERNEL_VERSION}"
+ln -sf "vmlinuz-${KERNEL_VERSION}" "${KERNEL_STAGING}/boot/vmlinuz-sol"
+
+# Keep the bare bzImage available for UKI assembly in create-iso.sh
+mkdir -p "${BUILD_DIR}/kernel-artifacts"
+cp arch/x86/boot/bzImage "${BUILD_DIR}/kernel-artifacts/vmlinuz"
 
 # Save kernel version for later stages
 echo "$KERNEL_VERSION" > "${BUILD_DIR}/kernel-version.txt"

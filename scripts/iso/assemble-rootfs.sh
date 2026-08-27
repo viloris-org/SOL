@@ -1,60 +1,73 @@
 #!/bin/bash
-# Assemble the SOL root filesystem
+# Assemble the SOL root filesystem.
+#
+# The base is a minimal Debian minbase WITHOUT systemd: SOL owns the init
+# path (/sbin/init -> sol-init) and the daemon supervision (sol-init's
+# .daemon files). The kernel modules and platform components staged by
+# build-kernel.sh / build-platform.sh are merged in afterward.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 ROOTFS_DIR="${BUILD_DIR}/rootfs-staging"
-ROOTFS_OVERLAY="${BUILD_DIR}/rootfs"
+KERNEL_STAGING="${BUILD_DIR}/kernel-staging"
+PLATFORM_STAGING="${BUILD_DIR}/platform-staging"
 
 echo "==> Assembling SOL root filesystem..."
 
-# Create base directory structure
-echo "==> Creating directory structure..."
-mkdir -p "${ROOTFS_DIR}"/{boot,dev,proc,sys,tmp,run,home,root}
-mkdir -p "${ROOTFS_DIR}"/usr/{bin,sbin,lib,lib64,share}
-mkdir -p "${ROOTFS_DIR}"/etc/{systemd/system,dbus-1/system.d,xdg,sol}
-mkdir -p "${ROOTFS_DIR}"/var/{log,cache,lib}
-
-# Install base system using debootstrap (minimal Debian base)
+# ---------------------------------------------------------------------------
+# Base system (Debian bookworm minbase, no systemd in the runtime)
+# ---------------------------------------------------------------------------
 if [ ! -f "${BUILD_DIR}/.rootfs-base-done" ]; then
-    echo "==> Installing base system (Debian bookworm minimal)..."
-    
-    # Check if debootstrap is available
+    echo "==> Installing base system (Debian bookworm minimal, systemd-free)..."
+
     if ! command -v debootstrap &> /dev/null; then
         echo "ERROR: debootstrap not found. Install it first:"
         echo "  Ubuntu/Debian: sudo apt-get install debootstrap"
         exit 1
     fi
-    
+    if [ -d "${ROOTFS_DIR}" ] && [ -n "$(ls -A "${ROOTFS_DIR}" 2>/dev/null)" ]; then
+        echo "ERROR: ${ROOTFS_DIR} exists and is not empty; debootstrap needs an"
+        echo "       empty target. Remove it first: rm -rf ${ROOTFS_DIR}"
+        exit 1
+    fi
+
     sudo debootstrap \
         --variant=minbase \
-        --include=systemd,dbus,udev,kmod,util-linux,coreutils,bash,ca-certificates \
-        --exclude=ifupdown,isc-dhcp-client,isc-dhcp-common \
+        --include=dbus,util-linux,coreutils,bash,passwd,kmod,ca-certificates,busybox-static \
+        --exclude=ifupdown,isc-dhcp-client,isc-dhcp-common,systemd,systemd-sysv,udev \
         bookworm \
         "${ROOTFS_DIR}" \
         http://deb.debian.org/debian
-    
+
     touch "${BUILD_DIR}/.rootfs-base-done"
-    echo "  ✓ Base system installed"
+    echo "  ✓ Base system installed (minbase, systemd-free)"
 else
     echo "  ✓ Using cached base system"
 fi
 
-# Apply SOL overlay if it exists
-if [ -d "${ROOTFS_OVERLAY}" ]; then
-    echo "==> Applying SOL overlay..."
-    sudo rsync -a "${ROOTFS_OVERLAY}/" "${ROOTFS_DIR}/"
+# ---------------------------------------------------------------------------
+# Merge SOL components into the rootfs
+# ---------------------------------------------------------------------------
+if [ -d "${KERNEL_STAGING}" ]; then
+    echo "==> Merging kernel staging..."
+    sudo rsync -a "${KERNEL_STAGING}/" "${ROOTFS_DIR}/"
+fi
+if [ -d "${PLATFORM_STAGING}" ]; then
+    echo "==> Merging platform staging..."
+    sudo rsync -a "${PLATFORM_STAGING}/" "${ROOTFS_DIR}/"
 fi
 
-# Configure system
+# ---------------------------------------------------------------------------
+# Configure the system
+# ---------------------------------------------------------------------------
 echo "==> Configuring system..."
 
-# Set hostname
+# Hostname
 echo "sol" | sudo tee "${ROOTFS_DIR}/etc/hostname" > /dev/null
 
-# Configure hosts file
+# Hosts file
 sudo tee "${ROOTFS_DIR}/etc/hosts" > /dev/null <<'EOF'
 127.0.0.1   localhost
 127.0.1.1   sol
@@ -63,69 +76,31 @@ ff02::1     ip6-allnodes
 ff02::2     ip6-allrouters
 EOF
 
-# Configure fstab
+# fstab (informational: the initramfs mounts the live root; /run and /tmp are
+# mounted by the SOL PID1 bringup before sol-init starts)
 sudo tee "${ROOTFS_DIR}/etc/fstab" > /dev/null <<'EOF'
 # SOL OS filesystem table
 tmpfs      /tmp       tmpfs   defaults,noatime,mode=1777  0 0
 tmpfs      /run       tmpfs   defaults,noatime,mode=0755  0 0
-overlay    /          overlay defaults                    0 0
 EOF
 
-# Set default systemd target to graphical
-sudo ln -sf /lib/systemd/system/graphical.target \
-    "${ROOTFS_DIR}/etc/systemd/system/default.target"
-
-# Enable SOL services
-echo "==> Enabling SOL services..."
-for service in sol-compositor sol-shell sol-settingsd sol-notificationd; do
-    if [ -f "${ROOTFS_DIR}/lib/systemd/system/${service}.service" ]; then
-        sudo ln -sf "/lib/systemd/system/${service}.service" \
-            "${ROOTFS_DIR}/etc/systemd/system/graphical.target.wants/${service}.service"
-        echo "  ✓ Enabled ${service}"
-    fi
-done
-
-# Create SOL user (default user)
-echo "==> Creating SOL user..."
-sudo chroot "${ROOTFS_DIR}" useradd -m -s /bin/bash -G audio,video,input sol || true
-sudo chroot "${ROOTFS_DIR}" passwd -d sol  # No password for live boot
-
-# Set up autologin
-sudo mkdir -p "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d"
-sudo tee "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d/autologin.conf" > /dev/null <<'EOF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin sol --noclear %I $TERM
-EOF
-
-# Configure environment
+# Environment for the desktop session
 sudo tee "${ROOTFS_DIR}/etc/profile.d/sol.sh" > /dev/null <<'EOF'
 # SOL environment variables
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export SOL_COMPOSITOR_SOCKET="${XDG_RUNTIME_DIR}/sol-compositor.sock"
 
-# Ensure runtime directory exists
 if [ ! -d "$XDG_RUNTIME_DIR" ]; then
     mkdir -p "$XDG_RUNTIME_DIR"
     chmod 0700 "$XDG_RUNTIME_DIR"
 fi
 EOF
 
-# Create version file
+# Release file
 KERNEL_VERSION=$(cat "${BUILD_DIR}/kernel-version.txt" 2>/dev/null || echo "unknown")
-
-if [ -f "${PROJECT_ROOT}/VERSION" ]; then
-    SOL_VERSION=$(cat "${PROJECT_ROOT}/VERSION")
-else
-    SOL_VERSION=$(git -C "$PROJECT_ROOT" describe --tags --always 2>/dev/null || echo "dev")
-fi
-
-if [ -f "${PROJECT_ROOT}/CODENAME" ]; then
-    SOL_CODENAME=$(cat "${PROJECT_ROOT}/CODENAME")
-else
-    SOL_CODENAME=""
-fi
-
+SOL_VERSION=$(cat "${PROJECT_ROOT}/VERSION" 2>/dev/null || \
+    git -C "$PROJECT_ROOT" describe --tags --always 2>/dev/null || echo "dev")
+SOL_CODENAME=$(cat "${PROJECT_ROOT}/CODENAME" 2>/dev/null || echo "")
 sudo tee "${ROOTFS_DIR}/etc/sol-release" > /dev/null <<EOF
 SOL_VERSION=${SOL_VERSION}
 SOL_CODENAME=${SOL_CODENAME}
@@ -133,13 +108,15 @@ SOL_KERNEL=${KERNEL_VERSION}
 SOL_BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 EOF
 
+# ---------------------------------------------------------------------------
 # Clean up
+# ---------------------------------------------------------------------------
 echo "==> Cleaning up..."
 sudo rm -rf "${ROOTFS_DIR}"/var/cache/apt/archives/*.deb
 sudo rm -rf "${ROOTFS_DIR}"/tmp/*
 sudo rm -rf "${ROOTFS_DIR}"/var/tmp/*
 
-# Set permissions
+# Run tmpfs mounts are created by /sbin/init at boot; ensure directories exist
 sudo chmod 1777 "${ROOTFS_DIR}/tmp"
 sudo chmod 0755 "${ROOTFS_DIR}/run"
 
@@ -150,3 +127,4 @@ else
     echo "  Version: ${SOL_VERSION}"
 fi
 echo "  Kernel: ${KERNEL_VERSION}"
+echo "  Init: sol-init (systemd-free)"
