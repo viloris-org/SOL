@@ -1,6 +1,6 @@
 //! Signing, verification, publisher lineage, and update identity for SOL `.app` bundles.
 //!
-//! The implementation follows ADR-0029: every regular bundle file is bound by a
+//! The implementation follows ADR-0030: every regular bundle file is bound by a
 //! canonical JSON content manifest, release signatures and publisher rotation
 //! form one unified protocol, and each lineage is independently verified.
 

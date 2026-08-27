@@ -1,8 +1,8 @@
-# ADR-0029 Technical Issues and Fixes
+# ADR-0030 Technical Issues and Fixes
 
-This document addresses 12 technical issues found in ADR-0029's initial design. **All issues have been resolved in the main ADR-0029 document.**
+This document addresses 12 technical issues found in ADR-0030's initial design. **All issues have been resolved in the main ADR-0030 document.**
 
-## Status: ✅ All fixes integrated into ADR-0029
+## Status: ✅ All fixes integrated into ADR-0030
 
 SOL exposes one unified signing scheme. Android generation labels are historical
 design context only and are not protocol modes or filenames in SOL.
@@ -131,7 +131,7 @@ if new_version_code <= installed_version_code {
 
 **Problem:** Missing verification that signer's public_key matches lineage's current key.
 
-**Fix Applied:** Already present in ADR-0029 (lines 333-341):
+**Fix Applied:** Already present in ADR-0030 (lines 333-341):
 ```rust
 // CRITICAL: Check signature public_key matches lineage current_key
 if public_key != verified_lineage.current_key {
@@ -233,7 +233,7 @@ enum CacheState {
 
 ## Document History
 
-- **2026-08-26 (initial)**: Identified 8 technical issues in ADR-0029
+- **2026-08-26 (initial)**: Identified 8 technical issues in ADR-0030
 - **2026-08-26 (updated)**: Expanded to 12 issues, all fixed in main document
 - **Status**: All fixes integrated - this document serves as historical record
 
@@ -705,4 +705,4 @@ Add tests for these fixes:
 
 ## Document History
 
-- **2026-08-26**: Initial fixes for 8 technical issues in ADR-0029
+- **2026-08-26**: Initial fixes for 8 technical issues in ADR-0030

@@ -41,7 +41,7 @@ pub struct ContentManifest {
     pub total_content_hash: String,
 }
 
-/// Content groups used by ADR-0029 and reserved forward-compatible content.
+/// Content groups used by ADR-0030 and reserved forward-compatible content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BundleSections {

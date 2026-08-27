@@ -1,4 +1,4 @@
-# ADR-0030: Capability-Based Permission Model
+# ADR-0034: Capability-Based Permission Model
 
 ## Status
 Proposed

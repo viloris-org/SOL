@@ -79,7 +79,7 @@ pub struct Signature {
     pub value: Vec<u8>,
 }
 
-/// Signature algorithms assigned by ADR-0029.
+/// Signature algorithms assigned by ADR-0030.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Enumeration)]
 #[repr(i32)]
 pub enum SignatureAlgorithm {

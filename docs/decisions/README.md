@@ -16,36 +16,47 @@ Decisions are recorded as Architecture Decision Records (ADRs) before implementa
 
 ## ADR list
 
+ADR numbers are immutable once assigned. `0009` was never assigned and is
+intentionally skipped; `0010` is the Phase 0 spike (see above), not a decision.
+Companion docs (`0030a`, `0031a`) are technical annexes to their ADR, not
+decisions in their own right.
+
 | # | Decision | Status | Target phase | ADR |
 |---|---|---|---|---|
 | 1 | Repository strategy: early monorepo | Accepted | Phase 0 | [0001](0001-monorepo.md) |
 | 2 | Rust workspace layout | Accepted | Phase 0 | [0002](0002-rust-workspace-layout.md) |
-| 3 | SOL Shell not based on Quickshell | Accepted | Phase 0 | [0003-shell-not-quickshell.md](0003-shell-not-quickshell.md) |
-| 4 | Slint-backed retained/reactive SolUI | Accepted | Phase 2 | [0004-slint-as-solui-substrate.md](0004-slint-as-solui-substrate.md) |
-| 5 | Compositor dev path: winit-first, DRM deferred | Accepted | Phase 0/1 | [0005-compositor-dev-path.md](0005-compositor-dev-path.md) |
-| 6 | Compositor ↔ Shell IPC: structural split, transport deferred | Accepted | Phase 0/1 | [0006-shell-ipc-deferred.md](0006-shell-ipc-deferred.md) |
-| 7 | IME: first-party sol-ime frontend + fcitx5 engine | Accepted | Phase 1 | [0007-ime-frontend-fcitx5-engine.md](0007-ime-frontend-fcitx5-engine.md) |
-| 8 | Historical distribution decision + XWayland dropped | Partially superseded; X11 scope accepted | Phase 1+ | [0008-distribution-xwayland-scope.md](0008-distribution-xwayland-scope.md) |
-| 9 | Settings storage and stable minimum API boundary | Accepted | Phase 2 | [0011-settings-storage-api.md](0011-settings-storage-api.md) |
-| 10 | Application identity and lifecycle contracts | Accepted | Phase 2 | [0012-application-identity-lifecycle.md](0012-application-identity-lifecycle.md) |
-| 11 | Typed System Action and permission layer | Accepted (API contract) | Phase 4 | [0013-system-action-permission-layer.md](0013-system-action-permission-layer.md) |
-| 12 | Local, privacy-preserving search index | Accepted (foundation) | Phase 4 | [0014-local-search-index.md](0014-local-search-index.md) |
-| 13 | System overlays and layer-shell popup contract | Accepted (headless contract) | Phase 4 | [0015-layer-shell-overlays-popup-contract.md](0015-layer-shell-overlays-popup-contract.md) |
-| 14 | Privacy-bounded diagnostics foundation | Accepted (Phase 5 foundation) | Phase 5 | [0016-diagnostics-foundation.md](0016-diagnostics-foundation.md) |
-| 15 | SolKit stability policy, SDK tiers, and monorepo review | Accepted (Phase 6 policy) | Phase 6 | [0017](0017-solkit-stability-tiers.md) |
-| 16 | Historical pacman/AUR package backend | Superseded by ADR-0020 | Phase 6 | [0018](0018-package-backend.md) |
-| 17 | SOL OS product, image, and boot boundary | Accepted (architecture) | Phase 7 | [0019](0019-os-product-and-boot-boundary.md) |
-| 18 | SOL package manager, `.app`, and shared runtime | Accepted (architecture) | Phases 8–9 | [0020](0020-sol-package-app-runtime.md) |
-| 19 | Default-deny application security and permissions | Accepted (policy) | Phase 8 | [0021](0021-application-security-permissions.md) |
-| 20 | System-managed accounts and credential vault | Accepted (architecture) | Phase 8 | [0022](0022-system-managed-accounts.md) |
-| 21 | SOL fluid material system | Accepted (design contract) | Phases 2/4/9 | [0023](0023-sol-fluid-material.md) |
-| 22 | GTK, Qt, and non-native toolkit compatibility | Accepted (architecture) | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
-| 23 | Shell spatial grammar, global menu, and Live Capsule | Accepted (product/architecture) | Phases 4/9 | [0025](0025-shell-spatial-menu-live-capsule.md) |
-| 24 | SOL boot execution, UKI, and seamless graphics handoff | Accepted (architecture) | Phase 7 | [0026](0026-sol-boot-uki-and-graphics-handoff.md) |
-| 25 | SOL Compositor Protocol (SCP) - capability-based security | Accepted (architecture) | Phases 1–2 | [0027](ADR-0027-sol-compositor-protocol.md) |
-| 26 | Drop Wayland compatibility layer | Accepted (product) | Phase 1 | [0028](ADR-0028-drop-wayland-compatibility.md) |
-| 27 | Application signing and publisher lineage | Proposed | Phase 8 | [0029](ADR-0029-app-signing-publisher-lineage.md) |
-| 27b | ADR-0029 Technical Fixes | Proposed | Phase 8 | [0029-fixes](ADR-0029-fixes.md) |
+| 3 | SOL Shell not based on Quickshell | Accepted | Phase 0 | [0003](0003-shell-not-quickshell.md) |
+| 4 | Slint-backed retained/reactive SolUI | Accepted | Phase 2 | [0004](0004-slint-as-solui-substrate.md) |
+| 5 | Compositor dev path: winit-first, DRM deferred | Accepted | Phase 0/1 | [0005](0005-compositor-dev-path.md) |
+| 6 | Compositor ↔ Shell IPC: structural split, transport deferred | Accepted | Phase 0/1 | [0006](0006-shell-ipc-deferred.md) |
+| 7 | IME: first-party sol-ime frontend + fcitx5 engine | Accepted | Phase 1 | [0007](0007-ime-frontend-fcitx5-engine.md) |
+| 8 | Historical distribution decision + XWayland dropped | Partially superseded; X11 scope accepted | Phase 1+ | [0008](0008-distribution-xwayland-scope.md) |
+| 11 | Settings storage and stable minimum API boundary | Accepted | Phase 2 | [0011](0011-settings-storage-api.md) |
+| 12 | Application identity and lifecycle contracts | Accepted | Phase 2 | [0012](0012-application-identity-lifecycle.md) |
+| 13 | Typed System Action and permission layer | Accepted (API contract) | Phase 4 | [0013](0013-system-action-permission-layer.md) |
+| 14 | Local, privacy-preserving search index | Accepted (foundation) | Phase 4 | [0014](0014-local-search-index.md) |
+| 15 | System overlays and layer-shell popup contract | Accepted (headless contract) | Phase 4 | [0015](0015-layer-shell-overlays-popup-contract.md) |
+| 16 | Privacy-bounded diagnostics foundation | Accepted (Phase 5 foundation) | Phase 5 | [0016](0016-diagnostics-foundation.md) |
+| 17 | SolKit stability policy, SDK tiers, and monorepo review | Accepted (Phase 6 policy) | Phase 6 | [0017](0017-solkit-stability-tiers.md) |
+| 18 | Historical pacman/AUR package backend | Superseded by ADR-0020 | Phase 6 | [0018](0018-package-backend.md) |
+| 19 | SOL OS product, image, and boot boundary | Accepted (architecture) | Phase 7 | [0019](0019-os-product-and-boot-boundary.md) |
+| 20 | SOL package manager, `.app`, and shared runtime | Accepted (architecture) | Phases 8–9 | [0020](0020-sol-package-app-runtime.md) |
+| 21 | Default-deny application security and permissions | Accepted (policy) | Phase 8 | [0021](0021-application-security-permissions.md) |
+| 22 | System-managed accounts and credential vault | Accepted (architecture) | Phase 8 | [0022](0022-system-managed-accounts.md) |
+| 23 | SOL fluid material system | Accepted (design contract) | Phases 2/4/9 | [0023](0023-sol-fluid-material.md) |
+| 24 | GTK, Qt, and non-native toolkit compatibility | Accepted (architecture) | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
+| 25 | Shell spatial grammar, global menu, and Live Capsule | Accepted (product/architecture) | Phases 4/9 | [0025](0025-shell-spatial-menu-live-capsule.md) |
+| 26 | SOL boot execution, UKI, and seamless graphics handoff | Accepted (architecture) | Phase 7 | [0026](0026-sol-boot-uki-and-graphics-handoff.md) |
+| 27 | SOL Compositor Protocol (SCP) - capability-based security | Accepted (architecture) | Phases 1–2 | [0027](0027-sol-compositor-protocol.md) |
+| 28 | Drop Wayland compatibility layer | Accepted (product) | Phase 1 | [0028](0028-drop-wayland-compatibility.md) |
+| 29 | Process scheduling strategy | Accepted (Phase 1 core implemented) | Phase 1 | [0029](0029-process-scheduling-strategy.md) |
+| 30 | Application signing and publisher lineage | Proposed | Phase 8 | [0030](0030-application-signing-publisher-lineage.md) |
+| 30a | Technical fixes for 0030 (all integrated into 0030) | — | — | [0030a](0030-application-signing-technical-fixes.md) |
+| 31 | Device control plane and hotplug lifecycle | Proposed | Phase 5 | [0031](0031-device-control-plane-and-hotplug.md) |
+| 31a | 0031 implementation summary (companion, not a decision) | — | — | [0031a](0031-device-control-plane-implementation-summary.md) |
+| 32 | Smithay-to-SCP complete migration | Accepted | Phases 1–2 | [0032](0032-smithay-to-scp-migration.md) |
+| 33 | Compositor-rendered window decorations and IME popups | Accepted | Phase 1 | [0033](0033-compositor-rendered-decorations.md) |
+| 34 | Capability-based permission model | Proposed | Phase 8 | [0034](0034-capability-based-permissions.md) |
 
 ## Decision register (PRD §41)
 
@@ -55,13 +66,13 @@ accepted decision remain open implementation or product work.
 
 | # | Decision | Earliest prototype trigger | Notes |
 |---|---|---|---|
-| 3 | Is Smithay renderer sufficient long-term? | Phase 0/1 | **Revisit with native SCP implementation** - ADR-0028 drops Smithay entirely |
+| 3 | Is Smithay renderer sufficient long-term? | Phase 0/1 | **Revisit with native SCP implementation** - ADR-0028 drops Smithay entirely; ADR-0032 executes the removal |
 | 4 | Long-term role of Vulkan / wgpu | Phase 1+ | Do not rewrite the renderer prematurely |
 | 5 | Compositor ↔ Shell IPC transport / wire format | **Accepted (implementation open)** | [ADR-0006](0006-shell-ipc-deferred.md) selects D-Bus; schema, compositor service, Shell proxy, and integration remain Phase 1 work |
 | 6 | Settings storage architecture | **Accepted (Phase 2)** | [ADR-0011](0011-settings-storage-api.md): typed API; daemon-owned storage boundary |
 | 7 | Application identity format | **Accepted (Phase 2)** | [ADR-0012](0012-application-identity-lifecycle.md): validated reverse-DNS `AppId`; lifecycle boundary |
 | 8 | SolKit ABI/API stability strategy | **Accepted (Phase 6 policy)** | [ADR-0017](0017-solkit-stability-tiers.md): source-API semver begins only with a post-v0.1 public release; no Rust ABI promise |
-| 9 | Server-side vs client-side decorations | **Accepted (Phase 1)** | SCP enforces server-side decorations only (ADR-0027, ADR-0028) - clients cannot draw chrome |
+| 9 | Server-side vs client-side decorations | **Accepted (Phase 1)** | SCP enforces server-side decorations only (ADR-0027, ADR-0028, ADR-0033) - clients cannot draw chrome |
 | 10 | Global menu protocol | **Existence/placement accepted (Phase 4)** | [ADR-0025](0025-shell-spatial-menu-live-capsule.md): Shell-rendered foreground menu at upper-left; schema remains open |
 | 11 | Window tiling product model | Phase 1/4 | Floating + snap first; optional advanced tiling |
 | 12 | Application sandbox implementation | **Policy accepted (Phase 8)** | [ADR-0021](0021-application-security-permissions.md): default deny, kernel enforcement, typed portals; exact LSM composition remains open |
@@ -80,8 +91,10 @@ accepted decision remain open implementation or product work.
 | 25 | Fluid-material compositor path | Phase 4/9 | Roles/fallbacks are fixed by ADR-0023; sampling/refraction implementation remains open |
 | 26 | Toolkit adapter/protocol matrix | Phase 9 | Support levels and isolation are fixed by ADR-0024; adapter coverage and material schema remain open |
 | 27 | Live Activity/menu/status IPC | Phase 4/9 | Placement, attribution, leasing, privacy priority, and trusted rendering fixed by ADR-0025 |
+| 28 | Device control plane and hotplug lifecycle | **Proposed (Phase 5)** | [ADR-0031](0031-device-control-plane-and-hotplug.md): normalized device graph, stable identity, subsystem authority, reconciliation, safe removal, and attachment-fenced leases |
 
 ## Related reading
 
 - [Project roadmap →](../ROADMAP.md) (phase-by-phase execution view)
 - [PRD ↗](../PRD.md) (product requirements)
+- Wayland-removal working notes (experiment log + removal plan, superseded by ADR-0028/0032): [`docs/worklog/`](../worklog/)

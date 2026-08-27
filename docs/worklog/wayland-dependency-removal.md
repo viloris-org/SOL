@@ -174,6 +174,6 @@ Smithay的Wayland支持使我们能：
 - 开发工具链不依赖Wayland（已改用X11）
 
 ## 参考
-- [ADR-0028](./ADR-0028-no-wayland-compatibility.md) - 不提供Wayland兼容层的决策
+- [ADR-0028](../decisions/0028-drop-wayland-compatibility.md) - 不提供Wayland兼容层的决策
 - `compositor/src/scp/protocol.rs` - SCP协议定义
 - `compositor/tests/scp_session.rs` - 纯SCP测试示例

@@ -2,7 +2,7 @@
 
 Device control plane service for SOL OS.
 
-Implements [ADR-0031: Device control plane and hotplug lifecycle](../../docs/decisions/ADR-0031-device-control-plane-and-hotplug.md).
+Implements [ADR-0031: Device control plane and hotplug lifecycle](../../docs/decisions/0031-device-control-plane-and-hotplug.md).
 
 ## Purpose
 
@@ -99,6 +99,6 @@ Use `FakeAdapter` to test without real hardware.
 
 ## Related
 
-- [ADR-0031: Device control plane](../../docs/decisions/ADR-0031-device-control-plane-and-hotplug.md)
+- [ADR-0031: Device control plane](../../docs/decisions/0031-device-control-plane-and-hotplug.md)
 - [ADR-0011: Settings storage and API](../../docs/decisions/ADR-0011-settings-storage-api.md)
 - [ADR-0021: Application security and permissions](../../docs/decisions/ADR-0021-application-security-permissions.md)

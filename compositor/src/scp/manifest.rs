@@ -2,7 +2,7 @@
 //!
 //! Parses .manifest files that declare an app's required capabilities,
 //! special directory access, and metadata. The manifest format is TOML-based
-//! and follows the schema defined in ADR-0030.
+//! and follows the schema defined in ADR-0034.
 
 use crate::scp::capability::Capability;
 use serde::{Deserialize, Serialize};

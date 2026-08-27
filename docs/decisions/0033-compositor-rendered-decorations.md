@@ -1,4 +1,4 @@
-# ADR-0030: Compositor-Rendered Window Decorations and IME Popups
+# ADR-0033: Compositor-Rendered Window Decorations and IME Popups
 
 ## Status
 Accepted

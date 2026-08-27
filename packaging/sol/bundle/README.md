@@ -1,7 +1,7 @@
 # `sol-bundle`
 
 `sol-bundle` implements the application signing design in
-[ADR-0029](../../../docs/decisions/ADR-0029-app-signing-publisher-lineage.md).
+[ADR-0030](../../../docs/decisions/0030-application-signing-publisher-lineage.md).
 It provides a reusable Rust library and the Phase 8 signing CLI.
 
 Implemented security properties:

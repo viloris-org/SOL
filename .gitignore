@@ -1,4 +1,5 @@
 /target
 **/*.rs.bk
+**/*.rs.backup
 *.swp
 .claude/worktrees/

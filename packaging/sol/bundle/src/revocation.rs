@@ -29,7 +29,7 @@ pub struct RevocationEntry {
     pub safe_replacement: Option<String>,
 }
 
-/// Freshness classification from ADR-0029.
+/// Freshness classification from ADR-0030.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheState {
     /// Cache is younger than 24 hours.

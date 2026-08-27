@@ -1,4 +1,4 @@
-# ADR-0029: Application signing and publisher lineage
+# ADR-0030: Application signing and publisher lineage
 
 - **Status:** Proposed
 - **Date:** 2026-08-26

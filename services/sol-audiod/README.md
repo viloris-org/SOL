@@ -159,5 +159,5 @@ unsupported backend.
 
 ## See Also
 
-- [ADR-0029](../../docs/decisions/ADR-0029-process-scheduling.md) - Process scheduling strategy (RT priorities)
+- [ADR-0029](../../docs/decisions/0029-process-scheduling-strategy.md) - Process scheduling strategy (RT priorities)
 - [Architecture](../../docs/architecture.md) - Overall SOL architecture
