@@ -12,6 +12,14 @@
 
 use std::os::unix::io::OwnedFd;
 
+
+use std::sync::{Arc, Mutex};
+use crate::{
+    input::InputCoordinator,
+    outputs::{OutputConfiguration, Outputs},
+    scp::state::ScpState,
+    window,
+};
 use smithay::{
     delegate_compositor, delegate_data_device, delegate_fractional_scale,
     delegate_input_method_manager, delegate_layer_shell, delegate_output, delegate_seat,
@@ -51,10 +59,6 @@ use smithay::{
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
 use wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 
-use crate::{
-    outputs::{OutputConfiguration, Outputs},
-    window,
-};
 
 /// Client-level state attached to each connected SCP client.
 #[derive(Default)]
@@ -62,8 +66,26 @@ pub struct ClientState {
     pub compositor_state: CompositorClientState,
 }
 
+impl smithay::reexports::wayland_server::backend::ClientData for ClientState {
+    fn initialized(&self, _client_id: smithay::reexports::wayland_server::backend::ClientId) {}
+    fn disconnected(&self, _client_id: smithay::reexports::wayland_server::backend::ClientId, _reason: smithay::reexports::wayland_server::backend::DisconnectReason) {}
+}
+
 /// Top-level compositor state shared across backends.
 pub struct SolState {
+    // Phase 2: Protocol-agnostic abstractions (ADR-0032)
+    /// Phase 2: SCP protocol state — the single source of truth for client state.
+    #[allow(dead_code)]
+    pub scp_state: Arc<Mutex<ScpState>>,
+    /// Phase 2: Protocol-agnostic renderer abstraction (type-erased).
+    /// Backend will inject a concrete renderer (SmithayRenderer in Phase 1).
+    #[allow(dead_code)]
+    pub renderer: Option<Box<dyn std::any::Any>>,
+    /// Phase 2: Protocol-agnostic input coordinator.
+    #[allow(dead_code)]
+    pub input_coordinator: InputCoordinator,
+
+    // Phase 1: Smithay protocol state (to be removed in Phase 4)
     display_handle: DisplayHandle,
     pub compositor_state: CompositorState,
     /// Fractional output scale protocol global and per-surface preferences.
@@ -100,8 +122,12 @@ pub struct SolState {
 
 impl SolState {
     /// Create compositor state with backend-provided output configurations.
+    ///
+    /// Phase 2: Accepts a shared SCP state instance that the transport thread
+    /// and compositor both access.
     pub fn with_output_configurations(
         display: &DisplayHandle,
+        scp_state: Arc<Mutex<ScpState>>,
         configurations: Option<&[OutputConfiguration]>,
     ) -> Self {
         let compositor_state = CompositorState::new::<SolState>(display);
@@ -128,6 +154,12 @@ impl SolState {
         ));
 
         SolState {
+            // Phase 2: Use the shared SCP state from the transport
+            scp_state,
+            renderer: None,  // Backend will inject this
+            input_coordinator: InputCoordinator::new(),
+
+            // Phase 1: Smithay protocol state
             display_handle: display.clone(),
             compositor_state,
             fractional_scale_state: FractionalScaleManagerState::new::<SolState>(display),
@@ -164,6 +196,26 @@ impl SolState {
             .set_work_area(smithay::utils::Rectangle::from_size(
                 smithay::utils::Size::new(width, height),
             ));
+    }
+
+    // Phase 2: Backend integration methods
+
+    /// Inject a renderer instance from the backend (winit/udev).
+    /// Phase 2: Backends call this after initializing their GL context.
+    pub fn set_renderer<R: 'static>(&mut self, renderer: R) {
+        self.renderer = Some(Box::new(renderer));
+    }
+
+    /// Access the SCP state for message processing.
+    /// Phase 2: Used by the event loop to dispatch SCP protocol messages.
+    pub fn scp_state(&self) -> Arc<Mutex<ScpState>> {
+        Arc::clone(&self.scp_state)
+    }
+
+    /// Access the input coordinator for backend event translation.
+    /// Phase 2: Used by backends to convert libinput/winit events to SCP.
+    pub fn input_coordinator(&mut self) -> &mut InputCoordinator {
+        &mut self.input_coordinator
     }
 }
 

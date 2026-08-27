@@ -1,0 +1,20 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 512 512"
+  role="img"
+  aria-labelledby="sol-mark-title"
+>
+  <title id="sol-mark-title">SOL eclipse mark</title>
+  <circle
+    cx="256"
+    cy="256"
+    r="192"
+    fill="var(--sol-mark-foreground, #fff)"
+  />
+  <circle
+    cx="390"
+    cy="256"
+    r="42"
+    fill="var(--sol-mark-background, #000)"
+  />
+</svg>
