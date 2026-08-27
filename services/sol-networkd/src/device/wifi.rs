@@ -1,6 +1,6 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug};
-use zbus::{Connection, proxy};
+use anyhow::{Context, Result};
+use tracing::{debug, info, warn};
+use zbus::{proxy, Connection};
 
 use crate::device::Device;
 
@@ -17,7 +17,9 @@ pub struct WiFiDevice {
 )]
 trait IwdStation {
     async fn scan(&self) -> zbus::Result<()>;
-    async fn get_ordered_networks(&self) -> zbus::Result<Vec<(zbus::zvariant::OwnedObjectPath, i16)>>;
+    async fn get_ordered_networks(
+        &self,
+    ) -> zbus::Result<Vec<(zbus::zvariant::OwnedObjectPath, i16)>>;
     async fn connect(&self, ssid: &str) -> zbus::Result<()>;
     async fn disconnect(&self) -> zbus::Result<()>;
 
@@ -65,7 +67,8 @@ trait IwdDevice {
 
 impl WiFiDevice {
     pub async fn new(device: Device) -> Result<Self> {
-        let connection = Connection::system().await
+        let connection = Connection::system()
+            .await
             .context("Failed to connect to system D-Bus")?;
 
         Ok(Self { device, connection })
@@ -85,13 +88,18 @@ impl WiFiDevice {
             .await?;
 
         // Trigger scan
-        station.scan().await.context("Failed to trigger WiFi scan")?;
+        station
+            .scan()
+            .await
+            .context("Failed to trigger WiFi scan")?;
 
         // Wait for scan to complete
         tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
         // Get ordered networks (sorted by signal strength)
-        let networks = station.get_ordered_networks().await
+        let networks = station
+            .get_ordered_networks()
+            .await
             .context("Failed to get network list")?;
 
         let mut results = Vec::new();
@@ -106,7 +114,11 @@ impl WiFiDevice {
         Ok(results)
     }
 
-    async fn parse_network(&self, path: &zbus::zvariant::OwnedObjectPath, signal_dbm: i16) -> Result<WiFiNetwork> {
+    async fn parse_network(
+        &self,
+        path: &zbus::zvariant::OwnedObjectPath,
+        signal_dbm: i16,
+    ) -> Result<WiFiNetwork> {
         let network = IwdNetworkProxy::builder(&self.connection)
             .path(path)?
             .build()
@@ -124,9 +136,9 @@ impl WiFiDevice {
         let security = match security_type.as_str() {
             "open" => WiFiSecurity::Open,
             "wep" => WiFiSecurity::Wep,
-            "psk" => WiFiSecurity::Wpa2,  // WPA2-PSK
-            "8021x" => WiFiSecurity::Wpa2,  // WPA2-Enterprise
-            "sae" => WiFiSecurity::Wpa3,  // WPA3
+            "psk" => WiFiSecurity::Wpa2,   // WPA2-PSK
+            "8021x" => WiFiSecurity::Wpa2, // WPA2-Enterprise
+            "sae" => WiFiSecurity::Wpa3,   // WPA3
             _ => WiFiSecurity::Wpa2,
         };
 
@@ -134,16 +146,22 @@ impl WiFiDevice {
             ssid,
             bssid,
             signal_strength,
-            frequency: 2437,  // TODO: Get actual frequency from iwd
+            frequency: 2437, // TODO: Get actual frequency from iwd
             security,
         })
     }
 
     fn extract_bssid_from_path(path: &str) -> String {
         // Path format: /net/connman/iwd/0/wlan0/aa_bb_cc_dd_ee_ff_psk
-        path.split('/')
-            .last()
-            .and_then(|s| s.split('_').take(6).collect::<Vec<_>>().get(..6).map(|parts| parts.join(":")))
+        path.rsplit('/')
+            .next()
+            .and_then(|s| {
+                s.split('_')
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .get(..6)
+                    .map(|parts| parts.join(":"))
+            })
             .unwrap_or_else(|| "00:00:00:00:00:00".to_string())
     }
 
@@ -170,7 +188,9 @@ impl WiFiDevice {
             .await?;
 
         // iwd will handle authentication using stored credentials
-        station.connect(ssid).await
+        station
+            .connect(ssid)
+            .await
             .context("Failed to connect to WiFi network")?;
 
         info!("Successfully connected to {}", ssid);
@@ -180,14 +200,12 @@ impl WiFiDevice {
     async fn store_passphrase(&self, ssid: &str, passphrase: &str) -> Result<()> {
         // Write passphrase to iwd's storage
         // Format: /var/lib/iwd/<ssid>.psk
-        let config = format!(
-            "[Security]\nPassphrase={}\n",
-            passphrase
-        );
+        let config = format!("[Security]\nPassphrase={}\n", passphrase);
 
         let path = format!("/var/lib/iwd/{}.psk", ssid.replace('/', "_"));
 
-        tokio::fs::write(&path, config).await
+        tokio::fs::write(&path, config)
+            .await
             .context("Failed to write WiFi credentials")?;
 
         debug!("Stored credentials for {}", ssid);
@@ -203,7 +221,9 @@ impl WiFiDevice {
             .build()
             .await?;
 
-        station.disconnect().await
+        station
+            .disconnect()
+            .await
             .context("Failed to disconnect WiFi")?;
 
         Ok(())
@@ -260,10 +280,25 @@ impl WiFiDevice {
             .build()
             .await?;
 
-        device.set_powered(powered).await
+        device
+            .set_powered(powered)
+            .await
             .context("Failed to set WiFi power state")?;
 
         Ok(())
+    }
+
+    pub async fn powered(&self) -> Result<bool> {
+        let station_path = self.station_path();
+        let device = IwdDeviceProxy::builder(&self.connection)
+            .path(station_path.as_str())?
+            .build()
+            .await?;
+
+        device
+            .powered()
+            .await
+            .context("Failed to read WiFi power state")
     }
 }
 
@@ -271,8 +306,8 @@ impl WiFiDevice {
 pub struct WiFiNetwork {
     pub ssid: String,
     pub bssid: String,
-    pub signal_strength: u8,  // 0-100
-    pub frequency: u32,        // MHz
+    pub signal_strength: u8, // 0-100
+    pub frequency: u32,      // MHz
     pub security: WiFiSecurity,
 }
 

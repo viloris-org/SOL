@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use zbus::interface;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
-use std::collections::HashMap;
 
+use crate::captive_portal::ConnectivityState;
 use crate::manager::NetworkManager;
 use crate::profile::ProfileId;
 
@@ -25,8 +26,12 @@ impl ManagerInterface {
 
     /// Get connectivity state (0=none, 1=portal, 2=limited, 3=full)
     async fn connectivity(&self) -> u32 {
-        // TODO: Implement actual connectivity checking
-        3 // Full connectivity placeholder
+        match self.manager.get_connectivity().await {
+            ConnectivityState::None => 0,
+            ConnectivityState::Portal => 1,
+            ConnectivityState::Limited => 2,
+            ConnectivityState::Full => 3,
+        }
     }
 
     /// List all network devices
@@ -34,7 +39,7 @@ impl ManagerInterface {
         let device_ids = self.manager.list_devices().await;
         device_ids
             .into_iter()
-            .map(|id| format!("/org/sol/Network1/Device/{}", id.0))
+            .map(|id| format!("/org/sol/Network1/Device/{}", object_path_component(&id.0)))
             .filter_map(|s| ObjectPath::try_from(s).ok().map(|p| p.into()))
             .collect()
     }
@@ -47,7 +52,10 @@ impl ManagerInterface {
             .await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
 
-        let path = format!("/org/sol/Network1/Connection/{}", profile_id);
+        let path = format!(
+            "/org/sol/Network1/Connection/{}",
+            object_path_component(&profile_id)
+        );
         ObjectPath::try_from(path)
             .map(|p| p.into())
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
@@ -83,8 +91,11 @@ impl ManagerInterface {
     }
 
     /// Scan for WiFi networks
-    async fn scan_wifi(&self) -> zbus::fdo::Result<Vec<HashMap<String, zbus::zvariant::Value<'static>>>> {
-        let networks = self.manager
+    async fn scan_wifi(
+        &self,
+    ) -> zbus::fdo::Result<Vec<HashMap<String, zbus::zvariant::Value<'static>>>> {
+        let networks = self
+            .manager
             .scan_wifi()
             .await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
@@ -93,10 +104,22 @@ impl ManagerInterface {
         for network in networks {
             let mut map = HashMap::new();
             map.insert("ssid".to_string(), zbus::zvariant::Value::new(network.ssid));
-            map.insert("bssid".to_string(), zbus::zvariant::Value::new(network.bssid));
-            map.insert("signal_strength".to_string(), zbus::zvariant::Value::new(network.signal_strength));
-            map.insert("frequency".to_string(), zbus::zvariant::Value::new(network.frequency));
-            map.insert("security".to_string(), zbus::zvariant::Value::new(format!("{:?}", network.security)));
+            map.insert(
+                "bssid".to_string(),
+                zbus::zvariant::Value::new(network.bssid),
+            );
+            map.insert(
+                "signal_strength".to_string(),
+                zbus::zvariant::Value::new(network.signal_strength),
+            );
+            map.insert(
+                "frequency".to_string(),
+                zbus::zvariant::Value::new(network.frequency),
+            );
+            map.insert(
+                "security".to_string(),
+                zbus::zvariant::Value::new(format!("{:?}", network.security)),
+            );
             results.push(map);
         }
 
@@ -111,7 +134,8 @@ impl ManagerInterface {
             Some(passphrase)
         };
 
-        let profile_id = self.manager
+        let profile_id = self
+            .manager
             .connect_wifi_quick(ssid, pass)
             .await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
@@ -129,19 +153,34 @@ impl ManagerInterface {
     }
 
     /// Get active connection information
-    async fn active_connection(&self) -> zbus::fdo::Result<HashMap<String, zbus::zvariant::Value<'static>>> {
-        let info = self.manager
+    async fn active_connection(
+        &self,
+    ) -> zbus::fdo::Result<HashMap<String, zbus::zvariant::Value<'static>>> {
+        let info = self
+            .manager
             .get_active_connection_info()
             .await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
             .ok_or_else(|| zbus::fdo::Error::Failed("No active connection".to_string()))?;
 
         let mut map = HashMap::new();
-        map.insert("type".to_string(), zbus::zvariant::Value::new(info.connection_type));
-        map.insert("interface".to_string(), zbus::zvariant::Value::new(info.interface));
-        map.insert("details".to_string(), zbus::zvariant::Value::new(info.details));
+        map.insert(
+            "type".to_string(),
+            zbus::zvariant::Value::new(info.connection_type),
+        );
+        map.insert(
+            "interface".to_string(),
+            zbus::zvariant::Value::new(info.interface),
+        );
+        map.insert(
+            "details".to_string(),
+            zbus::zvariant::Value::new(info.details),
+        );
         if let Some(strength) = info.signal_strength {
-            map.insert("signal_strength".to_string(), zbus::zvariant::Value::new(strength));
+            map.insert(
+                "signal_strength".to_string(),
+                zbus::zvariant::Value::new(strength),
+            );
         }
 
         Ok(map)
@@ -154,9 +193,11 @@ impl ManagerInterface {
     }
 
     /// Enable/disable auto-connect for a profile
-    async fn set_auto_connect(&self, _profile_id: String, _enabled: bool) -> zbus::fdo::Result<()> {
-        // TODO: Implement in manager
-        Ok(())
+    async fn set_auto_connect(&self, profile_id: String, enabled: bool) -> zbus::fdo::Result<()> {
+        self.manager
+            .set_auto_connect(&ProfileId(profile_id), enabled)
+            .await
+            .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))
     }
 
     /// Signal: Network state changed
@@ -179,4 +220,31 @@ impl ManagerInterface {
         signal_ctxt: &zbus::SignalContext<'_>,
         networks_count: u32,
     ) -> zbus::Result<()>;
+}
+
+fn object_path_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encodes_ids_as_valid_dbus_path_components() {
+        assert_eq!(object_path_component("wifi:3"), "wifi_3");
+        assert_eq!(
+            object_path_component("ca8dfd21-5d20-41a2"),
+            "ca8dfd21_5d20_41a2"
+        );
+    }
 }

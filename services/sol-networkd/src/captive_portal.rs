@@ -1,8 +1,9 @@
 use anyhow::Result;
-use tracing::{info, warn};
 use std::time::Duration;
+use tracing::{info, warn};
 
 /// Captive portal detection and handling
+#[derive(Clone)]
 pub struct CaptivePortalDetector {
     check_url: String,
     expected_response: String,
@@ -141,10 +142,10 @@ impl CaptivePortalDetector {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ConnectivityState {
-    None,        // No connection
-    Portal,      // Behind captive portal
-    Limited,     // Connected but no internet
-    Full,        // Full internet connectivity
+    None,    // No connection
+    Portal,  // Behind captive portal
+    Limited, // Connected but no internet
+    Full,    // Full internet connectivity
 }

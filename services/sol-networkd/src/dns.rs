@@ -1,9 +1,10 @@
 use anyhow::Result;
-use tracing::{info, warn};
-use zbus::Connection;
 use std::net::IpAddr;
+use tracing::info;
+use zbus::Connection;
 
 /// DNS integration with systemd-resolved
+#[derive(Clone)]
 pub struct DnsManager {
     connection: Option<Connection>,
 }
@@ -22,8 +23,7 @@ impl DnsManager {
         info!("Setting DNS servers for {}: {:?}", interface, servers);
 
         let Some(conn) = &self.connection else {
-            warn!("DNS manager not initialized");
-            return Ok(());
+            anyhow::bail!("DNS manager is not initialized");
         };
 
         // Get interface index
@@ -36,15 +36,19 @@ impl DnsManager {
             "org.freedesktop.resolve1",
             "/org/freedesktop/resolve1",
             "org.freedesktop.resolve1.Manager",
-        ).await?;
+        )
+        .await?;
 
         // Convert IpAddr to D-Bus format (family, address bytes)
-        let dns_entries: Vec<(i32, Vec<u8>)> = servers.into_iter().map(|addr| {
-            match addr {
-                IpAddr::V4(v4) => (2, v4.octets().to_vec()), // AF_INET = 2
-                IpAddr::V6(v6) => (10, v6.octets().to_vec()), // AF_INET6 = 10
-            }
-        }).collect();
+        let dns_entries: Vec<(i32, Vec<u8>)> = servers
+            .into_iter()
+            .map(|addr| {
+                match addr {
+                    IpAddr::V4(v4) => (2, v4.octets().to_vec()), // AF_INET = 2
+                    IpAddr::V6(v6) => (10, v6.octets().to_vec()), // AF_INET6 = 10
+                }
+            })
+            .collect();
 
         let _: () = proxy.call("SetLinkDNS", &(ifindex, dns_entries)).await?;
 
@@ -55,8 +59,7 @@ impl DnsManager {
         info!("Setting search domains for {}: {:?}", interface, domains);
 
         let Some(conn) = &self.connection else {
-            warn!("DNS manager not initialized");
-            return Ok(());
+            anyhow::bail!("DNS manager is not initialized");
         };
 
         let ifindex = self.get_interface_index(interface)?;
@@ -66,14 +69,15 @@ impl DnsManager {
             "org.freedesktop.resolve1",
             "/org/freedesktop/resolve1",
             "org.freedesktop.resolve1.Manager",
-        ).await?;
+        )
+        .await?;
 
         // Convert domains to D-Bus format (domain, routing_only)
-        let domain_entries: Vec<(String, bool)> = domains.into_iter()
-            .map(|d| (d, false))
-            .collect();
+        let domain_entries: Vec<(String, bool)> = domains.into_iter().map(|d| (d, false)).collect();
 
-        let _: () = proxy.call("SetLinkDomains", &(ifindex, domain_entries)).await?;
+        let _: () = proxy
+            .call("SetLinkDomains", &(ifindex, domain_entries))
+            .await?;
 
         Ok(())
     }
@@ -82,8 +86,7 @@ impl DnsManager {
         info!("Flushing DNS caches");
 
         let Some(conn) = &self.connection else {
-            warn!("DNS manager not initialized");
-            return Ok(());
+            anyhow::bail!("DNS manager is not initialized");
         };
 
         let proxy = zbus::Proxy::new(
@@ -91,7 +94,8 @@ impl DnsManager {
             "org.freedesktop.resolve1",
             "/org/freedesktop/resolve1",
             "org.freedesktop.resolve1.Manager",
-        ).await?;
+        )
+        .await?;
 
         proxy.call_method("FlushCaches", &()).await?;
 

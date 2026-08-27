@@ -6,7 +6,9 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 zbus = "4"
-netlink-packet-route = "0.17"
+netlink-packet-route = "0.19"
+netlink-packet-core = "0.7"
+netlink-sys = "0.8"
 rtnetlink = "0.14"
 dhcproto = "0.9"
 trust-dns-resolver = "0.23"

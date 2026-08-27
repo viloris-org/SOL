@@ -2,6 +2,29 @@
 
 Network management service for SOL OS. Handles device discovery, connection profiles, DHCP, DNS configuration, and connectivity monitoring.
 
+## Reliability update (2026-08)
+
+The service now has a tested reliability baseline for its core control path:
+
+- subscribes to real kernel link, address, and route multicast events instead of producing timer-based placeholder events;
+- performs guarded auto-connect selection, preferring Ethernet and optionally excluding metered profiles;
+- rolls failed connection attempts back to `Disconnected` and tracks the active profile and observed internet connectivity separately;
+- implements the global WiFi D-Bus scan cache, connect/disconnect, signal, current-network, and radio-power operations;
+- validates D-Bus object-path components instead of silently dropping IDs containing `:` or `-`;
+- accepts only the expected DHCP OFFER/ACK for the current transaction and exits the receive loop correctly;
+- applies addresses and routes with checked `ip ... replace` operations and configures DNS through `systemd-resolved` rather than overwriting `/etc/resolv.conf`; and
+- stores profiles atomically with private permissions, rejects unsafe/duplicate IDs, and fails rather than silently losing a newly generated credential salt.
+
+Run the focused test suite with `cargo test -p sol-networkd --all-targets`.
+
+### Known implementation boundaries
+
+- iwd integration still needs validation and hardening against a real iwd daemon, including hidden and enterprise networks.
+- Manager-level VPN activation is explicitly rejected until profile secrets, interface creation, routes, and rollback are wired end to end. The lower-level WireGuard structures are not yet a complete connection flow.
+- DHCP renewal/release primitives exist, but lease scheduling and persistence are not implemented.
+- `NtsClient` currently delegates to system time services; it is not an in-process RFC 8915 NTS implementation.
+- Per-device and per-profile D-Bus objects and state-change signal emission remain incomplete.
+
 ## Architecture
 
 ```

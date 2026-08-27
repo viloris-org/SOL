@@ -1,19 +1,31 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use std::net::{IpAddr, Ipv4Addr};
 use tracing::info;
-use std::net::Ipv4Addr;
 
 use crate::device::Device;
 use crate::dhcp::{DhcpClient, DhcpLease};
+use crate::dns::DnsManager;
 use crate::profile::ethernet_profile::IpConfig;
 
 /// Ethernet device implementation
 pub struct EthernetDevice {
     device: Device,
+    dns_manager: Option<DnsManager>,
 }
 
 impl EthernetDevice {
     pub fn new(device: Device) -> Self {
-        Self { device }
+        Self {
+            device,
+            dns_manager: None,
+        }
+    }
+
+    pub fn with_dns_manager(device: Device, dns_manager: DnsManager) -> Self {
+        Self {
+            device,
+            dns_manager: Some(dns_manager),
+        }
     }
 
     pub async fn connect(&self, ip_config: &IpConfig) -> Result<()> {
@@ -28,7 +40,12 @@ impl EthernetDevice {
                 let lease = self.start_dhcp().await?;
                 self.apply_dhcp_lease(&lease).await?;
             }
-            IpConfig::Static { address, netmask, gateway, dns } => {
+            IpConfig::Static {
+                address,
+                netmask,
+                gateway,
+                dns,
+            } => {
                 info!("Configuring static IP on {}", self.device.interface);
                 self.set_static_address(*address, *netmask).await?;
                 if let Some(gw) = gateway {
@@ -44,27 +61,22 @@ impl EthernetDevice {
     }
 
     pub async fn disconnect(&self) -> Result<()> {
-        info!("Bringing down Ethernet interface: {}", self.device.interface);
+        info!(
+            "Bringing down Ethernet interface: {}",
+            self.device.interface
+        );
         self.set_link_down().await?;
         Ok(())
     }
 
     async fn set_link_up(&self) -> Result<()> {
-        tokio::process::Command::new("ip")
-            .args(["link", "set", &self.device.interface, "up"])
-            .output()
+        self.run_ip(&["link", "set", &self.device.interface, "up"])
             .await
-            .context("Failed to bring interface up")?;
-        Ok(())
     }
 
     async fn set_link_down(&self) -> Result<()> {
-        tokio::process::Command::new("ip")
-            .args(["link", "set", &self.device.interface, "down"])
-            .output()
+        self.run_ip(&["link", "set", &self.device.interface, "down"])
             .await
-            .context("Failed to bring interface down")?;
-        Ok(())
     }
 
     async fn start_dhcp(&self) -> Result<DhcpLease> {
@@ -75,7 +87,8 @@ impl EthernetDevice {
 
     async fn apply_dhcp_lease(&self, lease: &DhcpLease) -> Result<()> {
         // Apply IP address
-        self.set_static_address(lease.ip_address, lease.subnet_mask).await?;
+        self.set_static_address(lease.ip_address, lease.subnet_mask)
+            .await?;
 
         // Apply default route
         if let Some(router) = lease.router {
@@ -91,54 +104,37 @@ impl EthernetDevice {
     }
 
     async fn set_static_address(&self, address: Ipv4Addr, netmask: Ipv4Addr) -> Result<()> {
-        let prefix_len = netmask_to_prefix(netmask);
+        let prefix_len = netmask_to_prefix(netmask)?;
         let cidr = format!("{}/{}", address, prefix_len);
 
-        // Remove existing addresses
-        let _ = tokio::process::Command::new("ip")
-            .args(["addr", "flush", "dev", &self.device.interface])
-            .output()
-            .await;
-
-        // Add new address
-        tokio::process::Command::new("ip")
-            .args(["addr", "add", &cidr, "dev", &self.device.interface])
-            .output()
+        self.run_ip(&["address", "replace", &cidr, "dev", &self.device.interface])
             .await
-            .context("Failed to set IP address")?;
-
-        Ok(())
     }
 
     async fn add_default_route(&self, gateway: Ipv4Addr) -> Result<()> {
-        // Remove existing default route for this interface
-        let _ = tokio::process::Command::new("ip")
-            .args(["route", "del", "default", "dev", &self.device.interface])
-            .output()
-            .await;
-
-        // Add new default route
-        tokio::process::Command::new("ip")
-            .args(["route", "add", "default", "via", &gateway.to_string(), "dev", &self.device.interface])
-            .output()
-            .await
-            .context("Failed to add default route")?;
-
-        Ok(())
+        self.run_ip(&[
+            "route",
+            "replace",
+            "default",
+            "via",
+            &gateway.to_string(),
+            "dev",
+            &self.device.interface,
+        ])
+        .await
     }
 
     async fn set_dns_servers(&self, servers: &[Ipv4Addr]) -> Result<()> {
-        // Write to /etc/resolv.conf (temporary, should use systemd-resolved)
-        let mut content = String::new();
-        for server in servers {
-            content.push_str(&format!("nameserver {}\n", server));
-        }
-
-        tokio::fs::write("/etc/resolv.conf", content)
+        let dns_manager = self
+            .dns_manager
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("DNS manager is unavailable"))?;
+        dns_manager
+            .set_dns_servers(
+                &self.device.interface,
+                servers.iter().copied().map(IpAddr::V4).collect(),
+            )
             .await
-            .context("Failed to write DNS configuration")?;
-
-        Ok(())
     }
 
     async fn get_mac_address(&self) -> Result<[u8; 6]> {
@@ -156,8 +152,7 @@ impl EthernetDevice {
 
         let mut mac = [0u8; 6];
         for (i, part) in parts.iter().enumerate() {
-            mac[i] = u8::from_str_radix(part, 16)
-                .context("Failed to parse MAC address")?;
+            mac[i] = u8::from_str_radix(part, 16).context("Failed to parse MAC address")?;
         }
 
         Ok(mac)
@@ -180,15 +175,57 @@ impl EthernetDevice {
             .ok()
             .and_then(|s| s.trim().parse::<u32>().ok())
     }
+
+    async fn run_ip(&self, args: &[&str]) -> Result<()> {
+        let output = tokio::process::Command::new("ip")
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("failed to run `ip {}`", args.join(" ")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            anyhow::bail!("`ip {}` failed: {}", args.join(" "), stderr);
+        }
+
+        Ok(())
+    }
 }
 
-fn netmask_to_prefix(netmask: Ipv4Addr) -> u8 {
-    let octets = netmask.octets();
-    let mut prefix = 0u8;
-
-    for octet in octets {
-        prefix += octet.count_ones() as u8;
+fn netmask_to_prefix(netmask: Ipv4Addr) -> Result<u8> {
+    let mask = u32::from(netmask);
+    let prefix = mask.leading_ones() as u8;
+    let expected = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix)
+    };
+    if mask != expected {
+        anyhow::bail!("non-contiguous IPv4 netmask: {netmask}");
     }
 
-    prefix
+    Ok(prefix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_contiguous_netmasks_to_prefixes() {
+        assert_eq!(netmask_to_prefix(Ipv4Addr::new(0, 0, 0, 0)).unwrap(), 0);
+        assert_eq!(
+            netmask_to_prefix(Ipv4Addr::new(255, 255, 255, 0)).unwrap(),
+            24
+        );
+        assert_eq!(
+            netmask_to_prefix(Ipv4Addr::new(255, 255, 255, 255)).unwrap(),
+            32
+        );
+    }
+
+    #[test]
+    fn rejects_non_contiguous_netmasks() {
+        assert!(netmask_to_prefix(Ipv4Addr::new(255, 0, 255, 0)).is_err());
+    }
 }

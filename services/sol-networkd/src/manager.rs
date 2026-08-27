@@ -1,15 +1,15 @@
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::Result;
 use tracing::{info, warn};
 
-use crate::device::{Device, DeviceId};
-use crate::profile::{Profile, ProfileId, ProfileStore};
-use crate::netlink::NetlinkMonitor;
 use crate::captive_portal::{CaptivePortalDetector, ConnectivityState as PortalState};
+use crate::device::{Device, DeviceId, DeviceState, DeviceType};
 use crate::dns::DnsManager;
+use crate::netlink::NetlinkMonitor;
 use crate::nts::{NtsClient, DEFAULT_NTS_SERVERS};
+use crate::profile::{Profile, ProfileId, ProfileStore};
 
 /// Network manager core - handles connection policy and coordination
 #[derive(Clone)]
@@ -21,6 +21,8 @@ struct NetworkManagerInner {
     devices: HashMap<DeviceId, Device>,
     profiles: ProfileStore,
     state: NetworkState,
+    connectivity: PortalState,
+    active_profile: Option<ProfileId>,
     auto_connect_policy: AutoConnectPolicy,
     dns_manager: DnsManager,
     captive_portal: CaptivePortalDetector,
@@ -32,7 +34,7 @@ pub enum NetworkState {
     Disconnected,
     Connecting,
     Connected,
-    Limited,  // Connected but no internet
+    Limited, // Connected but no internet
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +68,8 @@ impl NetworkManager {
             devices: HashMap::new(),
             profiles,
             state: NetworkState::Disconnected,
+            connectivity: PortalState::None,
+            active_profile: None,
             auto_connect_policy: AutoConnectPolicy::default(),
             dns_manager,
             captive_portal: CaptivePortalDetector::new(),
@@ -104,11 +108,7 @@ impl NetworkManager {
         {
             let mut inner = self.inner.write().await;
             for (index, name) in interfaces {
-                let device_type = if name.starts_with("wlan") || name.starts_with("wlp") {
-                    crate::device::DeviceType::WiFi
-                } else if name.starts_with("eth") || name.starts_with("enp") {
-                    crate::device::DeviceType::Ethernet
-                } else {
+                let Some(device_type) = classify_interface(&name) else {
                     continue; // Skip unknown types
                 };
 
@@ -122,14 +122,11 @@ impl NetworkManager {
         }
 
         loop {
-            match monitor.next_event().await {
-                Ok(event) => {
-                    self.handle_netlink_event(event).await;
-                }
-                Err(e) => {
-                    warn!("Netlink event error: {}", e);
-                }
-            }
+            let event = monitor
+                .next_event()
+                .await
+                .context("Netlink event stream failed")?;
+            self.handle_netlink_event(event).await;
         }
     }
 
@@ -137,28 +134,45 @@ impl NetworkManager {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
 
-            let inner = self.inner.read().await;
-            if inner.state == NetworkState::Connected {
-                match inner.captive_portal.check_connectivity().await {
-                    Ok(PortalState::Full) => {
-                        info!("Connectivity check: Full internet");
-                    }
-                    Ok(PortalState::Portal) => {
-                        warn!("Captive portal detected");
-                        // TODO: Emit signal for UI notification
-                    }
-                    Ok(PortalState::Limited) => {
-                        warn!("Limited connectivity");
-                    }
-                    Ok(PortalState::None) => {
-                        warn!("No connectivity despite being connected");
-                    }
-                    Err(e) => {
-                        warn!("Connectivity check failed: {}", e);
-                    }
+            let detector = {
+                let inner = self.inner.read().await;
+                if !matches!(inner.state, NetworkState::Connected | NetworkState::Limited) {
+                    continue;
+                }
+                inner.captive_portal.clone()
+            };
+
+            match detector.check_connectivity().await {
+                Ok(PortalState::Full) => {
+                    info!("Connectivity check: Full internet");
+                    self.update_connectivity(PortalState::Full).await;
+                }
+                Ok(PortalState::Portal) => {
+                    warn!("Captive portal detected");
+                    self.update_connectivity(PortalState::Portal).await;
+                }
+                Ok(PortalState::Limited) => {
+                    warn!("Limited connectivity");
+                    self.update_connectivity(PortalState::Limited).await;
+                }
+                Ok(PortalState::None) => {
+                    warn!("No connectivity despite being connected");
+                    self.update_connectivity(PortalState::None).await;
+                }
+                Err(e) => {
+                    warn!("Connectivity check failed: {}", e);
                 }
             }
         }
+    }
+
+    async fn update_connectivity(&self, connectivity: PortalState) {
+        let mut inner = self.inner.write().await;
+        inner.connectivity = connectivity;
+        inner.state = match connectivity {
+            PortalState::Full => NetworkState::Connected,
+            PortalState::Portal | PortalState::Limited | PortalState::None => NetworkState::Limited,
+        };
     }
 
     async fn handle_netlink_event(&self, event: crate::netlink::NetlinkEvent) {
@@ -167,24 +181,118 @@ impl NetworkManager {
         match event {
             crate::netlink::NetlinkEvent::LinkUp { interface, index } => {
                 info!("Link up: {} ({})", interface, index);
-                // TODO: Trigger auto-connect if appropriate
+                let Some(device_type) = classify_interface(&interface) else {
+                    return;
+                };
+                {
+                    let mut inner = self.inner.write().await;
+                    let id = DeviceId(format!("{}:{}", device_type_str(&device_type), index));
+                    let device = inner
+                        .devices
+                        .entry(id.clone())
+                        .or_insert_with(|| Device::new(id, device_type.clone(), interface.clone()));
+                    device.state = DeviceState::Disconnected;
+                }
+
+                if let Some(profile_id) = self
+                    .select_auto_connect_profile(&device_type, &interface)
+                    .await
+                {
+                    let manager = self.clone();
+                    tokio::spawn(async move {
+                        if let Err(error) = manager.connect_to_profile(&profile_id).await {
+                            warn!("Auto-connect failed for profile {profile_id}: {error}");
+                        }
+                    });
+                }
             }
             crate::netlink::NetlinkEvent::LinkDown { interface, index } => {
                 info!("Link down: {} ({})", interface, index);
                 let mut inner = self.inner.write().await;
-                if inner.state == NetworkState::Connected {
+                let active_profile = if let Some(profile_id) = &inner.active_profile {
+                    inner.profiles.get(profile_id).await.ok().flatten()
+                } else {
+                    None
+                };
+                let affected_type = inner
+                    .devices
+                    .values_mut()
+                    .find(|device| device.interface == interface)
+                    .map(|device| {
+                        device.state = DeviceState::Unavailable;
+                        device.device_type.clone()
+                    });
+                let active_was_affected = active_profile
+                    .as_ref()
+                    .zip(affected_type.as_ref())
+                    .is_some_and(|(profile, device_type)| {
+                        profile_matches_device(profile, device_type, &interface)
+                    });
+                if active_was_affected {
                     inner.state = NetworkState::Disconnected;
+                    inner.connectivity = PortalState::None;
+                    inner.active_profile = None;
                 }
             }
             crate::netlink::NetlinkEvent::NewAddress { interface, address } => {
                 info!("New address on {}: {}", interface, address);
-
-                // Update DNS if we have DNS servers from DHCP
-                let _inner = self.inner.read().await;
-                // TODO: Get DNS servers from active connection
+                if let Some(device) = self
+                    .inner
+                    .write()
+                    .await
+                    .devices
+                    .values_mut()
+                    .find(|device| device.interface == interface)
+                {
+                    device.state = DeviceState::Active;
+                }
+            }
+            crate::netlink::NetlinkEvent::DelAddress { interface, address } => {
+                info!("Address removed from {}: {}", interface, address);
             }
             _ => {}
         }
+    }
+
+    async fn select_auto_connect_profile(
+        &self,
+        device_type: &DeviceType,
+        interface: &str,
+    ) -> Option<ProfileId> {
+        let inner = self.inner.read().await;
+        if inner.state != NetworkState::Disconnected {
+            return None;
+        }
+
+        let mut candidates = Vec::new();
+        for id in inner.profiles.list().await {
+            let Some(profile) = inner.profiles.get(&id).await.ok().flatten() else {
+                continue;
+            };
+            if !profile.auto_connect
+                || (inner.auto_connect_policy.avoid_metered && profile.metered)
+                || !profile_matches_device(&profile, device_type, interface)
+            {
+                continue;
+            }
+
+            let score = match &profile.profile_type {
+                crate::profile::ProfileType::Ethernet(_) => {
+                    u64::from(inner.auto_connect_policy.prefer_ethernet) * 10_000
+                }
+                crate::profile::ProfileType::WiFi(wifi) => u64::from(wifi.priority),
+                crate::profile::ProfileType::Vpn(_) => 0,
+            };
+            candidates.push((score, id));
+        }
+
+        candidates.sort_by(|left, right| {
+            right
+                .0
+                .cmp(&left.0)
+                .then_with(|| left.1 .0.cmp(&right.1 .0))
+        });
+        candidates.into_iter().next().map(|(_, id)| id)
     }
 
     pub async fn list_devices(&self) -> Vec<DeviceId> {
@@ -201,33 +309,62 @@ impl NetworkManager {
         info!("Connecting to profile: {}", profile_id);
 
         let mut inner = self.inner.write().await;
-        let profile = inner.profiles.get(profile_id).await?
+        if inner.state == NetworkState::Connecting {
+            anyhow::bail!("Another connection attempt is already in progress");
+        }
+        if let Some(active_profile) = &inner.active_profile {
+            if active_profile == profile_id {
+                return Ok(());
+            }
+            anyhow::bail!("Profile {active_profile} is already active");
+        }
+        let profile = inner
+            .profiles
+            .get(profile_id)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Profile not found"))?;
 
         inner.state = NetworkState::Connecting;
+        inner.connectivity = PortalState::None;
         drop(inner); // Release lock during connection
 
         // Dispatch based on profile type
-        match &profile.profile_type {
+        let connect_result = match &profile.profile_type {
             crate::profile::ProfileType::WiFi(wifi_profile) => {
-                self.connect_wifi(profile_id, wifi_profile).await?;
+                self.connect_wifi(profile_id, wifi_profile).await
             }
             crate::profile::ProfileType::Ethernet(eth_profile) => {
-                self.connect_ethernet(profile_id, eth_profile).await?;
+                self.connect_ethernet(profile_id, eth_profile).await
             }
             crate::profile::ProfileType::Vpn(vpn_profile) => {
-                self.connect_vpn(profile_id, vpn_profile).await?;
+                self.connect_vpn(profile_id, vpn_profile).await
             }
+        };
+
+        if let Err(error) = connect_result {
+            let mut inner = self.inner.write().await;
+            inner.state = NetworkState::Disconnected;
+            inner.connectivity = PortalState::None;
+            inner.active_profile = None;
+            return Err(error).with_context(|| format!("failed to connect profile {profile_id}"));
         }
 
         let mut inner = self.inner.write().await;
         inner.state = NetworkState::Connected;
+        inner.active_profile = Some(profile_id.clone());
 
         // Sync time after successful connection
         let manager_clone = self.clone();
         tokio::spawn(async move {
             if let Err(e) = manager_clone.sync_time_after_connect().await {
                 warn!("Failed to sync time: {}", e);
+            }
+        });
+
+        let manager_clone = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = manager_clone.check_connectivity().await {
+                warn!("Initial connectivity check failed: {error}");
             }
         });
 
@@ -241,7 +378,10 @@ impl NetworkManager {
         let inner = self.inner.read().await;
         match inner.nts_client.sync_time().await {
             Ok(time_info) => {
-                info!("Time synchronized: {} from {}", time_info.current_time, time_info.server);
+                info!(
+                    "Time synchronized: {} from {}",
+                    time_info.current_time, time_info.server
+                );
                 Ok(())
             }
             Err(e) => {
@@ -251,10 +391,16 @@ impl NetworkManager {
         }
     }
 
-    async fn connect_wifi(&self, _profile_id: &ProfileId, wifi_profile: &crate::profile::wifi_profile::WiFiProfile) -> Result<()> {
+    async fn connect_wifi(
+        &self,
+        _profile_id: &ProfileId,
+        wifi_profile: &crate::profile::wifi_profile::WiFiProfile,
+    ) -> Result<()> {
         // Find a WiFi device
         let inner = self.inner.read().await;
-        let wifi_device = inner.devices.values()
+        let wifi_device = inner
+            .devices
+            .values()
             .find(|d| d.device_type == crate::device::DeviceType::WiFi)
             .ok_or_else(|| anyhow::anyhow!("No WiFi device found"))?
             .clone();
@@ -272,7 +418,8 @@ impl NetworkManager {
             None
         };
 
-        wifi.connect(&wifi_profile.ssid, passphrase.as_deref()).await?;
+        wifi.connect(&wifi_profile.ssid, passphrase.as_deref())
+            .await?;
 
         // Wait for connection to establish
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
@@ -280,41 +427,103 @@ impl NetworkManager {
         Ok(())
     }
 
-    async fn connect_ethernet(&self, _profile_id: &ProfileId, eth_profile: &crate::profile::ethernet_profile::EthernetProfile) -> Result<()> {
+    async fn connect_ethernet(
+        &self,
+        _profile_id: &ProfileId,
+        eth_profile: &crate::profile::ethernet_profile::EthernetProfile,
+    ) -> Result<()> {
         // Find an Ethernet device (or specific one if specified)
         let inner = self.inner.read().await;
         let eth_device = if let Some(iface) = &eth_profile.interface {
-            inner.devices.values()
-                .find(|d| d.device_type == crate::device::DeviceType::Ethernet && &d.interface == iface)
+            inner
+                .devices
+                .values()
+                .find(|d| {
+                    d.device_type == crate::device::DeviceType::Ethernet && &d.interface == iface
+                })
                 .cloned()
         } else {
-            inner.devices.values()
+            inner
+                .devices
+                .values()
                 .find(|d| d.device_type == crate::device::DeviceType::Ethernet)
                 .cloned()
         }
         .ok_or_else(|| anyhow::anyhow!("No Ethernet device found"))?;
+        let dns_manager = inner.dns_manager.clone();
         drop(inner);
 
-        // Create Ethernet device and connect
-        let ethernet = crate::device::ethernet::EthernetDevice::new(eth_device);
+        let ethernet =
+            crate::device::ethernet::EthernetDevice::with_dns_manager(eth_device, dns_manager);
         ethernet.connect(&eth_profile.ip_config).await?;
 
         Ok(())
     }
 
-    async fn connect_vpn(&self, _profile_id: &ProfileId, _vpn_profile: &crate::profile::vpn_profile::VpnProfile) -> Result<()> {
-        // VPN connection logic
-        info!("VPN connection not yet fully implemented");
-        Ok(())
+    async fn connect_vpn(
+        &self,
+        _profile_id: &ProfileId,
+        _vpn_profile: &crate::profile::vpn_profile::VpnProfile,
+    ) -> Result<()> {
+        anyhow::bail!("VPN profile activation is not implemented")
     }
 
     pub async fn disconnect_profile(&self, profile_id: &ProfileId) -> Result<()> {
         info!("Disconnecting profile: {}", profile_id);
 
-        let mut inner = self.inner.write().await;
+        let (profile, devices, is_active) = {
+            let inner = self.inner.read().await;
+            let profile = inner
+                .profiles
+                .get(profile_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Profile not found"))?;
+            (
+                profile,
+                inner.devices.values().cloned().collect::<Vec<_>>(),
+                inner.active_profile.as_ref() == Some(profile_id),
+            )
+        };
 
-        // TODO: implement disconnection logic
+        if !is_active {
+            anyhow::bail!("Profile {profile_id} is not active");
+        }
+
+        match profile.profile_type {
+            crate::profile::ProfileType::WiFi(_) => {
+                let device = devices
+                    .into_iter()
+                    .find(|device| device.device_type == crate::device::DeviceType::WiFi)
+                    .ok_or_else(|| anyhow::anyhow!("No WiFi device found"))?;
+                crate::device::wifi::WiFiDevice::new(device)
+                    .await?
+                    .disconnect()
+                    .await?;
+            }
+            crate::profile::ProfileType::Ethernet(profile) => {
+                let device = devices
+                    .into_iter()
+                    .find(|device| {
+                        device.device_type == crate::device::DeviceType::Ethernet
+                            && profile
+                                .interface
+                                .as_ref()
+                                .is_none_or(|name| name == &device.interface)
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("No Ethernet device found"))?;
+                crate::device::ethernet::EthernetDevice::new(device)
+                    .disconnect()
+                    .await?;
+            }
+            crate::profile::ProfileType::Vpn(_) => {
+                anyhow::bail!("VPN profile deactivation is not implemented");
+            }
+        }
+
+        let mut inner = self.inner.write().await;
         inner.state = NetworkState::Disconnected;
+        inner.connectivity = PortalState::None;
+        inner.active_profile = None;
 
         Ok(())
     }
@@ -331,6 +540,9 @@ impl NetworkManager {
 
     pub async fn delete_profile(&self, profile_id: &ProfileId) -> Result<()> {
         let mut inner = self.inner.write().await;
+        if inner.active_profile.as_ref() == Some(profile_id) {
+            anyhow::bail!("Cannot delete active profile {profile_id}");
+        }
         inner.profiles.delete(profile_id).await
     }
 
@@ -340,14 +552,22 @@ impl NetworkManager {
     }
 
     pub async fn check_connectivity(&self) -> Result<PortalState> {
-        let inner = self.inner.read().await;
-        inner.captive_portal.comprehensive_check().await
+        let detector = self.inner.read().await.captive_portal.clone();
+        let connectivity = detector.comprehensive_check().await?;
+        self.update_connectivity(connectivity).await;
+        Ok(connectivity)
+    }
+
+    pub async fn get_connectivity(&self) -> PortalState {
+        self.inner.read().await.connectivity
     }
 
     pub async fn scan_wifi(&self) -> Result<Vec<crate::device::wifi::WiFiNetwork>> {
         // Find a WiFi device
         let inner = self.inner.read().await;
-        let wifi_device = inner.devices.values()
+        let wifi_device = inner
+            .devices
+            .values()
             .find(|d| d.device_type == crate::device::DeviceType::WiFi)
             .ok_or_else(|| anyhow::anyhow!("No WiFi device found"))?
             .clone();
@@ -357,7 +577,11 @@ impl NetworkManager {
         wifi.scan().await
     }
 
-    pub async fn connect_wifi_quick(&self, ssid: String, passphrase: Option<String>) -> Result<ProfileId> {
+    pub async fn connect_wifi_quick(
+        &self,
+        ssid: String,
+        passphrase: Option<String>,
+    ) -> Result<ProfileId> {
         // Determine security type
         let security = if passphrase.is_some() {
             crate::profile::wifi_profile::WiFiSecurity::Wpa2
@@ -393,14 +617,21 @@ impl NetworkManager {
 
         // Save and connect
         let profile_id = self.create_profile(profile).await?;
-        self.connect_to_profile(&profile_id).await?;
+        if let Err(error) = self.connect_to_profile(&profile_id).await {
+            if let Err(cleanup_error) = self.delete_profile(&profile_id).await {
+                warn!("Failed to remove unusable WiFi profile {profile_id}: {cleanup_error}");
+            }
+            return Err(error);
+        }
 
         Ok(profile_id)
     }
 
     pub async fn get_wifi_signal_strength(&self) -> Result<Option<u8>> {
         let inner = self.inner.read().await;
-        let wifi_device = inner.devices.values()
+        let wifi_device = inner
+            .devices
+            .values()
             .find(|d| d.device_type == crate::device::DeviceType::WiFi)
             .ok_or_else(|| anyhow::anyhow!("No WiFi device found"))?
             .clone();
@@ -411,14 +642,17 @@ impl NetworkManager {
     }
 
     pub async fn get_active_connection_info(&self) -> Result<Option<ConnectionInfo>> {
-        let inner = self.inner.read().await;
-
-        if inner.state != NetworkState::Connected {
-            return Ok(None);
-        }
+        let devices = {
+            let inner = self.inner.read().await;
+            if !matches!(inner.state, NetworkState::Connected | NetworkState::Limited) {
+                return Ok(None);
+            }
+            inner.devices.values().cloned().collect::<Vec<_>>()
+        };
 
         // Try WiFi first
-        if let Some(wifi_device) = inner.devices.values()
+        if let Some(wifi_device) = devices
+            .iter()
             .find(|d| d.device_type == crate::device::DeviceType::WiFi)
         {
             let wifi = crate::device::wifi::WiFiDevice::new(wifi_device.clone()).await?;
@@ -434,7 +668,8 @@ impl NetworkManager {
         }
 
         // Try Ethernet
-        if let Some(eth_device) = inner.devices.values()
+        if let Some(eth_device) = devices
+            .iter()
             .find(|d| d.device_type == crate::device::DeviceType::Ethernet)
         {
             let eth = crate::device::ethernet::EthernetDevice::new(eth_device.clone());
@@ -443,13 +678,81 @@ impl NetworkManager {
                 return Ok(Some(ConnectionInfo {
                     connection_type: "Ethernet".to_string(),
                     interface: eth_device.interface.clone(),
-                    details: speed.map(|s| format!("{}Mbps", s)).unwrap_or_else(|| "Unknown speed".to_string()),
+                    details: speed
+                        .map(|s| format!("{}Mbps", s))
+                        .unwrap_or_else(|| "Unknown speed".to_string()),
                     signal_strength: None,
                 }));
             }
         }
 
         Ok(None)
+    }
+
+    pub async fn set_auto_connect(&self, profile_id: &ProfileId, enabled: bool) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        let mut profile = inner
+            .profiles
+            .get(profile_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Profile not found"))?;
+        profile.auto_connect = enabled;
+        inner.profiles.update(profile).await
+    }
+
+    pub async fn disconnect_active_wifi(&self) -> Result<()> {
+        let active_profile = {
+            let inner = self.inner.read().await;
+            let id = inner
+                .active_profile
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("No active profile"))?;
+            let profile = inner
+                .profiles
+                .get(&id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Active profile not found"))?;
+            if !matches!(profile.profile_type, crate::profile::ProfileType::WiFi(_)) {
+                anyhow::bail!("The active profile is not a WiFi profile");
+            }
+            id
+        };
+        self.disconnect_profile(&active_profile).await
+    }
+
+    pub async fn get_wifi_current_network(&self) -> Result<Option<String>> {
+        let device = self.wifi_device().await?;
+        crate::device::wifi::WiFiDevice::new(device)
+            .await?
+            .get_current_network()
+            .await
+    }
+
+    pub async fn get_wifi_powered(&self) -> Result<bool> {
+        let device = self.wifi_device().await?;
+        crate::device::wifi::WiFiDevice::new(device)
+            .await?
+            .powered()
+            .await
+    }
+
+    pub async fn set_wifi_powered(&self, powered: bool) -> Result<()> {
+        let device = self.wifi_device().await?;
+        crate::device::wifi::WiFiDevice::new(device)
+            .await?
+            .set_powered(powered)
+            .await
+    }
+
+    async fn wifi_device(&self) -> Result<Device> {
+        self.inner
+            .read()
+            .await
+            .devices
+            .values()
+            .find(|device| device.device_type == crate::device::DeviceType::WiFi)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("No WiFi device found"))
     }
 }
 
@@ -466,5 +769,63 @@ fn device_type_str(dt: &crate::device::DeviceType) -> &'static str {
         crate::device::DeviceType::WiFi => "wifi",
         crate::device::DeviceType::Ethernet => "eth",
         crate::device::DeviceType::Vpn => "vpn",
+    }
+}
+
+fn classify_interface(interface: &str) -> Option<DeviceType> {
+    if interface.starts_with("wlan") || interface.starts_with("wlp") {
+        Some(DeviceType::WiFi)
+    } else if interface.starts_with("eth") || interface.starts_with("en") {
+        Some(DeviceType::Ethernet)
+    } else {
+        None
+    }
+}
+
+fn profile_matches_device(profile: &Profile, device_type: &DeviceType, interface: &str) -> bool {
+    match (&profile.profile_type, device_type) {
+        (crate::profile::ProfileType::WiFi(_), DeviceType::WiFi) => true,
+        (crate::profile::ProfileType::Ethernet(profile), DeviceType::Ethernet) => profile
+            .interface
+            .as_ref()
+            .is_none_or(|configured| configured == interface),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::profile::ethernet_profile::EthernetProfile;
+
+    #[test]
+    fn classifies_predictable_linux_interface_names() {
+        assert_eq!(classify_interface("wlp2s0"), Some(DeviceType::WiFi));
+        assert_eq!(classify_interface("enp3s0"), Some(DeviceType::Ethernet));
+        assert_eq!(classify_interface("lo"), None);
+    }
+
+    #[test]
+    fn ethernet_profile_honors_its_interface_constraint() {
+        let mut ethernet = EthernetProfile::new_dhcp();
+        ethernet.interface = Some("enp3s0".into());
+        let profile = Profile {
+            id: ProfileId("wired".into()),
+            name: "Wired".into(),
+            profile_type: crate::profile::ProfileType::Ethernet(ethernet),
+            auto_connect: true,
+            metered: false,
+        };
+
+        assert!(profile_matches_device(
+            &profile,
+            &DeviceType::Ethernet,
+            "enp3s0"
+        ));
+        assert!(!profile_matches_device(
+            &profile,
+            &DeviceType::Ethernet,
+            "enp4s0"
+        ));
     }
 }
