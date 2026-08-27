@@ -30,6 +30,7 @@ members = [
     "apps/sol-installer",
     "examples/solkit-showcase",
     "packaging/sol/bundle",
+    "lyra",
 ]
 
 [workspace.package]

@@ -21,7 +21,7 @@ Phase 3.
 - `SettingsApi` exposes `snapshot()` and `apply(SettingsChange)`;
 - `SettingsSnapshot` is a coherent view with a monotonically increasing
   revision;
-- `SettingsChange` has explicit typed variants, beginning with colour scheme,
+- `SettingsChange` has explicit typed variants, beginning with color scheme,
   output volume (a validated 0–100 `OutputVolume`), and output mute;
 - `SettingsError` is the single client-visible failure type.
 

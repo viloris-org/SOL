@@ -138,6 +138,14 @@ cargo fmt --all
 cargo clippy --workspace -- -D warnings
 ```
 
+## Writing Style
+
+All documentation and code comments in this repository must be written in **American English**:
+
+- Use American spellings: *color*, *behavior*, *customize*, *organize*, *optimize*, *center*, *favor*
+- Avoid British/Commonwealth spellings: *colour*, *behaviour*, *customise*, *organise*, *optimise*, *centre*, *favour*
+- Applies to this file and all docs under `docs/`
+
 ## Documentation
 
 - [README.md](README.md) - Project overview and status
