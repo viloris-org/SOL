@@ -8,7 +8,10 @@ mod tests {
         security::{AppId, AuditOutcome, SecurityCoordinator},
         state::ScpState,
     };
-    use std::{collections::HashMap, sync::{Arc, Mutex}};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
 
     #[derive(Default)]
     struct TestSecurity {
@@ -177,7 +180,11 @@ mod tests {
             .expect("app connects");
 
         let session_id = match &responses[0] {
-            CompositorMessage::Connected { session_id, capability_tokens, .. } => {
+            CompositorMessage::Connected {
+                session_id,
+                capability_tokens,
+                ..
+            } => {
                 assert!(!capability_tokens.contains_key("layer-shell"));
                 *session_id
             }
@@ -266,10 +273,7 @@ mod tests {
         state
             .handle_message(
                 Some(session_id),
-                ClientMessage::SetLayerExclusiveZone {
-                    layer_id,
-                    zone: 48,
-                },
+                ClientMessage::SetLayerExclusiveZone { layer_id, zone: 48 },
             )
             .expect("exclusive zone set");
 
@@ -279,7 +283,7 @@ mod tests {
                 Some(session_id),
                 ClientMessage::SetLayerSize {
                     layer_id,
-                    width: 0,  // stretch horizontally
+                    width: 0, // stretch horizontally
                     height: 48,
                 },
             )
@@ -336,9 +340,18 @@ mod tests {
         assert_eq!(sorted.len(), 4);
 
         // Should be ordered: Background < Bottom < Top < Overlay
-        assert!(matches!(sorted[0].layer, crate::scp::surface::Layer::Background));
-        assert!(matches!(sorted[1].layer, crate::scp::surface::Layer::Bottom));
+        assert!(matches!(
+            sorted[0].layer,
+            crate::scp::surface::Layer::Background
+        ));
+        assert!(matches!(
+            sorted[1].layer,
+            crate::scp::surface::Layer::Bottom
+        ));
         assert!(matches!(sorted[2].layer, crate::scp::surface::Layer::Top));
-        assert!(matches!(sorted[3].layer, crate::scp::surface::Layer::Overlay));
+        assert!(matches!(
+            sorted[3].layer,
+            crate::scp::surface::Layer::Overlay
+        ));
     }
 }

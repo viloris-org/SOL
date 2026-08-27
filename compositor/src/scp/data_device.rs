@@ -99,7 +99,9 @@ impl DataDevice {
 
     /// Get current selection (returns owner session and mime types)
     pub fn get_selection(&self) -> Option<(SessionId, Vec<String>)> {
-        self.selection.as_ref().map(|s| (s.owner, s.mime_types.clone()))
+        self.selection
+            .as_ref()
+            .map(|s| (s.owner, s.mime_types.clone()))
     }
 
     /// Get full selection details
@@ -166,7 +168,9 @@ impl DataDevice {
 
     /// Get active drag (returns source session, surface, and mime types)
     pub fn get_drag(&self) -> Option<(SessionId, SurfaceId, Vec<String>)> {
-        self.drag.as_ref().map(|d| (d.source, d.origin_surface, d.mime_types.clone()))
+        self.drag
+            .as_ref()
+            .map(|d| (d.source, d.origin_surface, d.mime_types.clone()))
     }
 
     /// Set drag target surface
@@ -322,13 +326,17 @@ mod tests {
         device.record_serial(serial);
 
         // Valid serial should work
-        assert!(device
-            .set_selection_validated(1, vec!["text/plain".to_string()], serial)
-            .is_ok());
+        assert!(
+            device
+                .set_selection_validated(1, vec!["text/plain".to_string()], serial)
+                .is_ok()
+        );
 
         // Invalid serial should fail
-        assert!(device
-            .set_selection_validated(2, vec!["text/plain".to_string()], 999)
-            .is_err());
+        assert!(
+            device
+                .set_selection_validated(2, vec!["text/plain".to_string()], 999)
+                .is_err()
+        );
     }
 }

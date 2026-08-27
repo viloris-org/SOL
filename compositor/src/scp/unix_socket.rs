@@ -109,15 +109,15 @@ pub fn create_pipe() -> io::Result<(RawFd, RawFd)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::net::UnixStream;
     use std::os::unix::io::AsRawFd;
+    use std::os::unix::net::UnixStream;
 
     #[test]
     fn gets_peer_credentials() {
         let (client, server) = UnixStream::pair().expect("create socket pair");
 
-        let (pid, uid, gid) = get_peer_credentials(server.as_raw_fd())
-            .expect("get peer credentials");
+        let (pid, uid, gid) =
+            get_peer_credentials(server.as_raw_fd()).expect("get peer credentials");
 
         // Should match our process
         assert_eq!(pid, std::process::id());

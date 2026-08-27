@@ -17,6 +17,7 @@ pub struct DeviceObservation {
 }
 
 /// Identity evidence from a backend.
+#[allow(dead_code)] // Variants are constructed by Phase 1 adapters; tests exercise them today
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IdentityEvidence {
     VendorProductSerial {
@@ -53,6 +54,7 @@ pub struct FunctionObservation {
     pub device_evidence: IdentityEvidence,
     pub function_type: FunctionType,
     pub owner: FunctionOwner,
+    #[allow(dead_code)] // Phase 1: used for endpoint subsystem matching
     pub subsystem: String,
     pub metadata: HashMap<String, String>,
 }
@@ -112,13 +114,12 @@ impl Reconciler {
         // Mark unseen devices as removed
         let all_device_ids: Vec<_> = snapshot.devices.keys().copied().collect();
         for device_id in all_device_ids {
-            if !seen_devices.contains(&device_id) {
-                if let Some(device) = snapshot.devices.get_mut(&device_id) {
-                    if device.attachment_state != AttachmentState::Removed {
-                        device.attachment_state = AttachmentState::Removed;
-                        info!(?device_id, "Device removed");
-                    }
-                }
+            if !seen_devices.contains(&device_id)
+                && let Some(device) = snapshot.devices.get_mut(&device_id)
+                && device.attachment_state != AttachmentState::Removed
+            {
+                device.attachment_state = AttachmentState::Removed;
+                info!(?device_id, "Device removed");
             }
         }
 
@@ -186,8 +187,7 @@ impl Reconciler {
             parent: obs
                 .parent_evidence
                 .as_ref()
-                .map(|e| self.identity_map.get(e).copied())
-                .flatten(),
+                .and_then(|e| self.identity_map.get(e).copied()),
             children: Vec::new(),
             functions: Vec::new(),
         }
@@ -236,10 +236,10 @@ impl Reconciler {
         snapshot.functions.insert(function_id, function);
 
         // Add to device's function list
-        if let Some(device) = snapshot.devices.get_mut(&device_id) {
-            if !device.functions.contains(&function_id) {
-                device.functions.push(function_id);
-            }
+        if let Some(device) = snapshot.devices.get_mut(&device_id)
+            && !device.functions.contains(&function_id)
+        {
+            device.functions.push(function_id);
         }
 
         function_id
@@ -266,6 +266,7 @@ impl Reconciler {
     }
 
     /// Complete device removal.
+    #[allow(dead_code)] // Used by tests; wired to adapters in Phase 1
     pub fn complete_removal(&mut self, device_id: DeviceId, snapshot: &mut DeviceSnapshot) {
         if let Some(device) = snapshot.devices.get_mut(&device_id) {
             device.attachment_state = AttachmentState::Removed;

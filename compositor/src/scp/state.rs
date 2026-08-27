@@ -5,15 +5,18 @@ use crate::scp::{
     capability::{Capability, CapabilityGrant, CapabilityToken, Decision},
     data_device::DataDevice,
     input::InputState,
-    keymap::{KeymapState, RepeatInfo, ModifierState},
+    keymap::{KeymapState, ModifierState, RepeatInfo},
     output::OutputManager,
-    popup::{position_popup, Popup},
-    protocol::{BufferId, ClientMessage, CompositorMessage, PopupId, Rect, SessionId, SurfaceId, LayerSurfaceId},
+    popup::{Popup, position_popup},
+    protocol::{
+        BufferId, ClientMessage, CompositorMessage, LayerSurfaceId, PopupId, Rect, SessionId,
+        SurfaceId,
+    },
     security::{AppId, AuditOutcome, SecurityCoordinator, StubSecurityCoordinator},
-    surface::{SurfaceManager, Layer, Anchor, Margin, KeyboardInteractivity},
+    surface::{Anchor, KeyboardInteractivity, Layer, Margin, SurfaceManager},
     unix_socket,
 };
-use std::{collections::HashMap, sync::Arc, time::Instant, os::unix::io::IntoRawFd};
+use std::{collections::HashMap, os::unix::io::IntoRawFd, sync::Arc, time::Instant};
 
 /// Authenticated client session.
 #[derive(Debug)]
@@ -477,9 +480,7 @@ impl ScpState {
                 height,
             } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
-                if let Some(surface) = self
-                    .surface_manager
-                    .get_surface_mut(session_id, surface_id)
+                if let Some(surface) = self.surface_manager.get_surface_mut(session_id, surface_id)
                 {
                     surface.add_damage(Rect {
                         x,
@@ -492,9 +493,7 @@ impl ScpState {
             }
             ClientMessage::SetInputRegion { surface_id, rects } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
-                if let Some(surface) = self
-                    .surface_manager
-                    .get_surface_mut(session_id, surface_id)
+                if let Some(surface) = self.surface_manager.get_surface_mut(session_id, surface_id)
                 {
                     surface.set_input_region(rects);
                 }
@@ -502,9 +501,7 @@ impl ScpState {
             }
             ClientMessage::SetOpaqueRegion { surface_id, rects } => {
                 self.verify_surface_ownership(session_id, surface_id)?;
-                if let Some(surface) = self
-                    .surface_manager
-                    .get_surface_mut(session_id, surface_id)
+                if let Some(surface) = self.surface_manager.get_surface_mut(session_id, surface_id)
                 {
                     surface.set_opaque_region(rects);
                 }
@@ -610,24 +607,32 @@ impl ScpState {
                         } else {
                             (1920, 1080)
                         };
-                        (w, h, crate::scp::surface::ToplevelStates {
-                            activated: toplevel.states.activated,
-                            maximized: true,
-                            fullscreen: false,
-                            minimized: false,
-                            resizing: false,
-                        })
+                        (
+                            w,
+                            h,
+                            crate::scp::surface::ToplevelStates {
+                                activated: toplevel.states.activated,
+                                maximized: true,
+                                fullscreen: false,
+                                minimized: false,
+                                resizing: false,
+                            },
+                        )
                     }
                     ToplevelStateRequest::Minimize => {
                         toplevel.set_minimized(true);
                         // Keep current dimensions, just mark as minimized
-                        (toplevel.geometry.width, toplevel.geometry.height, crate::scp::surface::ToplevelStates {
-                            activated: false,
-                            maximized: toplevel.states.maximized,
-                            fullscreen: toplevel.states.fullscreen,
-                            minimized: true,
-                            resizing: false,
-                        })
+                        (
+                            toplevel.geometry.width,
+                            toplevel.geometry.height,
+                            crate::scp::surface::ToplevelStates {
+                                activated: false,
+                                maximized: toplevel.states.maximized,
+                                fullscreen: toplevel.states.fullscreen,
+                                minimized: true,
+                                resizing: false,
+                            },
+                        )
                     }
                     ToplevelStateRequest::Fullscreen { output_id } => {
                         toplevel.set_fullscreen(true);
@@ -641,33 +646,45 @@ impl ScpState {
                         } else {
                             (1920, 1080)
                         };
-                        (w, h, crate::scp::surface::ToplevelStates {
-                            activated: toplevel.states.activated,
-                            maximized: false,
-                            fullscreen: true,
-                            minimized: false,
-                            resizing: false,
-                        })
+                        (
+                            w,
+                            h,
+                            crate::scp::surface::ToplevelStates {
+                                activated: toplevel.states.activated,
+                                maximized: false,
+                                fullscreen: true,
+                                minimized: false,
+                                resizing: false,
+                            },
+                        )
                     }
                     ToplevelStateRequest::UnsetMaximize => {
                         toplevel.set_maximized(false);
-                        (800, 600, crate::scp::surface::ToplevelStates {
-                            activated: toplevel.states.activated,
-                            maximized: false,
-                            fullscreen: toplevel.states.fullscreen,
-                            minimized: toplevel.states.minimized,
-                            resizing: false,
-                        })
+                        (
+                            800,
+                            600,
+                            crate::scp::surface::ToplevelStates {
+                                activated: toplevel.states.activated,
+                                maximized: false,
+                                fullscreen: toplevel.states.fullscreen,
+                                minimized: toplevel.states.minimized,
+                                resizing: false,
+                            },
+                        )
                     }
                     ToplevelStateRequest::UnsetFullscreen => {
                         toplevel.set_fullscreen(false);
-                        (toplevel.geometry.width, toplevel.geometry.height, crate::scp::surface::ToplevelStates {
-                            activated: toplevel.states.activated,
-                            maximized: toplevel.states.maximized,
-                            fullscreen: false,
-                            minimized: toplevel.states.minimized,
-                            resizing: false,
-                        })
+                        (
+                            toplevel.geometry.width,
+                            toplevel.geometry.height,
+                            crate::scp::surface::ToplevelStates {
+                                activated: toplevel.states.activated,
+                                maximized: toplevel.states.maximized,
+                                fullscreen: false,
+                                minimized: toplevel.states.minimized,
+                                resizing: false,
+                            },
+                        )
                     }
                 };
 
@@ -714,12 +731,7 @@ impl ScpState {
                 if let Some(surface_id) = surface_id {
                     self.verify_surface_ownership(session_id, surface_id)?;
                     self.cursor_surface = Some((session_id, surface_id));
-                    tracing::trace!(
-                        ?surface_id,
-                        ?hotspot_x,
-                        ?hotspot_y,
-                        "Cursor surface set"
-                    );
+                    tracing::trace!(?surface_id, ?hotspot_x, ?hotspot_y, "Cursor surface set");
                 } else {
                     // Hide cursor
                     self.cursor_surface = None;
@@ -943,7 +955,13 @@ impl ScpState {
 
                 self.data_device.record_serial(serial);
                 self.data_device
-                    .start_drag_validated(session_id, origin_surface, icon_surface, mime_types, serial)
+                    .start_drag_validated(
+                        session_id,
+                        origin_surface,
+                        icon_surface,
+                        mime_types,
+                        serial,
+                    )
                     .map_err(|e| e.to_string())?;
 
                 Ok(vec![])
@@ -960,16 +978,12 @@ impl ScpState {
             }
 
             ClientMessage::FinishDrag => {
-                self.data_device
-                    .finish_drag()
-                    .map_err(|e| e.to_string())?;
+                self.data_device.finish_drag().map_err(|e| e.to_string())?;
                 Ok(vec![CompositorMessage::DragFinished])
             }
 
             ClientMessage::CancelDrag => {
-                self.data_device
-                    .cancel_drag()
-                    .map_err(|e| e.to_string())?;
+                self.data_device.cancel_drag().map_err(|e| e.to_string())?;
                 Ok(vec![CompositorMessage::DragCancelled])
             }
 
@@ -1154,7 +1168,10 @@ impl ScpState {
         // Remove popups owned by surfaces from this session
         let mut popups_to_remove = Vec::new();
         for (popup_id, popup) in &self.popups {
-            if let Some(_surface) = self.surface_manager.get_surface(session_id, popup.surface_id) {
+            if let Some(_surface) = self
+                .surface_manager
+                .get_surface(session_id, popup.surface_id)
+            {
                 // This popup belongs to the disconnecting session
                 popups_to_remove.push(*popup_id);
             }
@@ -1193,7 +1210,10 @@ impl ScpState {
 
     /// Send frame callbacks to all surfaces that requested them.
     /// Called after rendering a frame.
-    pub fn send_frame_callbacks(&mut self, timestamp_ms: u64) -> Vec<(SessionId, CompositorMessage)> {
+    pub fn send_frame_callbacks(
+        &mut self,
+        timestamp_ms: u64,
+    ) -> Vec<(SessionId, CompositorMessage)> {
         let mut messages = Vec::new();
 
         for (session_id, surface_id, callback_id) in self.surface_manager.take_frame_callbacks() {
@@ -1233,10 +1253,12 @@ impl ScpState {
         let fd = self.keymap_state.create_memfd()?;
         Ok(CompositorMessage::KeymapFormat {
             format: match self.keymap_state.format() {
-                crate::scp::keymap::KeymapFormat::NoKeymap =>
-                    crate::scp::protocol::KeymapFormat::NoKeymap,
-                crate::scp::keymap::KeymapFormat::XkbV1 =>
-                    crate::scp::protocol::KeymapFormat::XkbV1,
+                crate::scp::keymap::KeymapFormat::NoKeymap => {
+                    crate::scp::protocol::KeymapFormat::NoKeymap
+                }
+                crate::scp::keymap::KeymapFormat::XkbV1 => {
+                    crate::scp::protocol::KeymapFormat::XkbV1
+                }
             },
             fd,
             size: self.keymap_state.size(),
@@ -1252,7 +1274,11 @@ impl ScpState {
     }
 
     /// Process a key press event
-    pub fn handle_key_press(&mut self, keycode: u32, time_ms: u32) -> Vec<(SessionId, CompositorMessage)> {
+    pub fn handle_key_press(
+        &mut self,
+        keycode: u32,
+        time_ms: u32,
+    ) -> Vec<(SessionId, CompositorMessage)> {
         let mut messages = Vec::new();
 
         // Update modifier state
@@ -1294,7 +1320,11 @@ impl ScpState {
     }
 
     /// Process a key release event
-    pub fn handle_key_release(&mut self, keycode: u32, time_ms: u32) -> Vec<(SessionId, CompositorMessage)> {
+    pub fn handle_key_release(
+        &mut self,
+        keycode: u32,
+        time_ms: u32,
+    ) -> Vec<(SessionId, CompositorMessage)> {
         let mut messages = Vec::new();
 
         // Update modifier state
@@ -1336,7 +1366,11 @@ impl ScpState {
     }
 
     /// Send keyboard enter event when surface gains focus
-    pub fn send_keyboard_enter(&mut self, _session_id: SessionId, surface_id: SurfaceId) -> Vec<CompositorMessage> {
+    pub fn send_keyboard_enter(
+        &mut self,
+        _session_id: SessionId,
+        surface_id: SurfaceId,
+    ) -> Vec<CompositorMessage> {
         let serial = self.next_serial();
         let pressed_keys = self.modifier_state.pressed_keys();
 
@@ -1360,7 +1394,11 @@ impl ScpState {
     }
 
     /// Send keyboard leave event when surface loses focus
-    pub fn send_keyboard_leave(&mut self, _session_id: SessionId, surface_id: SurfaceId) -> CompositorMessage {
+    pub fn send_keyboard_leave(
+        &mut self,
+        _session_id: SessionId,
+        surface_id: SurfaceId,
+    ) -> CompositorMessage {
         let serial = self.next_serial();
         CompositorMessage::InputEvent {
             surface_id,
@@ -1391,15 +1429,15 @@ impl ScpState {
         // In production, track recent input serials per session
 
         // Check ClipboardWrite capability
-        let _session = self.sessions.get(&session_id)
-            .ok_or("Invalid session")?;
+        let _session = self.sessions.get(&session_id).ok_or("Invalid session")?;
 
         // Store selection offer
-        self.data_device.set_selection(session_id, mime_types.clone());
+        self.data_device
+            .set_selection(session_id, mime_types.clone());
 
         // Notify all other clients about new selection
         let mut messages = Vec::new();
-        for (&other_session_id, _) in &self.sessions {
+        for &other_session_id in self.sessions.keys() {
             if other_session_id != session_id {
                 messages.push(CompositorMessage::SelectionOffer {
                     mime_types: mime_types.clone(),
@@ -1417,7 +1455,9 @@ impl ScpState {
         mime_type: String,
     ) -> Result<(SessionId, CompositorMessage), String> {
         // Get the selection owner
-        let (owner_session, available_mimes) = self.data_device.get_selection()
+        let (owner_session, available_mimes) = self
+            .data_device
+            .get_selection()
             .ok_or("No selection available")?;
 
         // Verify requested mime type is available
@@ -1426,8 +1466,8 @@ impl ScpState {
         }
 
         // Create pipe for data transfer
-        let (_read_fd, write_fd) = unix_socket::create_pipe()
-            .map_err(|e| format!("Failed to create pipe: {}", e))?;
+        let (_read_fd, write_fd) =
+            unix_socket::create_pipe().map_err(|e| format!("Failed to create pipe: {}", e))?;
 
         // Request data from selection owner
         Ok((
@@ -1450,7 +1490,8 @@ impl ScpState {
         // Verify DragAndDrop capability and recent input serial
 
         // Start drag operation
-        self.data_device.start_drag(session_id, surface_id, mime_types.clone());
+        self.data_device
+            .start_drag(session_id, surface_id, mime_types.clone());
 
         Ok(vec![])
     }
@@ -1466,29 +1507,26 @@ impl ScpState {
 
         // Find surface under pointer
         // This is simplified - real implementation uses hit-testing
-        if let Some((session_id, surface_id)) = self.focused_surface {
-            if let Some((_drag_session, _drag_surface, mime_types)) = self.data_device.get_drag() {
-                // If this is a new surface, send DragEnter
-                if !self.data_device.is_drag_over_surface(surface_id) {
-                    let serial = self.next_serial();
-                    messages.push((
-                        session_id,
-                        CompositorMessage::DragEnter {
-                            serial,
-                            surface_id,
-                            x,
-                            y,
-                            mime_types,
-                        },
-                    ));
-                    self.data_device.set_drag_surface(surface_id);
-                } else {
-                    // Send motion update
-                    messages.push((
-                        session_id,
-                        CompositorMessage::DragMotion { x, y, time_ms },
-                    ));
-                }
+        if let Some((session_id, surface_id)) = self.focused_surface
+            && let Some((_drag_session, _drag_surface, mime_types)) = self.data_device.get_drag()
+        {
+            // If this is a new surface, send DragEnter
+            if !self.data_device.is_drag_over_surface(surface_id) {
+                let serial = self.next_serial();
+                messages.push((
+                    session_id,
+                    CompositorMessage::DragEnter {
+                        serial,
+                        surface_id,
+                        x,
+                        y,
+                        mime_types,
+                    },
+                ));
+                self.data_device.set_drag_surface(surface_id);
+            } else {
+                // Send motion update
+                messages.push((session_id, CompositorMessage::DragMotion { x, y, time_ms }));
             }
         }
 
@@ -1499,10 +1537,10 @@ impl ScpState {
     pub fn handle_drag_drop(&mut self) -> Vec<(SessionId, CompositorMessage)> {
         let mut messages = Vec::new();
 
-        if let Some(_drag_surface_id) = self.data_device.drag_surface() {
-            if let Some((session_id, _)) = self.focused_surface {
-                messages.push((session_id, CompositorMessage::Drop));
-            }
+        if let Some(_drag_surface_id) = self.data_device.drag_surface()
+            && let Some((session_id, _)) = self.focused_surface
+        {
+            messages.push((session_id, CompositorMessage::Drop));
         }
 
         messages

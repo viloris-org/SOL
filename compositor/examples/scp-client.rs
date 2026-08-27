@@ -69,10 +69,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             serial,
         },
     )?;
-    write_frame(&mut stream, &ClientMessage::Commit {
-        surface_id: 1,
-        frame_callback: Some(1),
-    })?;
+    write_frame(
+        &mut stream,
+        &ClientMessage::Commit {
+            surface_id: 1,
+            frame_callback: Some(1),
+        },
+    )?;
     println!("SCP native round-trip complete");
     Ok(())
 }

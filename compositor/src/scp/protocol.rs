@@ -173,10 +173,7 @@ pub enum ClientMessage {
     },
 
     /// Set layer surface exclusive zone
-    SetLayerExclusiveZone {
-        layer_id: LayerSurfaceId,
-        zone: i32,
-    },
+    SetLayerExclusiveZone { layer_id: LayerSurfaceId, zone: i32 },
 
     /// Set layer surface margins
     SetLayerMargin {
@@ -404,9 +401,7 @@ pub enum CompositorMessage {
 
     // ===== Data Transfer (Clipboard/DnD) =====
     /// Selection offered (clipboard content available)
-    SelectionOffer {
-        mime_types: Vec<String>,
-    },
+    SelectionOffer { mime_types: Vec<String> },
 
     /// Request clipboard data
     RequestSelectionData {
@@ -428,11 +423,7 @@ pub enum CompositorMessage {
     },
 
     /// Drag motion over surface
-    DragMotion {
-        x: f64,
-        y: f64,
-        time_ms: u32,
-    },
+    DragMotion { x: f64, y: f64, time_ms: u32 },
 
     /// Drag leave surface
     DragLeave,

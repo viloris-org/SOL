@@ -163,7 +163,7 @@ async fn main() -> Result<()> {
     let interface = Device1Interface::new(op_tx);
 
     // Build D-Bus connection
-    let connection = ConnectionBuilder::system()?
+    let _connection = ConnectionBuilder::system()?
         .name("org.sol.Device1")?
         .serve_at("/org/sol/Device1", interface)?
         .build()

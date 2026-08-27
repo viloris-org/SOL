@@ -27,11 +27,13 @@ impl Device1Interface {
         }
     }
 
+    #[allow(dead_code)] // Phase 1: wired to periodic reconciliation
     pub async fn update_snapshot(&self, snapshot: DeviceSnapshot) {
         let mut current = self.snapshot.write().await;
         *current = snapshot;
     }
 
+    #[allow(dead_code)] // Phase 1: used by diagnostics tooling
     pub async fn get_snapshot_copy(&self) -> DeviceSnapshot {
         self.snapshot.read().await.clone()
     }

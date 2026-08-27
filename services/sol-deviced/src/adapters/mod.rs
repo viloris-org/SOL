@@ -1,4 +1,10 @@
 //! Backend adapter trait and fake implementation for testing.
+//!
+//! The adapter lifecycle and removal operations (`stop`, `prepare_removal`,
+//! `commit_removal`, `abort_removal`) plus the injection helpers are exercised
+//! by real udev/UDisks2 adapters in Phase 1 (see ADR-0031). They are not yet
+//! wired into the service loop, so they are allowed here to keep CI green.
+#![allow(dead_code)]
 
 use crate::reconcile::{DeviceObservation, FunctionObservation};
 use crate::types::*;

@@ -1,6 +1,9 @@
 //! SCP buffer management (SHM pools and buffers).
 
-use crate::scp::{protocol::{BufferId, PoolId, ShmFormat}, unix_socket};
+use crate::scp::{
+    protocol::{BufferId, PoolId, ShmFormat},
+    unix_socket,
+};
 use std::collections::HashMap;
 
 /// Shared memory pool.

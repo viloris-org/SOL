@@ -42,6 +42,7 @@ impl FunctionId {
 pub struct EndpointId(pub Uuid);
 
 impl EndpointId {
+    #[allow(dead_code)] // Phase 1: constructed when endpoints are reconciled
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -52,6 +53,7 @@ impl EndpointId {
 pub struct OperationId(pub Uuid);
 
 impl OperationId {
+    #[allow(dead_code)] // Phase 1: constructed when operations begin
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }

@@ -64,8 +64,7 @@ impl AppManifest {
 
     /// Parse a manifest from TOML string.
     pub fn from_toml(toml: &str) -> Result<Self, ManifestError> {
-        let parsed = crate::scp::toml_parser::parse(toml)
-            .map_err(|e| ManifestError::ParseError(e))?;
+        let parsed = crate::scp::toml_parser::parse(toml).map_err(ManifestError::ParseError)?;
 
         // Extract [app] section
         let app_table = parsed
@@ -89,11 +88,16 @@ impl AppManifest {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| ManifestError::ParseError("app.version is required".to_string()))?
                 .to_string(),
-            signature: app_table.get("signature").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            signature: app_table
+                .get("signature")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         };
 
         // Extract [capabilities] section (optional)
-        let capabilities = if let Some(caps_table) = parsed.get("capabilities").and_then(|v| v.as_table()) {
+        let capabilities = if let Some(caps_table) =
+            parsed.get("capabilities").and_then(|v| v.as_table())
+        {
             let mut static_caps = HashMap::new();
             if let Some(static_table) = caps_table.get("static_caps").and_then(|v| v.as_table()) {
                 for (key, value) in static_table {
@@ -116,7 +120,13 @@ impl AppManifest {
                             .get("optional")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
-                        dynamic.insert(key.clone(), CapabilityRequest { justification, optional });
+                        dynamic.insert(
+                            key.clone(),
+                            CapabilityRequest {
+                                justification,
+                                optional,
+                            },
+                        );
                     }
                 }
             }

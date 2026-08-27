@@ -1,7 +1,9 @@
 //! SCP surface management.
 
 use crate::scp::{
-    protocol::{BufferFormat, BufferId, Rect, SessionId, SurfaceId, ToplevelId, OutputId, LayerSurfaceId},
+    protocol::{
+        BufferFormat, BufferId, LayerSurfaceId, OutputId, Rect, SessionId, SurfaceId, ToplevelId,
+    },
     security::AppId,
     unix_socket,
 };
@@ -98,7 +100,8 @@ impl ScpSurface {
         self.damage = std::mem::take(&mut self.pending_damage);
 
         // Move pending frame callbacks to active
-        self.frame_callbacks.append(&mut self.pending_frame_callbacks);
+        self.frame_callbacks
+            .append(&mut self.pending_frame_callbacks);
     }
 
     /// Take frame callbacks that should fire after this frame renders.
@@ -123,10 +126,7 @@ impl ScpSurface {
     pub fn contains_point(&self, x: i32, y: i32) -> bool {
         if let Some(regions) = &self.input_region {
             regions.iter().any(|rect| {
-                x >= rect.x
-                    && x < rect.x + rect.width
-                    && y >= rect.y
-                    && y < rect.y + rect.height
+                x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
             })
         } else {
             // Default: entire surface is input region
@@ -142,10 +142,7 @@ impl ScpSurface {
     pub fn is_opaque_at(&self, x: i32, y: i32) -> bool {
         if let Some(regions) = &self.opaque_region {
             regions.iter().any(|rect| {
-                x >= rect.x
-                    && x < rect.x + rect.width
-                    && y >= rect.y
-                    && y < rect.y + rect.height
+                x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
             })
         } else {
             false
@@ -320,7 +317,8 @@ impl Anchor {
     }
 
     pub fn is_corner(&self) -> bool {
-        (self.top || self.bottom) && (self.left || self.right)
+        (self.top || self.bottom)
+            && (self.left || self.right)
             && !(self.is_horizontal_stretch() && self.is_vertical_stretch())
     }
 }

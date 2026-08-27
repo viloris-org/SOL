@@ -1,8 +1,6 @@
 //! Popup window positioning and constraint resolution.
 
-use crate::scp::protocol::{
-    Edge, Gravity, PopupPositioner, Rect, SurfaceId,
-};
+use crate::scp::protocol::{Edge, Gravity, PopupPositioner, Rect, SurfaceId};
 
 /// Resolved popup geometry after constraint adjustment.
 #[derive(Debug, Clone)]
@@ -55,7 +53,8 @@ pub fn position_popup(
     };
 
     if !is_fully_visible(&popup_rect, output_bounds)
-        && let Some(adjusted) = apply_constraints(positioner, &popup_rect, output_bounds, parent_geometry)
+        && let Some(adjusted) =
+            apply_constraints(positioner, &popup_rect, output_bounds, parent_geometry)
     {
         x = adjusted.x;
         y = adjusted.y;
@@ -76,18 +75,12 @@ fn calculate_initial_position(positioner: &PopupPositioner, _parent: &Rect) -> (
 
     // Calculate anchor point based on anchor edge
     let (anchor_px, anchor_py) = match positioner.anchor_edge {
-        Edge::Top => (
-            anchor_x + positioner.anchor_rect.width / 2,
-            anchor_y,
-        ),
+        Edge::Top => (anchor_x + positioner.anchor_rect.width / 2, anchor_y),
         Edge::Bottom => (
             anchor_x + positioner.anchor_rect.width / 2,
             anchor_y + positioner.anchor_rect.height,
         ),
-        Edge::Left => (
-            anchor_x,
-            anchor_y + positioner.anchor_rect.height / 2,
-        ),
+        Edge::Left => (anchor_x, anchor_y + positioner.anchor_rect.height / 2),
         Edge::Right => (
             anchor_x + positioner.anchor_rect.width,
             anchor_y + positioner.anchor_rect.height / 2,
@@ -97,9 +90,15 @@ fn calculate_initial_position(positioner: &PopupPositioner, _parent: &Rect) -> (
     // Apply gravity to determine popup position relative to anchor
     let (popup_x, popup_y) = match positioner.gravity {
         Gravity::None => (anchor_px, anchor_py),
-        Gravity::Top => (anchor_px - positioner.size.0 / 2, anchor_py - positioner.size.1),
+        Gravity::Top => (
+            anchor_px - positioner.size.0 / 2,
+            anchor_py - positioner.size.1,
+        ),
         Gravity::Bottom => (anchor_px - positioner.size.0 / 2, anchor_py),
-        Gravity::Left => (anchor_px - positioner.size.0, anchor_py - positioner.size.1 / 2),
+        Gravity::Left => (
+            anchor_px - positioner.size.0,
+            anchor_py - positioner.size.1 / 2,
+        ),
         Gravity::Right => (anchor_px, anchor_py - positioner.size.1 / 2),
         Gravity::TopLeft => (anchor_px - positioner.size.0, anchor_py - positioner.size.1),
         Gravity::TopRight => (anchor_px, anchor_py - positioner.size.1),
@@ -107,10 +106,7 @@ fn calculate_initial_position(positioner: &PopupPositioner, _parent: &Rect) -> (
         Gravity::BottomRight => (anchor_px, anchor_py),
     };
 
-    (
-        popup_x + positioner.offset.0,
-        popup_y + positioner.offset.1,
-    )
+    (popup_x + positioner.offset.0, popup_y + positioner.offset.1)
 }
 
 fn is_fully_visible(rect: &Rect, bounds: &Rect) -> bool {
@@ -130,11 +126,14 @@ fn apply_constraints(
     let constraint = &positioner.constraint;
 
     // Try flip adjustments first (most common)
-    if constraint.flip_x && (popup.x < bounds.x || popup.x + popup.width > bounds.x + bounds.width) {
+    if constraint.flip_x && (popup.x < bounds.x || popup.x + popup.width > bounds.x + bounds.width)
+    {
         result.x = flip_horizontal(positioner, parent);
     }
 
-    if constraint.flip_y && (popup.y < bounds.y || popup.y + popup.height > bounds.y + bounds.height) {
+    if constraint.flip_y
+        && (popup.y < bounds.y || popup.y + popup.height > bounds.y + bounds.height)
+    {
         result.y = flip_vertical(positioner, parent);
     }
 
@@ -205,7 +204,12 @@ mod tests {
     #[test]
     fn positions_popup_below_parent() {
         let positioner = PopupPositioner {
-            anchor_rect: Rect { x: 10, y: 10, width: 100, height: 30 },
+            anchor_rect: Rect {
+                x: 10,
+                y: 10,
+                width: 100,
+                height: 30,
+            },
             anchor_edge: Edge::Bottom,
             gravity: Gravity::Bottom,
             constraint: ConstraintAdjustment {
@@ -220,8 +224,18 @@ mod tests {
             size: (120, 200),
         };
 
-        let parent = Rect { x: 0, y: 0, width: 400, height: 300 };
-        let output = Rect { x: 0, y: 0, width: 1920, height: 1080 };
+        let parent = Rect {
+            x: 0,
+            y: 0,
+            width: 400,
+            height: 300,
+        };
+        let output = Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
 
         let geometry = position_popup(&positioner, &parent, &output);
 
@@ -237,7 +251,12 @@ mod tests {
     #[test]
     fn flips_popup_when_off_screen() {
         let positioner = PopupPositioner {
-            anchor_rect: Rect { x: 0, y: 0, width: 100, height: 30 },
+            anchor_rect: Rect {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 30,
+            },
             anchor_edge: Edge::Bottom,
             gravity: Gravity::Bottom,
             constraint: ConstraintAdjustment {
@@ -252,8 +271,18 @@ mod tests {
             size: (100, 500),
         };
 
-        let parent = Rect { x: 0, y: 950, width: 400, height: 100 };
-        let output = Rect { x: 0, y: 0, width: 1920, height: 1080 };
+        let parent = Rect {
+            x: 0,
+            y: 950,
+            width: 400,
+            height: 100,
+        };
+        let output = Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
 
         let geometry = position_popup(&positioner, &parent, &output);
 

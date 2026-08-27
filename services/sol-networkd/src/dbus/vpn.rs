@@ -157,7 +157,7 @@ fn parse_peers(value: &zbus::zvariant::Value) -> Result<Vec<WireGuardPeer>, Stri
         let mut peer_map = HashMap::new();
         for (k, v) in dict.iter() {
             let key: &str = k.try_into().map_err(|_| "key must be string".to_string())?;
-            peer_map.insert(key.to_string(), v.clone());
+            peer_map.insert(key.to_string(), v);
         }
 
         let public_key = peer_map

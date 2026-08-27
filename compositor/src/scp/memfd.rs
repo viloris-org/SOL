@@ -30,13 +30,7 @@ pub fn create(name: &str, allow_sealing: bool) -> io::Result<RawFd> {
     }
 
     // SAFETY: memfd_create is a Linux syscall that creates an anonymous file
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_memfd_create,
-            c_name.as_ptr(),
-            flags,
-        )
-    };
+    let fd = unsafe { libc::syscall(libc::SYS_memfd_create, c_name.as_ptr(), flags) };
 
     if fd < 0 {
         return Err(io::Error::last_os_error());
@@ -50,9 +44,7 @@ pub fn create(name: &str, allow_sealing: bool) -> io::Result<RawFd> {
 /// Typical usage: seal after writing to prevent further modifications.
 pub fn add_seals(fd: RawFd, seals: i32) -> io::Result<()> {
     // SAFETY: fcntl F_ADD_SEALS is standard on Linux memfd
-    let result = unsafe {
-        libc::fcntl(fd, F_ADD_SEALS, seals)
-    };
+    let result = unsafe { libc::fcntl(fd, F_ADD_SEALS, seals) };
 
     if result < 0 {
         return Err(io::Error::last_os_error());

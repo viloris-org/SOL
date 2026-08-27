@@ -80,8 +80,8 @@ pub fn parse(input: &str) -> Result<TomlTable, String> {
             let key = key.trim();
             let value = value.trim();
 
-            let parsed_value = parse_value(value)
-                .map_err(|e| format!("Line {}: {}", line_num + 1, e))?;
+            let parsed_value =
+                parse_value(value).map_err(|e| format!("Line {}: {}", line_num + 1, e))?;
 
             current_table.insert(key.to_string(), parsed_value);
         } else {
@@ -145,11 +145,20 @@ audio = false
         "#;
 
         let parsed = parse(input).expect("parse");
-        assert_eq!(parsed.get("name").and_then(|v| v.as_str()), Some("test-app"));
-        assert_eq!(parsed.get("version").and_then(|v| v.as_str()), Some("1.0.0"));
+        assert_eq!(
+            parsed.get("name").and_then(|v| v.as_str()),
+            Some("test-app")
+        );
+        assert_eq!(
+            parsed.get("version").and_then(|v| v.as_str()),
+            Some("1.0.0")
+        );
         assert_eq!(parsed.get("enabled").and_then(|v| v.as_bool()), Some(true));
 
-        let caps = parsed.get("capabilities").and_then(|v| v.as_table()).expect("capabilities table");
+        let caps = parsed
+            .get("capabilities")
+            .and_then(|v| v.as_table())
+            .expect("capabilities table");
         assert_eq!(caps.get("clipboard").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(caps.get("audio").and_then(|v| v.as_bool()), Some(false));
     }
@@ -165,11 +174,26 @@ clipboard = true
         "#;
 
         let parsed = parse(input).expect("parse");
-        let app = parsed.get("app").and_then(|v| v.as_table()).expect("app table");
-        assert_eq!(app.get("id").and_then(|v| v.as_str()), Some("com.example.test"));
+        let app = parsed
+            .get("app")
+            .and_then(|v| v.as_table())
+            .expect("app table");
+        assert_eq!(
+            app.get("id").and_then(|v| v.as_str()),
+            Some("com.example.test")
+        );
 
-        let caps = parsed.get("capabilities").and_then(|v| v.as_table()).expect("capabilities");
-        let static_caps = caps.get("static_caps").and_then(|v| v.as_table()).expect("static_caps");
-        assert_eq!(static_caps.get("clipboard").and_then(|v| v.as_bool()), Some(true));
+        let caps = parsed
+            .get("capabilities")
+            .and_then(|v| v.as_table())
+            .expect("capabilities");
+        let static_caps = caps
+            .get("static_caps")
+            .and_then(|v| v.as_table())
+            .expect("static_caps");
+        assert_eq!(
+            static_caps.get("clipboard").and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 }

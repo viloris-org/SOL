@@ -2,8 +2,8 @@
 //!
 //! Handles XKB keymap generation and modifier tracking.
 
-use std::os::unix::io::RawFd;
 use std::collections::HashSet;
+use std::os::unix::io::RawFd;
 
 /// Keyboard keymap state.
 #[derive(Debug)]
@@ -128,9 +128,9 @@ impl KeymapState {
     /// Create a sealed memfd for the keymap (Phase 1+).
     #[cfg(target_os = "linux")]
     pub fn create_memfd(&self) -> Result<RawFd, std::io::Error> {
+        use crate::scp::memfd;
         use std::io::Write;
         use std::os::unix::io::FromRawFd;
-        use crate::scp::memfd;
 
         // Create anonymous sealed memfd
         let fd = memfd::create("sol-keymap", true)?;
@@ -179,8 +179,8 @@ pub struct RepeatInfo {
 impl Default for RepeatInfo {
     fn default() -> Self {
         Self {
-            rate: 25,    // 25 chars/sec
-            delay: 600,  // 600ms delay
+            rate: 25,   // 25 chars/sec
+            delay: 600, // 600ms delay
         }
     }
 }
@@ -300,12 +300,12 @@ impl ModifierState {
     fn keycode_to_modifier(&self, keycode: u32) -> u32 {
         // Linux evdev keycodes (offset by 8 from XKB)
         match keycode {
-            50 | 62 => modifiers::SHIFT,    // Left/Right Shift
-            37 | 105 => modifiers::CTRL,    // Left/Right Ctrl
-            64 | 108 => modifiers::ALT,     // Left/Right Alt
-            133 | 134 => modifiers::SUPER,  // Left/Right Super
-            66 => modifiers::CAPS_LOCK,     // Caps Lock
-            77 => modifiers::NUM_LOCK,      // Num Lock
+            50 | 62 => modifiers::SHIFT,   // Left/Right Shift
+            37 | 105 => modifiers::CTRL,   // Left/Right Ctrl
+            64 | 108 => modifiers::ALT,    // Left/Right Alt
+            133 | 134 => modifiers::SUPER, // Left/Right Super
+            66 => modifiers::CAPS_LOCK,    // Caps Lock
+            77 => modifiers::NUM_LOCK,     // Num Lock
             _ => 0,
         }
     }
