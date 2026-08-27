@@ -14,6 +14,7 @@ protocols to the compositor, shell, and apps.
 | `sol-diagnostics` | `services/sol-diagnostics/` | Typed, redacted, bounded local diagnostics store | Phase 5 foundation |
 | `sol-ntpd` | `services/sol-ntpd/` | NTPv4/NTS time sampling, authenticated source selection, and bounded privileged clock synchronization | NTS complete; frequency discipline pending |
 | `sol-networkd` | `services/sol-networkd/` | Network device management, connection profiles, DHCP client, DNS integration, and connectivity monitoring over `org.sol.Network1` | Phase 1 complete; WiFi scanning/auth and VPN pending Phase 2 |
+| `sol-audiod` | `services/sol-audiod/` | PipeWire output inventory and switching, priority routing, Bluetooth classification, and the `org.sol.Audio1` session-bus control plane | Phase 2 control plane; native PipeWire events and crossfade pending |
 | `sol-init` | `services/sol-init/` | Session daemon manager and startup orchestrator; starts compositor, shell, and services in dependency order | Phase 1 bootstrap |
 | `sol-scheduler` | `services/sol-scheduler/` | ADR-0029 cgroup, RT-thread, watchdog, OOM, I/O, and build-containment policy | Phase 1 core |
 

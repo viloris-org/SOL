@@ -1,0 +1,33 @@
+[package]
+name = "sol-audiod"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "sol_audiod"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sol-audiod"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+zbus = { version = "5.19", features = ["tokio"] }
+bluer = { version = "0.17", features = ["bluetoothd"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+thiserror = "1.0"
+lazy_static = "1.4"
+
+[[example]]
+name = "classify-debug"
+path = "examples/classify-debug.rs"

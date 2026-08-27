@@ -1,0 +1,45 @@
+# SOL Audio Daemon Configuration
+# File location: ~/.config/sol/audiod.toml
+
+[routing]
+# Enable automatic switching when headphones connect
+auto_switch_headphones = true
+
+# Don't auto-switch to speakers (notify only)
+auto_switch_speakers = false
+
+# Auto-switch for wired devices (3.5mm, USB)
+auto_switch_wired = true
+
+# Crossfade duration when switching devices (milliseconds)
+crossfade_duration_ms = 300
+
+# Detect multi-user scenarios (meetings, parties)
+detect_shared_usage = true
+
+# Consider battery levels when routing
+battery_aware = true
+
+# Per-device priority adjustments (MAC address -> boost value)
+[routing.priority_boosts]
+# Example: Give your main headphones extra priority
+# "00:1A:7D:DA:71:13" = 20
+
+[bluetooth]
+# Preferred codec (ldac > aptx > aac > sbc)
+prefer_codec = "ldac"
+
+# Auto-reconnect to last used device on boot
+auto_reconnect_last_device = true
+
+# Bluetooth connection timeout (seconds)
+connection_timeout_sec = 5
+
+# Per-device configuration
+# [devices."00:1A:7D:DA:71:13"]
+# name = "Sony WH-1000XM5"
+# type = "headphones"  # headphones, earbuds, speaker, etc.
+# auto_switch = true
+# trusted = true
+# classification_source = "vendor_db"
+# last_used = "2026-08-26T10:30:00Z"

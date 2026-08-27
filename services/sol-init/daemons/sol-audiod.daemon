@@ -1,0 +1,17 @@
+[Daemon]
+name = "sol-audiod"
+exec = "/usr/bin/sol-audiod"
+type = "system"
+start_mode = "boot"
+restart_policy = "on-failure"
+
+after = ["sol-audio"]
+requires = ["sol-audio"]
+
+capabilities = [
+    "audio.devices",
+    "bluetooth.read"
+]
+dbus_name = "org.sol.Audio1"
+
+[Environment]
