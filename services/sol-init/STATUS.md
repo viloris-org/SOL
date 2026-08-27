@@ -43,7 +43,7 @@ requires = []
 capabilities = ["compositor.render", "compositor.input"]
 
 [Environment]
-WAYLAND_DISPLAY = "sol-0"
+SOL_SCP_SOCKET = "sol-compositor-0"
 ```
 
 ### Phase 2+ Extensions (Not Yet Implemented)

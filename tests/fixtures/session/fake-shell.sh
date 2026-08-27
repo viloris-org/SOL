@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-[ "$WAYLAND_DISPLAY" = "wayland-sol-services" ]
+[ "$SOL_SCP_SOCKET" = "sol-compositor-services" ]
 [ "$XDG_CURRENT_DESKTOP" = "SOL" ]
 [ "$XDG_SESSION_DESKTOP" = "SOL" ]
 : > "$XDG_RUNTIME_DIR/shell-started"

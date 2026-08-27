@@ -1,60 +1,19 @@
-//! SOL compositor — Phase 0
+//! Native SCP compositor service.
 //!
-//! A functional Smithay compositor that can start a standalone SCP
-//! session (PRD §38 Phase 0 success criterion):
-//!
-//! ```text
-//! > 能启动独立 SOL SCP Session，并运行 SCP 原生应用
-//! ```
-//!
-//! For development this runs on Smithay's `winit` backend, which renders into
-//! a normal window on the surrounding Wayland/X11 session — no DRM grab
-//! required, so it can run without leaving the current desk or being root.
-//! The same [`SolState`] core is reused by the udev/DRM backend
-//! (`features = ["udev"]`, `--tty-udev`) for real hardware sessions later.
-//!
-//! This milestone intentionally ships the "minimal well-formed compositor":
-//! the wire protocols every client needs (SCP surface, buffer, shell, seat,
-//! data-device) plus the render/frame-callback loop. Window management,
-//! workspaces, and layer-shell (shell) are Phase 1.
-//!
-//! A `--headless` mode runs the same protocol loop with no render backend at
-//! all (no GPU, no display). It is driven by the integration tests and by CI,
-//! which therefore do not depend on a host windowing system or GL drivers.
+//! The process deliberately exposes only the SOL Compositor Protocol.  The
+//! retired Smithay/Wayland implementation remains in the repository history
+//! and migration notes, but is no longer part of the build graph.
 
-mod grabs;
-mod outputs;
-mod state;
-#[cfg(feature = "udev")]
-mod udev_output;
-#[cfg(feature = "udev")]
-mod udev_runtime;
-mod window;
-
-use outputs::OutputConfiguration;
 use sol_compositor::scp::ScpServer;
-use sol_scheduler::{COMPOSITOR_RT_PRIORITY, FrameWatchdog};
-
-use std::{sync::Arc, time::Instant};
-
-/// The clear-screen (wallpaper / window-clear) fill colour.
-///
-/// Matches `sol_design::DEFAULT_BACKGROUND` (0.11, 0.10, 0.13). Kept as a lone
-/// constant here because the compositor does not link `sol-design` (it is a
-/// client/SDK crate); the value is the canonical token, defined once in
-/// `sdk/sol-design` and mirrored here. PRD §19: no bare hex in component code.
-const CLEAR_BACKGROUND: smithay::backend::renderer::Color32F =
-    smithay::backend::renderer::Color32F::new(0.11, 0.10, 0.13, 1.0);
-
-use smithay::reexports::wayland_server::{
-    Display, ListeningSocket,
-    backend::{ClientData, ClientId, DisconnectReason},
-    protocol::wl_surface::WlSurface,
+use std::{
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Duration,
 };
-use smithay::wayland::compositor::{
-    SurfaceAttributes, TraversalAction, with_surface_tree_downward,
-};
-use state::{ClientState, SolState};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env() {
@@ -63,388 +22,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing_subscriber::fmt().init();
     }
 
-    // SCP is backend-independent and remains available in winit, udev, and
-    // headless modes. Keep the guard alive for the full compositor lifetime.
-    let _scp_server = ScpServer::bind_from_env()?;
+    let server = ScpServer::bind_from_env()?;
+    spawn_client(spawn_argument(), server.socket_path());
 
-    // `--spawn <client>` auto-launches an SCP client once listening.
-    // Optional; the token is otherwise ignored so extra args don't break the run.
-    let spawn = std::env::args()
-        .position(|a| a == "--spawn")
-        .and_then(|i| std::env::args().nth(i + 1));
+    let running = Arc::new(AtomicBool::new(true));
+    let signal_flag = Arc::clone(&running);
+    ctrlc::set_handler(move || signal_flag.store(false, Ordering::Release))?;
 
-    // `--headless` runs the protocol loop without a render backend; used by
-    // the integration tests and CI (no GPU / no display required).
-    let headless = std::env::args().any(|a| a == "--headless");
-    let tty_udev = std::env::args().any(|a| a == "--tty-udev");
-
-    if headless {
-        return run_headless(spawn);
+    tracing::info!(socket = %server.socket_path().display(), "native SCP compositor ready");
+    while running.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(50));
     }
-
-    if tty_udev {
-        #[cfg(feature = "udev")]
-        {
-            return run_udev(spawn);
-        }
-        #[cfg(not(feature = "udev"))]
-        {
-            tracing::error!("--tty-udev requires building with `--features udev`");
-            std::process::exit(2);
-        }
-    }
-
-    #[cfg(feature = "winit")]
-    {
-        return run_winit(spawn);
-    }
-    #[cfg(not(feature = "winit"))]
-    {
-        tracing::error!("no backend enabled; pass --headless or build with the `winit` feature");
-        std::process::exit(2);
-    }
-    #[allow(unreachable_code)]
+    tracing::info!("native SCP compositor exiting");
     Ok(())
 }
 
-/// Start the real libseat/libinput/DRM/GBM TTY backend.
-#[cfg(feature = "udev")]
-pub fn run_udev(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    udev_runtime::run(spawn)
+fn spawn_argument() -> Option<String> {
+    let mut arguments = std::env::args().skip(1);
+    while let Some(argument) = arguments.next() {
+        if argument == "--spawn" {
+            return arguments.next();
+        }
+    }
+    None
 }
 
-/// Start the compositor on the winit backend (a window on the current session).
-///
-/// `SOL_COMPOSITOR_SOCKET` selects the listener socket (default `sol-0`).
-/// `--spawn <client>` launches an SCP client against that socket once listening.
-#[cfg(feature = "winit")]
-pub fn run_winit(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    use ::winit::platform::pump_events::PumpStatus;
-    use smithay::{
-        backend::{
-            input::{AbsolutePositionEvent, InputEvent, KeyboardKeyEvent},
-            renderer::{
-                Frame, Renderer,
-                element::{
-                    Kind,
-                    surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
-                },
-                gles::GlesRenderer,
-                utils::draw_render_elements,
-            },
-            winit::{self, WinitEvent},
-        },
-        utils::{Rectangle, Transform},
+fn spawn_client(client: Option<String>, socket_path: &std::path::Path) {
+    let Some(client) = client else {
+        return;
     };
 
-    let mut display: Display<SolState> = Display::new()?;
-    let mut dh = display.handle();
-    let mut state = SolState::with_output_configurations(&dh, Some(&[configured_output()?]));
-
-    let socket_name = std::env::var("SOL_COMPOSITOR_SOCKET").unwrap_or_else(|_| "sol-0".into());
-    let listener = ListeningSocket::bind(&socket_name)?;
-    tracing::info!(socket = %socket_name, "SOL compositor listening");
-
-    let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
-
-    let mut frame_watchdog = FrameWatchdog::for_refresh_millihz(60_000);
-    if let Err(error) = frame_watchdog.enable_realtime(COMPOSITOR_RT_PRIORITY) {
-        tracing::warn!(%error, "SCHED_FIFO priority 2 unavailable; compositor remains on CFS");
-    } else {
-        tracing::info!("compositor render/present event loop elevated to SCHED_FIFO priority 2");
-    }
-
-    let keyboard = state.keyboard.clone();
-    let mut serial: u32 = 0;
-    let start_time = Instant::now();
-    let mut pending_input_at: Option<Instant> = None;
-
-    spawn_client(&spawn);
-
-    loop {
-        let frame_started = Instant::now();
-        let status = winit.dispatch_new_events(|event| match event {
-            WinitEvent::Resized { .. } => {}
-            WinitEvent::Input(event) => {
-                pending_input_at = Some(Instant::now());
-                match event {
-                    InputEvent::Keyboard { event } => {
-                        use smithay::{
-                            backend::input::{Event, KeyState},
-                            input::keyboard::{FilterResult, Keysym, keysyms},
-                            utils::Serial,
-                        };
-                        let kbd_serial = Serial::from(serial);
-                        let kbd_time = event.time_msec();
-                        let kbd_key = event.key_code();
-                        let kbd_state = event.state();
-
-                        // Intercept Alt+Tab (and Alt+Shift+Tab) to cycle keyboard
-                        // focus between windows (Phase 1 window management) instead
-                        // of forwarding the key to the focused client.
-                        let tab = Keysym::from(keysyms::KEY_Tab);
-                        let shift_tab = Keysym::from(keysyms::KEY_ISO_Left_Tab);
-                        let action = keyboard.input::<(), _>(
-                            &mut state,
-                            kbd_key,
-                            kbd_state,
-                            kbd_serial,
-                            kbd_time,
-                            |_, modifiers, handle| {
-                                let sym = handle.modified_sym();
-                                let tab_cycle = (sym == tab || sym == shift_tab) && modifiers.alt;
-                                if tab_cycle && kbd_state == KeyState::Pressed {
-                                    FilterResult::Intercept(())
-                                } else {
-                                    FilterResult::Forward
-                                }
-                            },
-                        );
-
-                        if action.is_some() {
-                            // Alt+Tab: raise & focus the next window; deliver the
-                            // updated keyboard focus to that surface.
-                            let surface = state.window_manager.cycle_focus();
-                            keyboard.set_focus(&mut state, surface, kbd_serial);
-                        }
-                        serial += 1;
-                    }
-                    InputEvent::PointerMotionAbsolute { event } => {
-                        use smithay::backend::input::Event;
-                        // Real hit-testing: find the topmost window under the
-                        // pointer and give keyboard focus to it, raising it in the
-                        // z-order (Phase 1, replacing the Phase 0 "focus the first
-                        // toplevel" placeholder).
-                        let physical_size = backend.window_size();
-                        let pos = event.position_transformed(physical_size.to_logical(1));
-                        let focus = state.window_manager.surface_under(pos);
-                        if let Some(ref surf) = focus {
-                            state.window_manager.set_focus(surf);
-                        }
-                        keyboard.set_focus(&mut state, focus.clone(), serial.into());
-                        serial += 1;
-
-                        // Route the motion to the pointer handle too, so active
-                        // move/resize grabs receive it and update geometry.
-                        let motion = smithay::input::pointer::MotionEvent {
-                            location: pos,
-                            serial: serial.into(),
-                            time: event.time_msec(),
-                        };
-                        state
-                            .pointer
-                            .clone()
-                            .motion(&mut state, focus.map(|s| (s, pos)), &motion);
-                    }
-                    InputEvent::PointerButton { event } => {
-                        use smithay::{
-                            backend::input::{Event, PointerButtonEvent},
-                            input::pointer::ButtonEvent,
-                            utils::Serial,
-                        };
-                        let button = event.button_code();
-                        let btn_serial = Serial::from(serial);
-                        let btn_event = ButtonEvent {
-                            serial: btn_serial,
-                            time: event.time_msec(),
-                            button,
-                            state: event.state(),
-                        };
-                        state.pointer.clone().button(&mut state, &btn_event);
-                        serial += 1;
-                    }
-                    _ => {}
-                }
-            }
-            _ => (),
-        });
-
-        match status {
-            PumpStatus::Continue => (),
-            PumpStatus::Exit(_) => return Ok(()),
-        };
-
-        let size = backend.window_size();
-        let damage = Rectangle::from_size(size);
-
-        // Collect the toplevel surfaces first so the borrow of `state` used
-        // for rendering ends before we hand `state` to `dispatch_clients`.
-        // The window manager is the single source of truth for open windows
-        // (Phase 1), superseding `xdg_shell_state.toplevel_surfaces()`.
-        let toplevel_surfaces: Vec<smithay::wayland::shell::xdg::ToplevelSurface> =
-            state.window_manager.toplevel_surfaces().cloned().collect();
-
-        // Render and dispatch inside a scope so the framebuffer/renderer
-        // borrows of `backend` are released before `backend.submit` below.
-        {
-            let (renderer, mut framebuffer) = backend.bind()?;
-            // HiDPI basics (PRD §33, do-not-defer): render at the primary
-            // output's integer scale so a 2× output yields crisp 2× pixels.
-            // Fractional scaling is verified in Phase 5.
-            let scale = state.outputs.primary_scale().fractional_scale();
-            let elements = toplevel_surfaces
-                .iter()
-                .flat_map(|surface| {
-                    render_elements_from_surface_tree(
-                        renderer,
-                        surface.wl_surface(),
-                        (0, 0),
-                        scale,
-                        1.0,
-                        Kind::Unspecified,
-                    )
-                })
-                .collect::<Vec<WaylandSurfaceRenderElement<GlesRenderer>>>();
-
-            {
-                let mut frame = renderer.render(&mut framebuffer, size, Transform::Flipped180)?;
-                // Clear the screen to the SOL design-token background
-                // (sol_design::DEFAULT_BACKGROUND, 0.11/0.10/0.13);
-                // keep the compositor visually consistent with first-party UX.
-                frame.clear(CLEAR_BACKGROUND, &[damage])?;
-                draw_render_elements(&mut frame, scale, &elements, &[damage])?;
-                let _ = frame.finish()?;
-            }
-        }
-
-        for surface in &toplevel_surfaces {
-            send_frames_surface_tree(
-                surface.wl_surface(),
-                start_time.elapsed().as_millis() as u32,
-            );
-        }
-
-        accept_clients(&mut dh, &listener)?;
-        display.dispatch_clients(&mut state)?;
-        display.flush_clients()?;
-
-        // Must dispatch + flush before swapping buffers; the swap can block.
-        backend.submit(Some(&[damage]))?;
-
-        if let Some(input_at) = pending_input_at.take() {
-            frame_watchdog.note_input_age(input_at.elapsed());
-        }
-        match frame_watchdog.observe(frame_started.elapsed()) {
-            Ok(observation) if observation.watchdog_downgraded => tracing::error!(
-                frame_time_us = frame_started.elapsed().as_micros(),
-                budget_us = frame_watchdog.frame_budget().as_micros(),
-                "compositor exceeded watchdog budget and was downgraded to SCHED_OTHER"
-            ),
-            Ok(_) => {}
-            Err(error) => tracing::error!(%error, "failed to downgrade compositor scheduler"),
-        }
-        let telemetry = frame_watchdog.telemetry();
-        if telemetry.presented_frames.is_multiple_of(600) {
-            tracing::info!(
-                frames = telemetry.presented_frames,
-                missed_vsyncs = telemetry.missed_vsyncs,
-                maximum_frame_time_us = telemetry.maximum_frame_time.as_micros(),
-                maximum_input_latency_us = telemetry.maximum_input_latency.as_micros(),
-                "compositor scheduling telemetry"
-            );
-        }
-    }
-}
-
-/// Spawn an SCP client against the listener socket, if requested.
-fn spawn_client(spawn: &Option<String>) {
-    if let Some(bin) = spawn {
-        tracing::info!(%bin, "spawning test client");
-        std::process::Command::new(bin).spawn().ok();
-    }
-}
-
-/// Accept any clients that connected to our socket.
-fn accept_clients(
-    dh: &mut smithay::reexports::wayland_server::DisplayHandle,
-    listener: &ListeningSocket,
-) -> Result<(), Box<dyn std::error::Error>> {
-    while let Some(stream) = listener.accept()? {
-        tracing::debug!("accepting client");
-        let _ = dh.insert_client(stream, Arc::new(ClientState::default()))?;
-    }
-    Ok(())
-}
-
-/// Send frame callbacks to every surface in the tree, so clients repaint.
-pub fn send_frames_surface_tree(surface: &WlSurface, time: u32) {
-    with_surface_tree_downward(
-        surface,
-        (),
-        |_, _, &()| TraversalAction::DoChildren(()),
-        |_surf, states, &()| {
-            for callback in states
-                .cached_state
-                .get::<SurfaceAttributes>()
-                .current()
-                .frame_callbacks
-                .drain(..)
-            {
-                callback.done(time);
-            }
-        },
-        |_, _, &()| true,
-    );
-}
-
-impl ClientData for ClientState {
-    fn initialized(&self, client_id: ClientId) {
-        tracing::debug!(?client_id, "client initialized");
-    }
-
-    fn disconnected(&self, client_id: ClientId, _reason: DisconnectReason) {
-        tracing::debug!(?client_id, "client disconnected");
-    }
-}
-
-/// Run the compositor headless: bind the socket and service SCP clients,
-/// with no render backend. Used by integration tests and CI.
-pub fn run_headless(spawn: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut display: Display<SolState> = Display::new()?;
-    let mut dh = display.handle();
-    let mut state = SolState::with_output_configurations(&dh, Some(&[configured_output()?]));
-
-    let socket_name = std::env::var("SOL_COMPOSITOR_SOCKET").unwrap_or_else(|_| "sol-0".into());
-    let listener = ListeningSocket::bind(&socket_name)?;
-    tracing::info!(socket = %socket_name, "SOL compositor listening");
-
-    let start_time = Instant::now();
-
-    spawn_client(&spawn);
-
-    loop {
-        // Collect the toplevel surfaces first so the borrow of `state` used
-        // for rendering ends before we hand `state` to `dispatch_clients`.
-        // The window manager is the single source of truth for open windows
-        // (Phase 1), superseding `xdg_shell_state.toplevel_surfaces()`.
-        let toplevel_surfaces: Vec<smithay::wayland::shell::xdg::ToplevelSurface> =
-            state.window_manager.toplevel_surfaces().cloned().collect();
-
-        // Send frame callbacks so committed clients can keep presenting.
-        for surface in &toplevel_surfaces {
-            send_frames_surface_tree(
-                surface.wl_surface(),
-                start_time.elapsed().as_millis() as u32,
-            );
-        }
-
-        accept_clients(&mut dh, &listener)?;
-        display.dispatch_clients(&mut state)?;
-        display.flush_clients()?;
-
-        // Busy-free pacing so headless CI doesn't spin a core at 100%.
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-}
-
-fn configured_output() -> Result<OutputConfiguration, Box<dyn std::error::Error>> {
-    let scale = std::env::var("SOL_OUTPUT_SCALE")
-        .ok()
-        .map(|value| value.parse::<f64>())
-        .transpose()?;
-    let configuration = OutputConfiguration::new("output-0", (1920, 1080), (0, 0));
-    match scale {
-        Some(scale) => Ok(configuration.try_with_scale(scale)?),
-        None => Ok(configuration),
+    match Command::new(&client)
+        .env("SOL_SCP_SOCKET", socket_path)
+        .spawn()
+    {
+        Ok(child) => tracing::info!(pid = child.id(), %client, "spawned SCP client"),
+        Err(error) => tracing::error!(%error, %client, "failed to spawn SCP client"),
     }
 }

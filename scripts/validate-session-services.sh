@@ -26,7 +26,7 @@ export SOL_SETTINGSD_BIN="$repo_root/target/debug/sol-settingsd"
 export SOL_NOTIFICATIOND_BIN="$repo_root/target/debug/sol-notificationd"
 export SOL_PORTAL_BIN="$repo_root/target/debug/sol-portal"
 
-cargo run --quiet -p sol-session -- --socket wayland-sol-services &
+cargo run --quiet -p sol-session -- --socket sol-compositor-services &
 session_pid=$!
 cleanup_session() {
     kill "$session_pid" 2>/dev/null || true

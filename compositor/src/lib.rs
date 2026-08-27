@@ -1,3 +1,3 @@
-//! Native SOL compositor protocol support.
+//! SOL Compositor - Native SCP protocol implementation.
 
 pub mod scp;

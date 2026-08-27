@@ -54,7 +54,7 @@ requires = []
 capabilities = ["compositor.render", "compositor.input"]
 
 [Environment]
-WAYLAND_DISPLAY = "sol-0"
+SOL_SCP_SOCKET = "sol-compositor-0"
 
 [Resources]
 memory_limit = "512M"

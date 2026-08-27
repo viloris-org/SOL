@@ -52,4 +52,4 @@ pub mod unix_socket;
 pub use permission_manager::PermissionManager;
 pub use state::ScpState;
 pub use surface::{Layer, LayerSurface};
-pub use transport::ScpServer;
+pub use transport::{ScpServer, resolve_socket_path};

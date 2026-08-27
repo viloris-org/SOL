@@ -11,10 +11,6 @@ publish = false
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ctrlc = { version = "3", features = ["termination"] }
-wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client"] }
-wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["client"] }
-anyhow = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zbus = { version = "5.19", features = ["blocking-api"] }
@@ -28,6 +24,7 @@ sol-animation = { path = "../sdk/sol-animation" }
 sol-ui = { path = "../sdk/sol-ui" }
 sol-diagnostics = { path = "../services/sol-diagnostics" }
 sol-scheduler = { path = "../services/sol-scheduler" }
+sol-compositor = { path = "../compositor" }
 
 [dev-dependencies]
 sol-settingsd = { path = "../services/sol-settingsd" }

@@ -56,7 +56,7 @@ capabilities = [
 ]
 
 [Environment]
-WAYLAND_DISPLAY = "sol-0"
+SOL_SCP_SOCKET = "sol-compositor-0"
 
 [Resources]  # Per-daemon overrides (pending)
 memory_limit = "512M"

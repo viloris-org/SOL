@@ -1,6 +1,6 @@
 //! Renderer-neutral SOL Shell models.
 //!
-//! The native `sol-shell` binary owns Wayland layer surfaces. These modules
+//! The native `sol-shell` binary owns SCP layer surfaces. These modules
 //! remain independently testable so service adapters can be validated without
 //! duplicating shell policy in transport-specific code.
 

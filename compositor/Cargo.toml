@@ -6,58 +6,31 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 publish = false
+autotests = false
+autoexamples = false
 
 [dependencies]
-smithay = { version = "0.7", default-features = false, features = ["backend_winit", "renderer_gl", "wayland_frontend"] }
-
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-xkbcommon = "0.8"
-xcursor = "0.3"
-wayland-server = "0.31"
-wayland-protocols = "0.32"
-# WLR layer-shell protocol (used by the shell top bar / dock) via Smithay's
-# wlr-layer-shell integration (PRD §11 / Phase 1 M1).
-wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["server"] }
-winit = { version = "0.30", default-features = false, features = ["x11", "rwh_06"] }
-smithay-drm-extras = { version = "0.1", default-features = false, optional = true }
+ctrlc = { version = "3", features = ["termination"] }
 
 # SCP (SOL Compositor Protocol) dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
 libc = "0.2"
-sol-scheduler = { path = "../services/sol-scheduler" }
 
 [features]
-# Phase 0 default: the winit backend renders into a window on the surrounding
-# session, so the compositor builds and runs with no DRM grab, no root, and no
-# extra system libraries. `winit` is part of the default build so the dev path
-# (and the `state.seat` it uses) stays live; `--headless` runs the same protocol
-# loop with no render backend at all.
-default = ["winit", "egl"]
-# Backends
-winit = ["smithay/backend_winit"]
-egl = ["smithay/backend_egl"]
-# Real-hardware session backend (Phase 1+). Requires system
-# DRM/GBM/EGL/libinput/libseat development packages. The connector scanner is
-# used without its optional libdisplay-info feature, avoiding version coupling
-# to the system's EDID parser.
-udev = [
-    "smithay/backend_udev",
-    "smithay/backend_libinput",
-    "smithay/backend_drm",
-    "smithay/backend_gbm",
-    "smithay/backend_egl",
-    "smithay/backend_session_libseat",
-    "smithay/renderer_gl",
-    "smithay/renderer_multi",
-    "dep:smithay-drm-extras",
-]
-# NOTE: there is intentionally no `headless` Cargo feature. Headless mode is a
-# runtime `--headless` flag (see main.rs): the protocol loop runs with no render
-# backend, and is used by the integration tests / CI.
+default = []
 
 [dev-dependencies]
+nix = { version = "0.30", features = ["socket", "uio"] }
 serial_test = "4.0.1"
+
+[[test]]
+name = "scp_session"
+path = "tests/scp_session.rs"
+
+[[example]]
+name = "scp-client"
+path = "examples/scp-client.rs"

@@ -22,7 +22,7 @@ fn runtime_dir() -> PathBuf {
 fn binary_prints_a_non_hardware_launch_plan() {
     let runtime_dir = runtime_dir();
     let output = Command::new(env!("CARGO_BIN_EXE_sol-session"))
-        .args(["--dry-run", "--socket", "wayland-sol-test"])
+        .args(["--dry-run", "--socket", "sol-compositor-test"])
         .env("XDG_RUNTIME_DIR", &runtime_dir)
         .env("SOL_COMPOSITOR_BIN", "/opt/sol/bin/sol-compositor")
         .env("SOL_AUDIO_BIN", "/opt/sol/bin/pipewire")
@@ -36,13 +36,15 @@ fn binary_prints_a_non_hardware_launch_plan() {
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "compositor: /opt/sol/bin/sol-compositor --tty-udev\ncompositor env: XDG_RUNTIME_DIR="
-            .to_owned()
+        "compositor: /opt/sol/bin/sol-compositor\ncompositor env: XDG_RUNTIME_DIR=".to_owned()
             + &runtime_dir.display().to_string()
-            + " SOL_WAYLAND_SOCKET=wayland-sol-test XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\naudio: /opt/sol/bin/pipewire\nsettingsd: /opt/sol/bin/sol-settingsd --dbus\nnotificationd: /opt/sol/bin/sol-notificationd --dbus\nportal: /opt/sol/bin/sol-portal --dbus\nshell: /opt/sol/bin/sol-shell\nshell env: XDG_RUNTIME_DIR="
+            + " SOL_SCP_SOCKET=sol-compositor-test XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\naudio: /opt/sol/bin/pipewire\nsettingsd: /opt/sol/bin/sol-settingsd --dbus\nnotificationd: /opt/sol/bin/sol-notificationd --dbus\nportal: /opt/sol/bin/sol-portal --dbus\nshell: /opt/sol/bin/sol-shell\nshell env: XDG_RUNTIME_DIR="
             + &runtime_dir.display().to_string()
-            + " WAYLAND_DISPLAY=wayland-sol-test XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: "
-            + &runtime_dir.join("wayland-sol-test").display().to_string()
+            + " SOL_SCP_SOCKET=sol-compositor-test XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: "
+            + &runtime_dir
+                .join("sol-compositor-test")
+                .display()
+                .to_string()
             + "\n"
     );
 }
@@ -66,12 +68,12 @@ fn actual_mode_starts_services_and_restarts_shell_until_compositor_exits() {
     let compositor = executable(
         &runtime_dir,
         "fake-compositor",
-        "#!/bin/sh\n: > \"$XDG_RUNTIME_DIR/$SOL_WAYLAND_SOCKET\"\nsleep 0.4\nexit 7\n",
+        "#!/bin/sh\n: > \"$XDG_RUNTIME_DIR/$SOL_SCP_SOCKET\"\nsleep 0.4\nexit 7\n",
     );
     let shell = executable(
         &runtime_dir,
         "fake-shell",
-        "#!/bin/sh\ntest \"$WAYLAND_DISPLAY\" = wayland-sol-test\ntest \"$XDG_CURRENT_DESKTOP\" = SOL\ntest \"$XDG_SESSION_DESKTOP\" = SOL\ncount=0\n[ ! -f \"$XDG_RUNTIME_DIR/shell-count\" ] || count=$(cat \"$XDG_RUNTIME_DIR/shell-count\")\ncount=$((count + 1))\nprintf '%s\\n' \"$count\" > \"$XDG_RUNTIME_DIR/shell-count\"\n[ \"$count\" -ne 1 ] || exit 0\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+        "#!/bin/sh\ntest \"$SOL_SCP_SOCKET\" = sol-compositor-test\ntest \"$XDG_CURRENT_DESKTOP\" = SOL\ntest \"$XDG_SESSION_DESKTOP\" = SOL\ncount=0\n[ ! -f \"$XDG_RUNTIME_DIR/shell-count\" ] || count=$(cat \"$XDG_RUNTIME_DIR/shell-count\")\ncount=$((count + 1))\nprintf '%s\\n' \"$count\" > \"$XDG_RUNTIME_DIR/shell-count\"\n[ \"$count\" -ne 1 ] || exit 0\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
     );
     let settingsd = service_executable(&runtime_dir, "fake-settingsd", "settingsd-started");
     let audio = executable(
@@ -84,7 +86,7 @@ fn actual_mode_starts_services_and_restarts_shell_until_compositor_exits() {
     let portal = service_executable(&runtime_dir, "fake-portal", "portal-started");
     let environment = sol_session::SessionEnvironment {
         runtime_dir: runtime_dir.clone(),
-        socket: "wayland-sol-test".to_owned(),
+        socket: "sol-compositor-test".to_owned(),
     };
     let plan = sol_session::LaunchPlan::new(
         &environment,

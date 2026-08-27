@@ -16,4 +16,4 @@ capabilities = [
 ]
 
 [Environment]
-WAYLAND_DISPLAY = "sol-0"
+SOL_SCP_SOCKET = "sol-compositor-0"

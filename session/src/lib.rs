@@ -2,7 +2,7 @@
 //!
 //! This crate deliberately owns process ordering and environment propagation,
 //! not seat/login management. The compositor remains responsible for opening a
-//! real DRM/libseat session when its `--tty-udev` backend is selected.
+//! native display/input backend once it is available.
 
 use sol_scheduler::{ProcessClass, SchedulingManager};
 use std::{
@@ -20,7 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const DEFAULT_SOCKET: &str = "wayland-sol";
+const DEFAULT_SOCKET: &str = "sol-compositor-0";
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const SERVICE_READY_GRACE: Duration = Duration::from_millis(100);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -236,10 +236,10 @@ impl LaunchPlan {
         Self {
             compositor: ProcessPlan {
                 program: programs.compositor.clone(),
-                arguments: vec![OsString::from("--tty-udev")],
+                arguments: Vec::new(),
                 environment: vec![
                     (OsString::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
-                    (OsString::from("SOL_WAYLAND_SOCKET"), socket.clone()),
+                    (OsString::from("SOL_SCP_SOCKET"), socket.clone()),
                     (OsString::from("XDG_CURRENT_DESKTOP"), OsString::from("SOL")),
                     (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
                 ],
@@ -254,7 +254,7 @@ impl LaunchPlan {
                 arguments: Vec::new(),
                 environment: vec![
                     (OsString::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
-                    (OsString::from("WAYLAND_DISPLAY"), socket),
+                    (OsString::from("SOL_SCP_SOCKET"), socket),
                     (OsString::from("XDG_CURRENT_DESKTOP"), OsString::from("SOL")),
                     (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
                 ],
@@ -269,7 +269,7 @@ impl LaunchPlan {
     #[must_use]
     pub fn dry_run_output(&self) -> String {
         format!(
-            "compositor: {} --tty-udev\ncompositor env: XDG_RUNTIME_DIR={} SOL_WAYLAND_SOCKET={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\naudio: {}\nsettingsd: {} --dbus\nnotificationd: {} --dbus\nportal: {} --dbus\nshell: {}\nshell env: XDG_RUNTIME_DIR={} WAYLAND_DISPLAY={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nwait for socket: {}\n",
+            "compositor: {}\ncompositor env: XDG_RUNTIME_DIR={} SOL_SCP_SOCKET={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\naudio: {}\nsettingsd: {} --dbus\nnotificationd: {} --dbus\nportal: {} --dbus\nshell: {}\nshell env: XDG_RUNTIME_DIR={} SOL_SCP_SOCKET={} XDG_CURRENT_DESKTOP={} XDG_SESSION_DESKTOP={}\nwait for socket: {}\n",
             self.compositor.program.display(),
             value(&self.compositor.environment[0].1),
             value(&self.compositor.environment[1].1),
@@ -350,7 +350,7 @@ pub fn environment(socket_override: Option<String>) -> Result<SessionEnvironment
         .ok_or_else(|| "XDG_RUNTIME_DIR must be set for a SOL session".to_owned())?;
     validate_runtime_dir(&runtime_dir)?;
     let socket = socket_override
-        .or_else(|| env::var("SOL_WAYLAND_SOCKET").ok())
+        .or_else(|| env::var("SOL_SCP_SOCKET").ok())
         .unwrap_or_else(|| DEFAULT_SOCKET.to_owned());
     validate_socket_name(&socket)?;
     Ok(SessionEnvironment {
@@ -623,10 +623,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn launch_plan_has_the_required_backend_and_wayland_contract() {
+    fn launch_plan_has_the_required_scp_contract() {
         let environment = SessionEnvironment {
             runtime_dir: PathBuf::from("/run/user/1000"),
-            socket: "wayland-sol-test".to_owned(),
+            socket: "sol-compositor-test".to_owned(),
         };
         let programs = ProgramPaths {
             compositor: PathBuf::from("/usr/bin/sol-compositor"),
@@ -637,7 +637,7 @@ mod tests {
             portal: PathBuf::from("/usr/bin/sol-portal"),
         };
         let plan = LaunchPlan::new(&environment, &programs);
-        assert_eq!(plan.compositor.arguments, [OsString::from("--tty-udev")]);
+        assert!(plan.compositor.arguments.is_empty());
         assert!(plan.audio.arguments.is_empty());
         for (_, service) in [
             ("settingsd", &plan.settingsd),
@@ -647,12 +647,12 @@ mod tests {
             assert_eq!(service.arguments, [OsString::from("--dbus")]);
         }
         assert!(plan.compositor.environment.contains(&(
-            OsString::from("SOL_WAYLAND_SOCKET"),
-            OsString::from("wayland-sol-test")
+            OsString::from("SOL_SCP_SOCKET"),
+            OsString::from("sol-compositor-test")
         )));
         assert!(plan.shell.environment.contains(&(
-            OsString::from("WAYLAND_DISPLAY"),
-            OsString::from("wayland-sol-test")
+            OsString::from("SOL_SCP_SOCKET"),
+            OsString::from("sol-compositor-test")
         )));
         for process in [&plan.compositor, &plan.shell] {
             assert!(
@@ -668,7 +668,7 @@ mod tests {
         }
         assert_eq!(
             plan.socket_path,
-            PathBuf::from("/run/user/1000/wayland-sol-test")
+            PathBuf::from("/run/user/1000/sol-compositor-test")
         );
     }
 
@@ -676,7 +676,7 @@ mod tests {
     fn dry_run_is_deterministic() {
         let environment = SessionEnvironment {
             runtime_dir: PathBuf::from("/run/user/42"),
-            socket: "wayland-sol".to_owned(),
+            socket: "sol-compositor-0".to_owned(),
         };
         let plan = LaunchPlan::new(
             &environment,
@@ -691,7 +691,7 @@ mod tests {
         );
         assert_eq!(
             plan.dry_run_output(),
-            "compositor: sol-compositor --tty-udev\ncompositor env: XDG_RUNTIME_DIR=/run/user/42 SOL_WAYLAND_SOCKET=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\naudio: pipewire\nsettingsd: sol-settingsd --dbus\nnotificationd: sol-notificationd --dbus\nportal: sol-portal --dbus\nshell: sol-shell\nshell env: XDG_RUNTIME_DIR=/run/user/42 WAYLAND_DISPLAY=wayland-sol XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: /run/user/42/wayland-sol\n"
+            "compositor: sol-compositor\ncompositor env: XDG_RUNTIME_DIR=/run/user/42 SOL_SCP_SOCKET=sol-compositor-0 XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\naudio: pipewire\nsettingsd: sol-settingsd --dbus\nnotificationd: sol-notificationd --dbus\nportal: sol-portal --dbus\nshell: sol-shell\nshell env: XDG_RUNTIME_DIR=/run/user/42 SOL_SCP_SOCKET=sol-compositor-0 XDG_CURRENT_DESKTOP=SOL XDG_SESSION_DESKTOP=SOL\nwait for socket: /run/user/42/sol-compositor-0\n"
         );
     }
 
@@ -716,7 +716,7 @@ mod tests {
         for invalid in ["", ".", "..", "nested/socket"] {
             assert!(validate_socket_name(invalid).is_err(), "{invalid:?}");
         }
-        assert!(validate_socket_name("wayland-sol-1").is_ok());
+        assert!(validate_socket_name("sol-compositor-1").is_ok());
     }
 
     #[test]

@@ -12,7 +12,7 @@ the normative layout and behavior.
 
 ```
 sol-compositor
-       ↕  Typed D-Bus IPC (selected by ADR-0006; adapter pending)
+       ↕  SCP surfaces + typed D-Bus control IPC (adapter pending)
 sol-shell
 ```
 
@@ -25,7 +25,7 @@ sol-shell
 
 ## Status
 
-**Phase 1/4 foundations in progress.** The repository contains a layer-shell
+**Phase 1/4 foundations in progress.** The repository contains an SCP layer
 top-bar configure/commit slice plus renderer-neutral Dock/Launcher, top-bar,
 overview, notifications, Quick Settings, consent, and overlay models. Native
 mapping/rendering and the compositor D-Bus service/proxy remain incomplete.
@@ -50,13 +50,13 @@ the capability broker and cannot be hidden by an app.
 
 ## Key dependencies
 
-- Complete compositor layer-shell mapping, layout, input, and rendering (Phase 1)
+- Complete compositor SCP layer mapping, layout, input, and rendering (Phase 1)
 - Implement the ADR-0006 compositor↔Shell typed D-Bus schema, service, proxy,
   signals, authentication, and reconnect behavior
 - SolKit maturity (Phase 2) — Phase 3/4 shell UI is built on it
 
 ## Positioning
 
-SOL Shell is a first-party SOL asset, not a thin wrapper around a generic
-layer-shell shell (Hyprland/niri style). It is deeply bound to our Smithay
-compositor's typed IPC and SolKit/SolUI's token/animation system. (ADR-0003)
+SOL Shell is a first-party SOL asset, not a wrapper around a generic desktop
+shell. It uses SCP plus SOL's typed IPC and SolKit/SolUI token and animation
+systems. (ADR-0003)

@@ -29,32 +29,23 @@ cargo check --workspace
 # Build entire workspace
 cargo build --workspace
 
-# Run the compositor (on current Wayland/X11 session, winit backend)
+# Run the native SCP compositor service
 cargo run -p sol-compositor
 
-# Run the compositor headless (no GPU, for CI/tests)
+# `--headless` remains accepted for CI compatibility; SCP is headless today
 cargo run -p sol-compositor -- --headless
 
 # Test the compositor
-cargo test -p sol-compositor --test sol_session
+cargo test -p sol-compositor --test scp_session
 
 # Run all tests
 cargo test --workspace
 ```
 
-## Development Environments
+## Development Environment
 
-### winit backend (default)
-Development path for Phase 0/1. Runs a window on the current Wayland/X11 session, no DRM grab required. Build with default feature:
-```bash
-cargo build -p sol-compositor
-```
-
-### udev backend (real hardware)
-Phase 1+ for TTY sessions with DRM/GBM/libinput. Requires `libdisplay-info < 0.3.0`:
-```bash
-cargo build -p sol-compositor --features udev
-```
+The active compositor build is SCP-only and headless. Renderer, input and
+real-hardware DRM/KMS integration are pending native implementations.
 
 ## Architecture (Big Picture)
 
@@ -75,9 +66,9 @@ Linux Kernel  systemd/kernel/drivers
 ```
 
 ### Compositor (`compositor/`)
-Core is `src/state.rs` containing `SolState` which owns the SCP protocol state and window management. The `main.rs` is a thin winit/udev backend event loop. Key components:
-- `state.rs`: `SolState` - SCP protocol handlers and state
-- `main.rs`: backend event loops (`run_winit`, `run_headless`)
+Core is `src/scp/state.rs`, which owns SCP protocol state and object management. Key components:
+- `scp/state.rs`: `ScpState` - SCP protocol handlers and state
+- `main.rs`: SCP service lifetime
 - `scp/`: SOL Compositor Protocol implementation (capability-based security)
 - `window.rs`: `WindowManager` - window layout, hit-testing, focus
 - `grabs.rs`: interactive move/resize grab handlers
@@ -123,7 +114,7 @@ The integration test (`compositor/tests/sol_session.rs`) validates end-to-end SC
 
 ### Start compositor in development mode
 ```bash
-# Run in winit backend (window on host Wayland/X11 session)
+# Run the SCP compositor
 cargo run -p sol-compositor
 
 # Run headless (no GPU, for CI/tests)

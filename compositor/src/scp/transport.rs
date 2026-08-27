@@ -128,7 +128,7 @@ impl Drop for ScpServer {
     }
 }
 
-fn resolve_socket_path() -> io::Result<PathBuf> {
+pub fn resolve_socket_path() -> io::Result<PathBuf> {
     let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;

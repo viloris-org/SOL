@@ -7,7 +7,7 @@
 SOL is a **complete operating system**, not a desktop layer installed on an
 arbitrary host distribution. It owns the boot experience, system image and
 updates, package manager, application bundle format, atomic permission policy,
-system-managed accounts, Wayland compositor, shell, system services,
+system-managed accounts, native SCP compositor, shell, system services,
 application framework, and visual material language.
 
 SOL still reuses proven Linux components where they are implementation
@@ -21,16 +21,11 @@ drivers, Mesa, PipeWire, or every protocol.
 **Concept / Pre-Alpha — foundation and implementation slices exist, but no
 daily-driver or release-ready desktop claim is made.**
 
-The Phase 0 work is retained as an accepted architecture spike: the compositor
-opens a Wayland socket, repository-owned clients complete selected headless
-round trips, and the winit development renderer runs. Phase 1 was reopened
-after an implementation/evidence audit. Window, output, layer-shell, transfer,
-IME, and hardware paths remain at different maturity stages; the typed
-compositor↔Shell D-Bus contract is selected but not implemented end to end.
+The compositor now exposes only SCP (SOL Compositor Protocol). Repository-owned
+clients complete authenticated headless toplevel and layer-surface round trips;
+native rendering, input, output and hardware backends remain open work.
 
-See the [Roadmap](docs/ROADMAP.md) for the S0–S5 maturity model and the
-[Wayland protocol matrix](docs/status/wayland-protocol-matrix.md) for exact
-interface coverage and closure evidence.
+See the [Roadmap](docs/ROADMAP.md) for the S0–S5 maturity model.
 
 Phase 2 M2 is in progress: semantic components, layout, tokens, lifecycle,
 commands, graphics, motion, and a private Slint adapter have implementation
@@ -61,11 +56,11 @@ The OS rebaseline adds these system foundations:
 See [OS Platform Definition](docs/os-platform.md) for the normative boundary.
 
 ```bash
-cargo test -p sol-compositor --test sol_session
+cargo test -p sol-compositor --test scp_session
 
-# Live check: start the compositor, then point a standard app at it.
-cargo run -p sol-compositor                       # terminal 1
-WAYLAND_DISPLAY=wayland-sol weston-terminal        # terminal 2
+# Live check: start the compositor, then run an SCP-native client.
+cargo run -p sol-compositor                         # terminal 1
+cargo run -p sol-compositor --example scp-client    # terminal 2
 ```
 
 **SolKit progress:** sol-ui provides semantic component API (Button,
@@ -77,7 +72,7 @@ assistive-technology validation remain open.
 
 | Path | Purpose | Status |
 |---|---|---|
-| `compositor/` | `sol-compositor`: Smithay-based Wayland compositor | 🟡 Phase 1 reopened; protocol, integration, and hardware closure pending |
+| `compositor/` | `sol-compositor`: native SCP compositor service | 🟡 protocol works headlessly; renderer/input/hardware closure pending |
 | `shell/` | `sol-shell`: top bar, dock, launcher, overview, system UI | 🟡 top-bar configure/commit slice plus Phase 4 renderer-neutral foundations |
 | `sdk/sol-design` | Design tokens (single source of truth for visuals) | 🟡 S2 token foundation and consistency tests |
 | `sdk/sol-ui` | SolKit UI components (semantic, not visual-metrics) | 🟡 S2 component/layout/adapter foundations |
@@ -92,7 +87,7 @@ assistive-technology validation remain open.
 | `packaging/sol/` | Target home of `.app` tooling and `sol-pkg` contracts | 🔲 planned |
 | `security/` | Target home of sandbox, permission, consent, and audit services | 🔲 planned |
 | `accounts/` | Target home of system accounts, credential vault, and provider brokers | 🔲 planned |
-| `compat/` | Target home of GTK/Qt adapters and generic Wayland compatibility contracts | 🔲 planned |
+| `compat/` | Target home of explicit toolkit adapters | 🔲 planned |
 | `tests/` | Cross-component integration tests | 🟡 selected S3 headless/service boundaries; real-session matrix open |
 | `docs/` | PRD, ROADMAP, engineering decisions | 🟡 living |
 
@@ -112,24 +107,21 @@ assistive-technology validation remain open.
 ## Build
 
 ```bash
-# Whole workspace (Phase 0 defaults: winit + egl backends).
+# Whole workspace (SCP-only; no Wayland/Smithay dependency).
 cargo check --workspace
 cargo build --workspace
 
-# Run the compositor (a window on your current Wayland/X11 session).
+# Run the native SCP compositor service.
 cargo run -p sol-compositor
 ```
 
-The compositor binds a `wayland-sol` listener socket (override with
-`SOL_WAYLAND_SOCKET`) and serves clients on it. The `udev` Cargo feature gates
-the real-hardware DRM/GBM/EGL/libinput/libseat backend (Phase 1+). Run a build
-made with that feature as `sol-compositor --tty-udev` from a local VT or a
-display-manager session managed by logind/seatd.
+The compositor binds `$XDG_RUNTIME_DIR/sol-compositor-0` (override with
+`SOL_SCP_SOCKET`) and serves authenticated SCP clients on it.
 
 ## Principles (from PRD §4)
 
 - **Consistency First** — enforced by architecture, not discipline (§19.1).
-- **Wayland Native** — no X11 session, no XWayland (§4.2).
+- **SCP Native** — applications target the SOL protocol and runtime directly.
 - **Framework First** — behavior comes from SolKit, not from per-app
   conventions (§4.3).
 - **Transactional System** — boot, update, activation, rollback, and recovery
@@ -149,11 +141,8 @@ display-manager session managed by logind/seatd.
   libraries.
 - **Interactive Motion** — interruptible, gesture-driven, spring-based
   animation as part of the interaction model, not decoration (§4.4).
-- **Linux Compatibility** — Wayland-native GTK/Qt/SDL/Flutter/Electron apps can
-  be packaged as `.app`; compatibility does not weaken the SOL trust model.
-- **Capability Equality** — native, integrated GTK/Qt, and generic Wayland apps
-  share the same security and system-service guarantees; only visual fidelity
-  differs by integration level.
+- **Explicit Adaptation** — non-native toolkits require a SOL adapter and do
+  not receive an implicit compatibility socket.
 - **Fluid Material** — adaptive translucent system chrome communicates depth,
   with solid reduced-transparency/high-contrast fallbacks.
 - **Stable Shell Geography** — Dock at the bottom, foreground app menu at the
