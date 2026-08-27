@@ -92,9 +92,22 @@ artifact corruption, A/B fallback, exact durable read-back, report promotion,
 EDID parsing/mode decisions, and bounded rendering.
 
 The current UEFI adapter preserves the usable firmware mode and renders via
-GOP BLT. EDID preferred-mode parsing and selection are implemented and tested,
+GOP BLT. Boot is Mac-silent by default: the brand mark from
+`assets/branding/sol-mark.svg` (parsed at build time by `build.rs; unexpected
+asset shapes fail the build) leads the screen before policy work starts, and a
+rounded progress capsule advances between genuine milestones — selection
+authenticated, UKI verified, control transfer — with ease-out motion. The
+interactive picker appears only when navigation keys are pressed during the
+first moments of boot (`V enables a verbose textual boot replaying buffered
+diagnostics). Machines without a graphics output print machine-readable status
+openly, which keeps the OVMF harness greps meaningful.
+
+EDID preferred-mode parsing and selection are implemented and tested,
 but the EDID Active protocol is not yet wired into the safe UEFI adapter.
 Success-report authenticity currently relies on the installer/early-userspace
 protection of the ESP transport; TPM-backed report authentication and physical
 hardware seamless-handoff qualification remain release blockers, not blockers
-for development boot use.
+for development boot use. Two handoff constraints learned on reference OVMF
+are enforced in code: never hold an exclusive claim on the Serial protocol
+across `StartImage (child images fail to execute), and leave the text console
+untouched once the graphical presentation takes over.

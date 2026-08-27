@@ -1,7 +1,5 @@
-//! Deterministic GOP mode selection and bounded boot-frame composition.
-
-use alloc::vec;
-use alloc::vec::Vec;
+//! Deterministic GOP mode selection, bounded boot-frame composition, and the
+//! branded Mac-classic boot splash renderer.
 
 /// A usable firmware graphics mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +67,24 @@ pub fn select_graphics_mode(
     }
 }
 
+/// Ease-out cubic curve over progress in `0.0..=1.0`; fast at first, still
+/// near the target afterwards.
+///
+/// Splash animation advances between real work milestones with motion that
+/// decelerates into each target instead of stopping abruptly. Non-finite and
+/// out-of-range inputs clamp onto the nearest endpoint.
+#[must_use]
+pub fn ease_out_cubic(progress: f32) -> f32 {
+    // Only NaN has no meaningful endpoint; infinities clamp naturally.
+    let clamped = if progress.is_nan() {
+        0.0
+    } else {
+        progress.clamp(0.0, 1.0)
+    };
+    let inverse = 1.0 - clamped;
+    1.0 - inverse * inverse * inverse
+}
+
 /// Malformed or unsupported EDID base block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdidError {
@@ -125,7 +141,8 @@ pub struct BootPixel {
 }
 
 impl BootPixel {
-    const fn rgb(red: u8, green: u8, blue: u8) -> Self {
+    #[must_use]
+    pub const fn rgb(red: u8, green: u8, blue: u8) -> Self {
         Self {
             blue,
             green,
@@ -133,44 +150,27 @@ impl BootPixel {
             reserved: 0,
         }
     }
-}
 
-const BACKGROUND: BootPixel = BootPixel::rgb(11, 15, 24);
-const SUN: BootPixel = BootPixel::rgb(255, 184, 77);
-const HORIZON: BootPixel = BootPixel::rgb(247, 116, 86);
-const MAX_FRAME_PIXELS: usize = 33_554_432;
-
-/// Composes a single complete static SOL frame with checked dimensions.
-#[must_use]
-pub fn render_boot_frame(width: usize, height: usize) -> Option<Vec<BootPixel>> {
-    let pixel_count = width.checked_mul(height)?;
-    if width == 0 || height == 0 || pixel_count > MAX_FRAME_PIXELS {
-        return None;
-    }
-    let mut pixels = vec![BACKGROUND; pixel_count];
-    let unit = width.min(height).max(64) / 16;
-    let radius = unit.saturating_mul(2).max(4);
-    let center_x = width / 2;
-    let center_y = height / 2;
-    let radius_squared = radius.saturating_mul(radius);
-    let y_start = center_y.saturating_sub(radius);
-    let y_end = center_y.saturating_add(radius).min(height - 1);
-    let x_start = center_x.saturating_sub(radius);
-    let x_end = center_x.saturating_add(radius).min(width - 1);
-    for y in y_start..=y_end {
-        for x in x_start..=x_end {
-            let dx = x.abs_diff(center_x);
-            let dy = y.abs_diff(center_y);
-            if dx.saturating_mul(dx).saturating_add(dy.saturating_mul(dy)) <= radius_squared {
-                pixels[y * width + x] = SUN;
-            }
+    /// Linear interpolation towards `target`; `alpha` 255 selects `target`.
+    fn blended(self, target: Self, alpha: u8) -> Self {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "each operand is at most 255, so the mixed sum stays within a byte"
+        )]
+        let mix = |base: u8, goal: u8| -> u8 {
+            (((u16::from(base) * (255 - u16::from(alpha)))
+                + (u16::from(goal) * u16::from(alpha))
+                + 127)
+                / 255) as u8
+        };
+        Self {
+            blue: mix(self.blue, target.blue),
+            green: mix(self.green, target.green),
+            red: mix(self.red, target.red),
+            reserved: 0,
         }
     }
-    let horizon_height = (unit / 4).max(2);
-    for y in center_y..center_y.saturating_add(horizon_height).min(height) {
-        for x in x_start..=x_end {
-            pixels[y * width + x] = HORIZON;
-        }
-    }
-    Some(pixels)
 }
+
+mod splash;
+pub use splash::{MAX_FRAME_EDGE, SplashProgress, redraw_boot_frame, render_boot_frame};
