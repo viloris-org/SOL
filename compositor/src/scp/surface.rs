@@ -2,7 +2,8 @@
 
 use crate::scp::{
     protocol::{
-        BufferFormat, BufferId, LayerSurfaceId, OutputId, Rect, SessionId, SurfaceId, ToplevelId,
+        BufferFormat, BufferId, LayerSurfaceId, LockSurfaceId, OutputId, Rect, SessionId,
+        SurfaceId, ToplevelId,
     },
     security::AppId,
     unix_socket,
@@ -48,8 +49,13 @@ impl Drop for SurfaceBuffer {
 pub enum SurfaceRole {
     None,
     Toplevel(ToplevelId),
-    Popup { parent: SurfaceId },
+    Popup {
+        parent: SurfaceId,
+    },
     LayerShell(LayerSurfaceId),
+    /// Full-output surface of an engaged session lock. Owned by
+    /// [`crate::scp::session_lock`], not by this module's per-role maps.
+    LockSurface(LockSurfaceId),
 }
 
 impl ScpSurface {
@@ -138,6 +144,25 @@ impl ScpSurface {
         }
     }
 
+    /// Whether this surface accepts pointer or touch input at a surface-local
+    /// point, used to refine a window-bounds hit test.
+    ///
+    /// An unset input region means the whole surface is interactive, matching
+    /// the caller's bounds check. An explicitly *empty* region is how a client
+    /// makes an overlay click-through, so it must be honored rather than treated
+    /// as "unset".
+    pub fn accepts_input_at(&self, x: f64, y: f64) -> bool {
+        match &self.input_region {
+            Some(regions) => regions.iter().any(|rect| {
+                x >= f64::from(rect.x)
+                    && x < f64::from(rect.x) + f64::from(rect.width)
+                    && y >= f64::from(rect.y)
+                    && y < f64::from(rect.y) + f64::from(rect.height)
+            }),
+            None => true,
+        }
+    }
+
     /// Check if a region is fully opaque.
     pub fn is_opaque_at(&self, x: i32, y: i32) -> bool {
         if let Some(regions) = &self.opaque_region {
@@ -155,7 +180,14 @@ impl ScpSurface {
 pub struct Toplevel {
     pub id: ToplevelId,
     pub surface_id: SurfaceId,
+    /// Verified identity of the owning application, assigned at connect time.
     pub app_id: AppId,
+    /// Self-declared grouping hint from `SetToplevelAppId`.
+    ///
+    /// Kept separate from [`Self::app_id`]: a client may name its window group
+    /// freely, but it must never be able to overwrite the identity the security
+    /// coordinator verified.
+    pub declared_app_id: Option<String>,
     pub session_id: SessionId,
     pub title: String,
     pub geometry: ToplevelGeometry,
@@ -212,6 +244,7 @@ impl Toplevel {
             id,
             surface_id,
             app_id,
+            declared_app_id: None,
             session_id,
             title,
             geometry: ToplevelGeometry::default(),
@@ -225,8 +258,16 @@ impl Toplevel {
         self.title = title;
     }
 
+    /// Record the client's declared app_id grouping hint.
     pub fn set_app_id(&mut self, app_id: String) {
-        tracing::debug!(toplevel_id = ?self.id, ?app_id, "Toplevel app_id updated");
+        tracing::debug!(toplevel_id = ?self.id, %app_id, "toplevel declared app_id updated");
+        self.declared_app_id = Some(app_id);
+    }
+
+    /// Move the window without changing its size.
+    pub fn set_position(&mut self, x: i32, y: i32) {
+        self.geometry.x = x;
+        self.geometry.y = y;
     }
 
     pub fn set_parent(&mut self, parent: Option<ToplevelId>) {
@@ -470,14 +511,34 @@ impl SurfaceManager {
         Ok(())
     }
 
-    pub fn destroy_surface(&mut self, session_id: SessionId, id: SurfaceId) -> Result<(), String> {
-        self.surfaces
+    /// Remove a surface and the window state attached to its role.
+    ///
+    /// Returns the role the surface held so the caller can finish the teardown
+    /// it owns — dismissing child popups, dropping focus, notifying clients.
+    pub fn destroy_surface(
+        &mut self,
+        session_id: SessionId,
+        id: SurfaceId,
+    ) -> Result<SurfaceRole, String> {
+        let surface = self
+            .surfaces
             .remove(&(session_id, id))
             .ok_or_else(|| "Surface not found".to_string())?;
-        self.toplevels.retain(|_, toplevel| {
-            !(toplevel.session_id == session_id && toplevel.surface_id == id)
-        });
-        Ok(())
+
+        let role = surface.role.clone();
+        match &role {
+            SurfaceRole::Toplevel(toplevel_id) => {
+                self.toplevels.remove(toplevel_id);
+            }
+            SurfaceRole::LayerShell(layer_id) => {
+                self.layer_surfaces.remove(layer_id);
+            }
+            // A lock surface's bookkeeping lives in the session lock, which
+            // must outlive the surface: the caller drops it there so that
+            // losing a surface cannot silently unlock the session.
+            SurfaceRole::LockSurface(_) | SurfaceRole::Popup { .. } | SurfaceRole::None => {}
+        }
+        Ok(role)
     }
 
     pub fn get_surface(&self, session_id: SessionId, id: SurfaceId) -> Option<&ScpSurface> {
@@ -575,6 +636,10 @@ impl SurfaceManager {
 
     pub fn get_layer_surface_mut(&mut self, id: LayerSurfaceId) -> Option<&mut LayerSurface> {
         self.layer_surfaces.get_mut(&id)
+    }
+
+    pub fn remove_layer_surface(&mut self, id: LayerSurfaceId) -> Option<LayerSurface> {
+        self.layer_surfaces.remove(&id)
     }
 
     pub fn iter_layer_surfaces(&self) -> impl Iterator<Item = &LayerSurface> {

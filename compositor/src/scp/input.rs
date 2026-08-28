@@ -1,5 +1,11 @@
-//! SCP input event handling and dispatch.
+//! SCP input focus tracking and event construction.
+//!
+//! [`InputState`] owns *where* input goes — keyboard focus, pointer focus, and
+//! the surface each touch point belongs to — and builds the wire events for it.
+//! Deciding what is under the cursor and delivering the result is
+//! [`crate::scp::state::ScpState`]'s job, since that needs the window stack.
 
+use crate::scp::keymap::ModifierState;
 use crate::scp::protocol::{
     AxisSource, ButtonState, InputEvent, KeyState, Orientation, SessionId, SurfaceId,
 };
@@ -24,31 +30,15 @@ pub struct InputState {
     pressed_buttons: HashSet<u32>,
 }
 
+/// An active touch point and the surface that owns it for its whole lifetime.
 #[derive(Debug, Clone)]
 struct TouchPoint {
     id: i32,
-    #[allow(dead_code)]
+    /// Surface the point went down on. Touch sequences are sticky, so this does
+    /// not change even if the finger slides outside that surface.
     surface: (SessionId, SurfaceId),
     x: f64,
     y: f64,
-}
-
-/// Keyboard modifier state (XKB compatible).
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ModifierState {
-    pub mods_depressed: u32, // Currently pressed modifiers
-    pub mods_latched: u32,   // Latched modifiers (sticky)
-    pub mods_locked: u32,    // Locked modifiers (caps lock, etc.)
-    pub group: u32,          // Keyboard layout group
-}
-
-impl ModifierState {
-    pub fn is_empty(&self) -> bool {
-        self.mods_depressed == 0
-            && self.mods_latched == 0
-            && self.mods_locked == 0
-            && self.group == 0
-    }
 }
 
 impl Default for InputState {
@@ -97,8 +87,8 @@ impl InputState {
         self.pressed_keys.iter().copied().collect()
     }
 
-    pub fn modifiers(&self) -> ModifierState {
-        self.modifiers
+    pub fn modifiers(&self) -> &ModifierState {
+        &self.modifiers
     }
 
     pub fn set_modifiers(&mut self, modifiers: ModifierState) {
@@ -179,6 +169,14 @@ impl InputState {
 
     pub fn pointer_position(&self) -> (f64, f64) {
         self.pointer_position
+    }
+
+    /// Record the absolute cursor position in output-layout coordinates.
+    ///
+    /// Event payloads carry surface-local coordinates, so the absolute position
+    /// is tracked separately — it is what later hit tests are run against.
+    pub fn set_pointer_position(&mut self, position: (f64, f64)) {
+        self.pointer_position = position;
     }
 
     pub fn pressed_buttons(&self) -> Vec<u32> {
@@ -274,6 +272,38 @@ impl InputState {
 
     // ===== Touch =====
 
+    /// Surface a touch point belongs to, for the life of the sequence.
+    pub fn touch_surface(&self, touch_id: i32) -> Option<(SessionId, SurfaceId)> {
+        self.touch_points
+            .iter()
+            .find(|point| point.id == touch_id)
+            .map(|point| point.surface)
+    }
+
+    /// Distinct surfaces with at least one active touch point.
+    ///
+    /// Frame and cancel events are per-surface, not per-point, so a two-finger
+    /// gesture on one surface must not produce two frame events.
+    pub fn touch_surfaces(&self) -> Vec<(SessionId, SurfaceId)> {
+        let mut surfaces: Vec<(SessionId, SurfaceId)> = self
+            .touch_points
+            .iter()
+            .map(|point| point.surface)
+            .collect();
+        surfaces.sort_unstable();
+        surfaces.dedup();
+        surfaces
+    }
+
+    pub fn active_touch_points(&self) -> usize {
+        self.touch_points.len()
+    }
+
+    /// Begin a touch sequence on `surface`.
+    ///
+    /// The serial is supplied by the caller rather than minted here: serials are
+    /// what clients quote to authorize privileged actions, so there must be
+    /// exactly one authority issuing them — [`crate::scp::state::ScpState`].
     pub fn dispatch_touch_down(
         &mut self,
         surface: (SessionId, SurfaceId),
@@ -281,6 +311,7 @@ impl InputState {
         x: f64,
         y: f64,
         time_ms: u32,
+        serial: u32,
     ) -> InputEvent {
         self.touch_points.push(TouchPoint {
             id: touch_id,
@@ -288,7 +319,7 @@ impl InputState {
             x,
             y,
         });
-        let serial = self.next_serial();
+        self.last_input_time = Instant::now();
         InputEvent::TouchDown {
             serial,
             touch_id,
@@ -298,9 +329,17 @@ impl InputState {
         }
     }
 
-    pub fn dispatch_touch_up(&mut self, touch_id: i32, time_ms: u32) -> Option<InputEvent> {
-        self.touch_points.retain(|tp| tp.id != touch_id);
-        let serial = self.next_serial();
+    /// Release a touch point. Returns `None` for a point that was never down,
+    /// so a stray release cannot fabricate an event for a client.
+    pub fn dispatch_touch_up(
+        &mut self,
+        touch_id: i32,
+        time_ms: u32,
+        serial: u32,
+    ) -> Option<InputEvent> {
+        let index = self.touch_points.iter().position(|tp| tp.id == touch_id)?;
+        self.touch_points.remove(index);
+        self.last_input_time = Instant::now();
         Some(InputEvent::TouchUp {
             serial,
             touch_id,

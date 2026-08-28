@@ -125,11 +125,16 @@ impl KeymapState {
         &self.keymap_data
     }
 
-    /// Create a sealed memfd for the keymap (Phase 1+).
+    /// Create a sealed, rewound memfd holding the keymap.
+    ///
+    /// The descriptor is rewound before it is handed out. A duplicated
+    /// descriptor shares its file offset with the original, so an fd left at the
+    /// end of the data would read as empty for a client that reads sequentially
+    /// instead of mmapping it.
     #[cfg(target_os = "linux")]
     pub fn create_memfd(&self) -> Result<RawFd, std::io::Error> {
         use crate::scp::memfd;
-        use std::io::Write;
+        use std::io::{Seek, Write};
         use std::os::unix::io::FromRawFd;
 
         // Create anonymous sealed memfd
@@ -138,6 +143,7 @@ impl KeymapState {
         let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
         file.write_all(&self.keymap_data)?;
         file.sync_all()?;
+        file.rewind()?;
 
         // Get raw fd back before sealing
         let fd = std::os::unix::io::IntoRawFd::into_raw_fd(file);
@@ -151,12 +157,13 @@ impl KeymapState {
     /// Fallback for non-Linux or testing: create temp file.
     #[cfg(not(target_os = "linux"))]
     pub fn create_memfd(&self) -> Result<RawFd, std::io::Error> {
-        use std::io::Write;
+        use std::io::{Seek, Write};
         use std::os::unix::io::IntoRawFd;
 
         let mut tmpfile = tempfile::tempfile()?;
         tmpfile.write_all(&self.keymap_data)?;
         tmpfile.sync_all()?;
+        tmpfile.rewind()?;
         Ok(tmpfile.into_raw_fd())
     }
 
@@ -330,7 +337,7 @@ mod tests {
         let keymap = KeymapState::new();
         assert_eq!(keymap.format(), KeymapFormat::XkbV1);
         assert!(keymap.size() > 0);
-        assert!(keymap.data().len() > 0);
+        assert!(!keymap.data().is_empty());
     }
 
     #[test]

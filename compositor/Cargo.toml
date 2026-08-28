@@ -31,6 +31,14 @@ serial_test = "4.0.1"
 name = "scp_session"
 path = "tests/scp_session.rs"
 
+[[test]]
+name = "scp_input"
+path = "tests/scp_input.rs"
+
+[[test]]
+name = "scp_events"
+path = "tests/scp_events.rs"
+
 [[example]]
 name = "scp-client"
 path = "examples/scp-client.rs"
