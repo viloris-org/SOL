@@ -41,7 +41,7 @@ Linux kernel + initrd + system services
     ↓
 sol-securityd / sol-accountsd / sol-vaultd / sol-packaged / portals
     ↓
-SOL Runtime + Wayland compositor + shell
+SOL Runtime + native SCP compositor + shell
     ↓
 signed .app bundles in per-application sandboxes
 ```
@@ -292,7 +292,7 @@ Enforcement combines Linux primitives rather than relying on a UI prompt alone:
 - cgroups for resource ownership and limits;
 - seccomp for syscall reduction;
 - Landlock and/or a selected LSM for filesystem and object policy;
-- Wayland protocol mediation;
+- SCP capability and object-ownership enforcement;
 - portals and capability brokers for user-mediated resources;
 - per-app data directories and Secret Service collections.
 
@@ -450,21 +450,21 @@ The exact on-disk layout may evolve, but its ownership model is fixed:
 `/Applications/*.app` entries are projections or handles into the managed
 store, not mutable copies managed by each application.
 
-## 11. Compatibility policy
+## 11. Toolkit adapter policy
 
-SOL distinguishes native, integrated, and compatible applications:
+SOL distinguishes native, integrated, and explicitly adapted applications:
 
 | Level | UI stack | Guarantee |
 |---|---|---|
 | Native | SolKit/SolUI | Full SOL components, motion, material, accessibility, and system framework |
 | Integrated | GTK/Qt with an official SOL adapter | Full system capabilities plus mapped appearance/accessibility/windowing and constrained materials |
-| Compatible | Generic Wayland `.app` | Standard Wayland/portal operation with its own visual and interaction system |
+| Adapted | Other toolkit with a reviewed SOL adapter | Declared adapter capabilities over SCP and stable SOL Runtime APIs |
 
 Security, permissions, accounts, installation, updates, and rollback are equal
 across all three levels. Non-SolKit code never receives more authority.
 
-- Wayland-native Linux applications target SOL by being repackaged as `.app`
-  and declaring requestable capabilities.
+- An application targets SOL only when SolKit or its bundled adapter implements
+  SCP and the stable SOL Runtime contracts. Repackaging alone is insufficient.
 - GTK, Qt, SDL, Flutter, Electron, and similar stacks are private bundle
   dependencies. The `.app` includes the toolkit, platform plugins, and native
   libraries it tested; no host toolkit copy or global plugin satisfies them.
@@ -482,8 +482,8 @@ across all three levels. Non-SolKit code never receives more authority.
   native SOL package, identity, or permission model.
 - pacman/AUR may remain build inputs and developer-bootstrap tools. They are
   not exposed as the installed OS transaction authority.
-- X11/XWayland remains outside the first-class compatibility target unless a
-  future security and product review explicitly changes that decision.
+- SOL exposes no Wayland, X11, or XWayland compatibility socket. Adding one
+  would require a new product and security ADR.
 
 ## 12. Required acceptance tests
 
@@ -523,7 +523,7 @@ hardware-backed tests prove:
     reduced-transparency/high-contrast modes without changing hierarchy;
 19. GTK/Qt apps carrying incompatible toolkit versions run together without
     host-library or plugin resolution;
-20. native, integrated, and compatible apps receive identical permission and
+20. native, integrated, and adapted apps receive identical permission and
     account denial semantics;
 21. toolkit material requests expose no backdrop data and preserve hierarchy
     when reduced to solid fallback;

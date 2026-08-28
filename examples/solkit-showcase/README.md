@@ -32,7 +32,7 @@ cargo run -p solkit-showcase --features native
 ```
 
 The `native` feature uses SolUI's private adapter; the example itself still
-does not reference any backend type. This requires a usable Wayland graphical
-session. It is intentionally not an AT-SPI/screen-reader, GPU-pacing,
+does not reference any backend type. A production window requires the pending
+SCP application-surface adapter. It is intentionally not an AT-SPI/screen-reader, GPU-pacing,
 multi-output, or input-latency certification; those remain Phase 2 closure
 environment tests.

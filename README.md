@@ -82,7 +82,7 @@ assistive-technology validation remain open.
 | `sdk/sol-system` | System API (restricted) | 🔲 placeholder → Phase 2 |
 | `services/` | `sol-settingsd`, `sol-notificationd`, `sol-portal`, `sol-ime` | 🟡 mixed S1–S3 foundations; real adapters and product surfaces remain open |
 | `apps/` | First-party apps: Files, Terminal, Settings | 🔲 placeholders → Phase 3 |
-| `protocols/` | SOL-owned protocol XML + IPC schemas | 🔲 no SOL-owned stable schema yet; standard-interface status is tracked separately |
+| `protocols/` | SCP + typed IPC schema home | 🔲 Rust SCP messages exist; no stable external schema yet |
 | `boot/` | `sol-image` manifest tooling; target home of `sol-boot`, recovery, and verified-slot policy | 🟡 Phase 7 manifest foundation |
 | `packaging/sol/` | Target home of `.app` tooling and `sol-pkg` contracts | 🔲 planned |
 | `security/` | Target home of sandbox, permission, consent, and audit services | 🔲 planned |
@@ -99,7 +99,7 @@ assistive-technology validation remain open.
 | [OS Platform Definition](docs/os-platform.md) | Normative OS boundary, `.app`, atomic permissions, accounts, materials, and runtime contracts |
 | [Shell Experience](docs/shell-experience.md) | Dock, Launcher, global menu, window controls, status zone, tray, and Live Capsule contracts |
 | [Roadmap](docs/ROADMAP.md) | Engineering execution view of the PRD phases, with deliverables & acceptance |
-| [Wayland protocol matrix](docs/status/wayland-protocol-matrix.md) | Advertised interfaces, semantic maturity, missing behavior, and evidence gates |
+| [Historical Wayland protocol matrix](docs/status/wayland-protocol-matrix.md) | Retired frontend evidence retained for migration history |
 | [Decision log](docs/decisions/README.md) | ADRs for boot, packages, security, runtime, compositor, SDK, IPC, and distribution |
 | [Docs index](docs/README.md) | How the docs fit together + pointers |
 | Component READMEs | `compositor/`, `sdk/*`, `services/*`, `apps/*`, `protocols/` |

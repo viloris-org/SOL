@@ -14,7 +14,7 @@ Renderer
 └── Present
 ```
 
-Phase 1 reuses Smithay's existing renderer capabilities (PRD §15); the
+The next native rendering slice targets SCP-owned buffers directly; the
 long-term role of Vulkan / wgpu is undecided (§41 #4).
 
 ## Principles

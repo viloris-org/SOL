@@ -70,9 +70,9 @@ Core is `src/scp/state.rs`, which owns SCP protocol state and object management.
 - `scp/state.rs`: `ScpState` - SCP protocol handlers and state
 - `main.rs`: SCP service lifetime
 - `scp/`: SOL Compositor Protocol implementation (capability-based security)
-- `window.rs`: `WindowManager` - window layout, hit-testing, focus
-- `grabs.rs`: interactive move/resize grab handlers
-- `outputs.rs`: output management (add/remove outputs, HiDPI scale)
+- `scp/surface.rs`: SCP surface, toplevel, and layer-surface lifecycle
+- `scp/input.rs`: native input focus and event routing state
+- `scp/output.rs`: native output descriptions and scale state
 
 **Protocol**: SOL uses SCP (SOL Compositor Protocol) exclusively. No Wayland compatibility (see ADR-0028).
 
@@ -95,7 +95,7 @@ Desktop shell (top bar, dock, launcher). Runs as a separate process from the com
 
 ## Key Architectural Principles
 
-1. **Compositor state ownership**: `SolState` owns all SCP protocol state. Backends only drive it.
+1. **Compositor state ownership**: `ScpState` owns all SCP protocol state. Backends only drive it.
 2. **Shell crash safety**: Shell is a separate process; compositor must not die if shell crashes.
 3. **Consistency via tokens**: Visual parameters live in `sol-design`; components use tokens only.
 4. **No legacy compatibility**: No XWayland, no Wayland (ADR-0028). SCP only.
@@ -104,7 +104,7 @@ Desktop shell (top bar, dock, launcher). Runs as a separate process from the com
 
 ## Testing
 
-The integration test (`compositor/tests/sol_session.rs`) validates end-to-end SCP protocol round-trips:
+The integration test (`compositor/tests/scp_session.rs`) validates end-to-end SCP protocol round-trips:
 - Spawns compositor in headless mode
 - Waits for socket
 - Runs SCP test client against it
@@ -125,7 +125,6 @@ cargo run -p sol-compositor -- --headless
 ```bash
 # Run example SCP clients
 cargo run -p sol-compositor --example scp-client
-cargo run -p sol-compositor --example popup-client
 ```
 
 ### Run formatter

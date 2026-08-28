@@ -44,7 +44,7 @@ decisions in their own right.
 | 21 | Default-deny application security and permissions | Accepted (policy) | Phase 8 | [0021](0021-application-security-permissions.md) |
 | 22 | System-managed accounts and credential vault | Accepted (architecture) | Phase 8 | [0022](0022-system-managed-accounts.md) |
 | 23 | SOL fluid material system | Accepted (design contract) | Phases 2/4/9 | [0023](0023-sol-fluid-material.md) |
-| 24 | GTK, Qt, and non-native toolkit compatibility | Accepted (architecture) | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
+| 24 | GTK, Qt, and non-native toolkit adapters | Partially superseded by ADR-0028; explicit adapters remain | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
 | 25 | Shell spatial grammar, global menu, and Live Capsule | Accepted (product/architecture) | Phases 4/9 | [0025](0025-shell-spatial-menu-live-capsule.md) |
 | 26 | SOL boot execution, UKI, and seamless graphics handoff | Accepted (architecture) | Phase 7 | [0026](0026-sol-boot-uki-and-graphics-handoff.md) |
 | 27 | SOL Compositor Protocol (SCP) - capability-based security | Accepted (architecture) | Phases 1–2 | [0027](0027-sol-compositor-protocol.md) |
@@ -90,7 +90,7 @@ accepted decision remain open implementation or product work.
 | 23 | System-image filesystem and delta encoding | Phase 7 | Read-only signed images and atomic slot activation are fixed by ADR-0019 |
 | 24 | Account vault storage and hardware sealing | Phase 8 | System ownership and scoped handles are fixed by ADR-0022; backend/TPM API remains open |
 | 25 | Fluid-material compositor path | Phase 4/9 | Roles/fallbacks are fixed by ADR-0023; sampling/refraction implementation remains open |
-| 26 | Toolkit adapter/protocol matrix | Phase 9 | Support levels and isolation are fixed by ADR-0024; adapter coverage and material schema remain open |
+| 26 | Toolkit adapter/protocol matrix | Phase 9 | ADR-0028 removes generic compatibility; explicit adapter coverage and SCP material schema remain open |
 | 27 | Live Activity/menu/status IPC | Phase 4/9 | Placement, attribution, leasing, privacy priority, and trusted rendering fixed by ADR-0025 |
 | 28 | Device control plane and hotplug lifecycle | **Proposed (Phase 5)** | [ADR-0031](0031-device-control-plane-and-hotplug.md): normalized device graph, stable identity, subsystem authority, reconciliation, safe removal, and attachment-fenced leases |
 

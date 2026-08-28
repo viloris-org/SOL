@@ -24,12 +24,12 @@ use a four-byte big-endian length prefix; buffer descriptors use `SCM_RIGHTS`.
 
 ```bash
 cargo test -p sol-compositor
-cargo tree --workspace --edges normal | rg -i 'wayland|smithay|wlroots'
+./scripts/validate-scp-only.sh
 ```
 
-The second command should print nothing. The active integration test is
-`tests/scp_session.rs`; retired Wayland fixtures remain as migration reference
-but are excluded from Cargo target discovery.
+The active integration test is `tests/scp_session.rs`. Retired compositor
+sources, clients, and compatibility fixtures live only in Git history; the
+SCP-only guard prevents them or their dependencies from returning unnoticed.
 
 ## Active architecture
 
@@ -40,4 +40,4 @@ but are excluded from Cargo target discovery.
 - `tests/scp_session.rs` — end-to-end native protocol/security checks.
 
 Renderer/input/DRM integration must be implemented against SCP-owned state;
-the removed Wayland frontend is not a compatibility fallback.
+there is no legacy frontend or compatibility fallback in the source tree.

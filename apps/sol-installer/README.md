@@ -14,7 +14,7 @@ transaction.
 # Deterministic semantic projection used by CI
 cargo run -p sol-installer
 
-# Native Wayland window used by a live image
+# Native SOL window used by a live image (SCP adapter pending)
 cargo run -p sol-installer --features native
 ```
 

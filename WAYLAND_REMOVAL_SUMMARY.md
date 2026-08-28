@@ -1,6 +1,6 @@
 # Wayland 依赖移除总结
 
-## 当前结果（2026-08-27）
+## 当前结果（2026-08-28）
 
 - `sol-compositor` 已删除 Smithay、Wayland server/protocol、winit、xkbcommon、
   xcursor 和 DRM Smithay adapter 依赖。
@@ -9,17 +9,19 @@
 - `sol-session` 统一传播 `SOL_SCP_SOCKET`，不再设置 `WAYLAND_DISPLAY` 或
   `SOL_WAYLAND_SOCKET`。
 - Cargo 默认工作区依赖树及 `Cargo.lock` 中已无 Wayland/Smithay/wlroots 包。
-- 旧 Wayland 源码与测试仅作为迁移参考保留，不参与 Cargo target discovery。
+- 旧 Wayland 源码、客户端示例、集成测试和 toolkit 兼容 fixture 已从工作树
+  删除，只保留于 Git 历史和历史 ADR。
+- `scripts/validate-scp-only.sh` 同时守卫 Cargo 依赖图、manifest、活动 session
+  环境变量以及已退役路径，防止兼容层意外回归。
 
 ## 验证
 
 ```bash
-cargo tree --workspace --edges normal --prefix none \
-  | rg -i '(^|[-_])wayland|smithay|wlroots'
-# 无输出
+./scripts/validate-scp-only.sh
 
 cargo test -p sol-compositor
 cargo test -p sol-session
+cargo test -p sol-logind
 ```
 
 ## 仍待实现
