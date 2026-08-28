@@ -19,6 +19,7 @@ members = [
     "services/sol-notificationd",
     "services/sol-portal",
     "services/sol-ime",
+    "services/sol-logind",
     "services/sol-diagnostics",
     "services/sol-ntpd",
     "services/sol-networkd",

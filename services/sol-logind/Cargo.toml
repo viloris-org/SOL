@@ -1,0 +1,25 @@
+[package]
+name = "sol-logind"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sol-design = { path = "../../sdk/sol-design" }
+sol-ui = { path = "../../sdk/sol-ui", features = ["native"] }
+sol-app = { path = "../../sdk/sol-app" }
+sol-graphics = { path = "../../sdk/sol-graphics" }
+sol-system = { path = "../../sdk/sol-system" }
+slint = { version = "=1.13.1", default-features = false, features = ["std", "compat-1-2", "backend-linuxkms", "renderer-software"] }
+pam = "0.7"
+uzers = "0.12"
+rand = "0.8"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
