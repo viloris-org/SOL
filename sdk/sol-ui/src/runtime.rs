@@ -40,9 +40,9 @@ impl LogicalSize {
 
 /// The platform surface that hosts a SolUI frame.
 ///
-/// `sol-shell` owns its Wayland layer-shell surface. Application windows use
-/// an xdg toplevel host. Both expose this small, renderer-neutral contract to
-/// SolUI, so layer-shell protocol types cannot leak into app code.
+/// `sol-shell` owns its privileged SCP layer surface. Application windows use
+/// SCP toplevel surfaces. Both expose this small, renderer-neutral contract to
+/// SolUI, so compositor protocol types cannot leak into app code.
 pub trait SurfaceHost {
     /// Logical extent negotiated with the platform surface.
     fn logical_size(&self) -> LogicalSize;

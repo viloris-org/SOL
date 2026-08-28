@@ -7,8 +7,7 @@
 
 use sol_design::color::Color;
 
-/// The preedit display attributes (mirrors the Wayland `text-input` model of
-/// cursor within the composition).
+/// The preedit display attributes carried by the native SCP text-input model.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Preedit {
     /// Raw UTF-8 composition text.

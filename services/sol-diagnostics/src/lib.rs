@@ -56,7 +56,7 @@ impl Error for DiagnosticError {}
 /// Known SOL runtime components allowed to emit diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolComponent {
-    /// The Wayland compositor.
+    /// The native SCP compositor.
     Compositor,
     /// The desktop shell.
     Shell,

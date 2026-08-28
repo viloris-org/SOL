@@ -9,12 +9,12 @@
 //! ## Phase 1 M1 scaffold
 //!
 //! This milestone ships the candidate-window **data model and layout** driven by
-//! `sol-design` tokens. The full Wayland input-method v2 client wiring and the
-//! fcitx5 bridge land as the protocol glue is exercised end-to-end.
+//! `sol-design` tokens. The SCP text-input client wiring and the fcitx5 bridge
+//! land as the protocol glue is exercised end-to-end.
 //!
-//! The compositor side (`sol-compositor`) already advertises `text-input v3` +
-//! `input-method v2` globals (see `compositor/src/state.rs`). This crate will
-//! connect as an input-method client over that global.
+//! The compositor-side SCP text-input capability is not implemented yet. This
+//! crate deliberately exposes no legacy compositor-protocol client while that
+//! native capability is being designed.
 
 pub mod candidate;
 pub mod engine;
@@ -26,8 +26,8 @@ use sol_design::color::Color;
 /// A compositor-independent handle to the IME frontend.
 ///
 /// In Phase 1 M1 this is a scaffold; the client connection to the compositor's
-/// `zwp_input_method_manager_v2` and `zwp_input_method_v2` will attach a
-/// surface here for `sol-ui` to render into.
+/// SCP text-input capability and candidate layer surface will attach here for
+/// `sol-ui` to render into.
 #[derive(Default)]
 pub struct SolIme {
     /// Current composition state, mirroring what the engine produced.
@@ -41,7 +41,7 @@ pub struct SolIme {
 
 impl SolIme {
     /// Apply an engine result to the frontend and return text to commit to the
-    /// focused Wayland client, if the engine settled a composition.
+    /// focused SCP client, if the engine settled a composition.
     pub fn apply_engine_result(&mut self, result: &engine::EngineResult) -> Option<String> {
         self.preedit = result.preedit.clone();
         self.candidates = result.candidates.clone();

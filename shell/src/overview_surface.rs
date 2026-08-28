@@ -2,8 +2,8 @@
 //!
 //! The overview model in [`crate::overview`] owns interaction policy.  This
 //! module is the shell-side surface adapter: it turns a compositor snapshot
-//! and optional window thumbnails into an output-sized layer-shell frame.
-//! Wayland and GPU code consume [`OverviewSurfaceContract`] at the host edge;
+//! and optional window thumbnails into an output-sized SCP layer frame.
+//! SCP and GPU adapters consume [`OverviewSurfaceContract`] at the host edge;
 //! no protocol types leak into the overview model.
 
 use std::collections::BTreeMap;
@@ -57,7 +57,7 @@ pub trait ThumbnailProvider {
     ) -> Result<Option<WindowThumbnail>, OverviewSurfaceError>;
 }
 
-/// Host boundary implemented by the Wayland layer-shell adapter.
+/// Host boundary implemented by the SCP layer-surface adapter.
 pub trait OverviewSurfaceHost {
     /// Present one frame at the negotiated physical extent.
     fn present(&mut self, contract: &OverviewSurfaceContract, pixels: &[u8]);

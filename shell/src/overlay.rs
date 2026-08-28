@@ -1,7 +1,7 @@
 //! Renderer-neutral system overlay and layer-shell popup contracts.
 //!
 //! `sol-shell` owns the protocol-facing layer-shell lifecycle.  This module
-//! deliberately models that lifecycle without importing Wayland types so the
+//! deliberately models that lifecycle without importing SCP wire types so the
 //! same contract can be exercised by a deterministic compositor fixture and
 //! consumed by a future native layer-shell host.
 

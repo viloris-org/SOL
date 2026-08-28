@@ -3,7 +3,7 @@
 //! The SOL frontend owns presentation.  Fcitx owns conversion and candidate
 //! ranking.  [`Fcitx5Transport`] deliberately translates fcitx's D-Bus signal
 //! vocabulary into small frontend events, which keeps D-Bus types out of the
-//! candidate-window and Wayland protocol code.
+//! candidate-window and SCP protocol code.
 
 use crate::candidate::CandidateWindow;
 use crate::preedit::Preedit;

@@ -1,7 +1,7 @@
 //! Renderer-neutral Dock, Launcher, and local Search model.
 //!
 //! The model owns ordered pins, catalog lookup, deterministic local ranking,
-//! and keyboard/accessibility semantics. Wayland activation and window close
+//! and keyboard/accessibility semantics. SCP activation and window close
 //! are deliberately outside it: a concrete desktop adapter must opt in rather
 //! than a headless fixture pretending that a desktop action occurred.
 
@@ -195,7 +195,7 @@ pub enum DesktopAction {
 }
 
 /// A native session bridge for desktop actions. A recording fixture is useful
-/// in CI, but it is not evidence that a Wayland client was activated or closed.
+/// in CI, but it is not evidence that an SCP client was activated or closed.
 pub trait DesktopActionAdapter {
     /// Attempt one typed desktop action.
     fn perform(&mut self, action: DesktopAction) -> Result<(), DesktopActionError>;
@@ -298,8 +298,8 @@ pub struct DockItem {
     pub running: bool,
 }
 
-/// Minimal model projection for a renderer. The shell's native Wayland top bar
-/// may consume this state later, but it need not leak Wayland objects into tests.
+/// Minimal model projection for a renderer. The shell's native SCP top bar may
+/// consume this state later, without leaking protocol objects into tests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellLauncherFrame {
     /// Surface size after its fractional scale is applied.
