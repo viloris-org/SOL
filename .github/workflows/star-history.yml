@@ -1,0 +1,94 @@
+name: Star History
+
+on:
+  schedule:
+    # Off the hour on purpose: :00 is when everyone else's cron fires.
+    - cron: '23 4 * * *'
+  # Fires when someone stars the repository, so the chart updates immediately.
+  watch:
+    types: [started]
+  workflow_dispatch:
+
+# Read-only by default; the render job opts into the one write it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: star-history
+  # A burst of stars only needs the newest chart.
+  cancel-in-progress: true
+
+jobs:
+  render:
+    name: Render and publish
+    runs-on: ubuntu-latest
+    permissions:
+      # DO NOT downgrade this to `read`. Since GitHub restricted the stargazer
+      # listing (announced 2026-06-30, enforced from ~2026-07-01), `contents:
+      # write` is what the API itself demands to *read* this repository's own
+      # stargazers: with no block or with `contents: read` the endpoint answers
+      # 403, and only `contents: write` returns 200. The docs list
+      # GET /repos/{owner}/{repo}/stargazers under "Contents" / write.
+      # Force-pushing the branch below happens to need the same permission.
+      #
+      # No third-party action runs in this job, so nothing outside this
+      # repository is ever handed a write-capable token.
+      contents: write
+
+    steps:
+      - name: Check out the renderer
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Render light and dark SVGs
+        env:
+          # The built-in token is sufficient for this repository's own stars
+          # given the `contents: write` grant above. The override exists only as
+          # an escape hatch if GitHub tightens this again: set the
+          # STAR_HISTORY_TOKEN secret to a fine-grained PAT with Contents
+          # read-and-write on this repository. Stargazers of a repository you do
+          # not administer are unreadable by any token.
+          GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN || secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/star-history.mjs --out dist
+
+      - name: Upload SVGs as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-history
+          path: dist/*.svg
+          if-no-files-found: error
+
+      - name: Publish to the star-history branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Build the branch contents from scratch in a scratch repository, then
+          # force-push it as a single commit. The branch therefore holds exactly
+          # one commit forever: the chart never accumulates history, and `main`
+          # is never touched.
+          work="$(mktemp -d)"
+          cp dist/star-history.svg dist/star-history-dark.svg "$work/"
+
+          cat > "$work/README.md" <<'MD'
+          # star-history
+
+          Generated branch — do not edit or merge.
+
+          Rebuilt by `.github/workflows/star-history.yml` from the GitHub API.
+          Every run replaces this branch with a single fresh commit.
+          MD
+
+          cd "$work"
+          git init --quiet --initial-branch star-history
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit --quiet -m "chore(star-history): rebuild $(date -u +%Y-%m-%d)"
+          git push --quiet --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            star-history
+
+          echo "Published to the star-history branch."
