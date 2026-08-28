@@ -1,8 +1,8 @@
 //! Native SCP compositor service.
 //!
 //! The process deliberately exposes only the SOL Compositor Protocol.  The
-//! retired Smithay/Wayland implementation remains in the repository history
-//! and migration notes, but is no longer part of the build graph.
+//! retired compositor implementation remains in repository history and
+//! migration notes, but is no longer present in the active source tree.
 
 use sol_compositor::scp::ScpServer;
 use std::{
