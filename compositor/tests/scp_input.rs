@@ -10,6 +10,9 @@
 //! compositor-initiated events can be observed the same way a real client would
 //! receive them.
 
+// `expect` in a test is a deliberate assertion, not an unhandled error.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use sol_compositor::scp::{
     ScpState,
     event_queue::{OutboundEvent, SessionSink},
@@ -400,6 +403,109 @@ fn a_popup_stacks_above_its_parent() {
     assert_eq!(
         state.hit_test(600.0, 300.0).expect("point is covered").kind,
         StackKind::Popup(popup),
+    );
+}
+
+/// Create a popup with a caller-chosen positioner, returning the configure.
+fn create_popup_with(
+    state: &mut ScpState,
+    client: &Client,
+    surface_id: SurfaceId,
+    parent_id: SurfaceId,
+    positioner: PopupPositioner,
+) -> Vec<CompositorMessage> {
+    send(state, client, ClientMessage::CreateSurface { surface_id });
+    send(
+        state,
+        client,
+        ClientMessage::CreatePopup {
+            surface_id,
+            parent_id,
+            positioner,
+            grab: true,
+        },
+    )
+}
+
+#[test]
+fn an_oversized_popup_is_confined_to_the_output() {
+    let mut state = compositor();
+    let client = connect(&mut state);
+    create_toplevel(&mut state, &client, 1);
+
+    // A popup far larger than the screen, pushed far off its top-left corner.
+    let mut hostile = positioner((10_000, 10_000));
+    hostile.offset = (-4_000, -4_000);
+    create_popup_with(&mut state, &client, 2, 1, hostile);
+
+    let entry = state
+        .build_stack()
+        .iter()
+        .find(|entry| matches!(entry.kind, StackKind::Popup(_)))
+        .copied()
+        .expect("popup is stacked");
+
+    assert!(
+        entry.rect.width <= OUTPUT_WIDTH && entry.rect.height <= OUTPUT_HEIGHT,
+        "a popup must not exceed the output it appears on: {:?}",
+        entry.rect
+    );
+}
+
+#[test]
+fn a_popup_cannot_cover_a_window_stacked_above_its_parent() {
+    let mut state = compositor();
+    let attacker = connect(&mut state);
+    let victim = connect(&mut state);
+
+    create_toplevel(&mut state, &attacker, 1);
+    let mut wide = positioner((OUTPUT_WIDTH, OUTPUT_HEIGHT));
+    wide.offset = (-OUTPUT_WIDTH, -OUTPUT_HEIGHT);
+    create_popup_with(&mut state, &attacker, 2, 1, wide);
+
+    // The victim's window is raised, so it sits above the attacker's window —
+    // and therefore above anything hanging off it.
+    create_toplevel(&mut state, &victim, 1);
+
+    // A point inside the victim's window, which the attacker's popup spans.
+    let hit = state
+        .hit_test(700.0, 400.0)
+        .expect("the victim's window covers this point");
+    assert_eq!(
+        hit.session_id, victim.session_id,
+        "a popup must not take input over a window stacked above its parent: {hit:?}"
+    );
+}
+
+#[test]
+fn a_hostile_positioner_is_refused_rather_than_wrapping() {
+    let mut state = compositor();
+    let client = connect(&mut state);
+    create_toplevel(&mut state, &client, 1);
+
+    // Every field at its extreme: plain arithmetic on these overflowed, which
+    // panicked inside the compositor state lock under overflow checks and
+    // produced an arbitrary on-screen rectangle without them.
+    let mut hostile = positioner((i32::MAX, i32::MAX));
+    hostile.anchor_rect = Rect {
+        x: i32::MAX,
+        y: i32::MAX,
+        width: i32::MAX,
+        height: i32::MAX,
+    };
+    hostile.offset = (i32::MAX, i32::MAX);
+    create_popup_with(&mut state, &client, 2, 1, hostile);
+
+    let entry = state
+        .build_stack()
+        .iter()
+        .find(|entry| matches!(entry.kind, StackKind::Popup(_)))
+        .copied()
+        .expect("popup is stacked");
+    assert!(
+        entry.rect.width <= OUTPUT_WIDTH && entry.rect.height <= OUTPUT_HEIGHT,
+        "saturated geometry must still be confined: {:?}",
+        entry.rect
     );
 }
 

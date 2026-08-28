@@ -10,6 +10,36 @@ use crate::scp::{
 };
 use std::collections::HashMap;
 
+/// Surfaces one client may hold at once.
+///
+/// Ids are client-chosen `u32`s, so without a cap a client can allocate four
+/// billion of them and take the compositor down by growing its heap. Every limit
+/// in this module is set well above what an application plausibly needs and far
+/// below what it takes to hurt the machine.
+pub const MAX_SURFACES_PER_SESSION: usize = 256;
+
+/// Toplevel windows one client may hold at once.
+pub const MAX_TOPLEVELS_PER_SESSION: usize = 64;
+
+/// Layer surfaces one client may hold at once.
+pub const MAX_LAYER_SURFACES_PER_SESSION: usize = 32;
+
+/// Buffers a surface may retain awaiting release before the oldest is dropped.
+///
+/// Each one pins a descriptor. The renderer releases them after a frame; until
+/// there is a renderer nothing does, so this is what keeps an attach/commit loop
+/// from exhausting the compositor's descriptors.
+pub const MAX_RETAINED_BUFFERS: usize = 8;
+
+/// Damage rectangles a surface accumulates before they are coalesced.
+///
+/// Damage is an optimization hint, so collapsing many rectangles into their
+/// bounding box costs redraw area and never correctness.
+pub const MAX_DAMAGE_RECTS: usize = 64;
+
+/// Frame callbacks a surface may have outstanding.
+pub const MAX_FRAME_CALLBACKS: usize = 64;
+
 /// A compositor surface — the minimal unit of client content.
 #[derive(Debug)]
 pub struct ScpSurface {
@@ -76,7 +106,14 @@ impl ScpSurface {
         }
     }
 
+    /// Register a frame callback, ignoring requests past the outstanding limit.
+    ///
+    /// A client that asks for callbacks it never lets fire is misbehaving; the
+    /// answer is to stop recording them, not to grow without bound.
     pub fn request_frame(&mut self, callback_id: u32) {
+        if self.pending_frame_callbacks.len() >= MAX_FRAME_CALLBACKS {
+            return;
+        }
         self.pending_frame_callbacks.push(callback_id);
     }
 
@@ -84,8 +121,19 @@ impl ScpSurface {
         self.pending_buffer = Some(buffer);
     }
 
+    /// Record a damaged region, coalescing once the list is full.
+    ///
+    /// Merging into a bounding box redraws more than strictly necessary, which
+    /// is the harmless direction to be wrong in — unlike an unbounded list a
+    /// client can grow by sending `Damage` without ever committing.
     pub fn add_damage(&mut self, rect: Rect) {
         self.pending_damage.push(rect);
+        if self.pending_damage.len() > MAX_DAMAGE_RECTS
+            && let Some(bounds) = bounding_box(&self.pending_damage)
+        {
+            self.pending_damage.clear();
+            self.pending_damage.push(bounds);
+        }
     }
 
     pub fn set_input_region(&mut self, rects: Vec<Rect>) {
@@ -101,6 +149,12 @@ impl ScpSurface {
             // Keep old buffer for release after render
             if let Some(old) = self.buffer.replace(buffer) {
                 self.old_buffers.push(old);
+                // Nothing has drained these yet — the renderer that will do so
+                // does not exist. Dropping the oldest closes its descriptor,
+                // which is what an attach/commit loop would otherwise exhaust.
+                while self.old_buffers.len() > MAX_RETAINED_BUFFERS {
+                    self.old_buffers.remove(0);
+                }
             }
         }
         self.damage = std::mem::take(&mut self.pending_damage);
@@ -108,6 +162,10 @@ impl ScpSurface {
         // Move pending frame callbacks to active
         self.frame_callbacks
             .append(&mut self.pending_frame_callbacks);
+        if self.frame_callbacks.len() > MAX_FRAME_CALLBACKS {
+            let excess = self.frame_callbacks.len() - MAX_FRAME_CALLBACKS;
+            self.frame_callbacks.drain(..excess);
+        }
     }
 
     /// Take frame callbacks that should fire after this frame renders.
@@ -173,6 +231,30 @@ impl ScpSurface {
             false
         }
     }
+}
+
+/// Smallest rectangle covering every input rectangle.
+fn bounding_box(rects: &[Rect]) -> Option<Rect> {
+    let mut iter = rects.iter();
+    let first = iter.next()?;
+    let mut left = first.x;
+    let mut top = first.y;
+    let mut right = first.x.saturating_add(first.width);
+    let mut bottom = first.y.saturating_add(first.height);
+
+    for rect in iter {
+        left = left.min(rect.x);
+        top = top.min(rect.y);
+        right = right.max(rect.x.saturating_add(rect.width));
+        bottom = bottom.max(rect.y.saturating_add(rect.height));
+    }
+
+    Some(Rect {
+        x: left,
+        y: top,
+        width: right.saturating_sub(left),
+        height: bottom.saturating_sub(top),
+    })
 }
 
 /// Toplevel window managed by the compositor.
@@ -433,12 +515,19 @@ impl LayerSurface {
     }
 
     /// Calculate the actual geometry based on anchor, size, and output bounds.
+    ///
+    /// Sizes and margins are client-chosen `i32`s, so every step saturates and
+    /// the result is clamped to the output. Plain arithmetic here used to panic
+    /// on a hostile margin — and this runs inside `build_stack`, on the input
+    /// path, while the compositor state lock is held.
     pub fn calculate_geometry(&self, output_width: i32, output_height: i32) -> Rect {
         let (desired_width, desired_height) = self.size;
 
         // Determine actual width
         let width = if self.anchor.is_horizontal_stretch() {
-            output_width - self.margin.left - self.margin.right
+            output_width
+                .saturating_sub(self.margin.left)
+                .saturating_sub(self.margin.right)
         } else if desired_width > 0 {
             desired_width
         } else {
@@ -447,35 +536,42 @@ impl LayerSurface {
 
         // Determine actual height
         let height = if self.anchor.is_vertical_stretch() {
-            output_height - self.margin.top - self.margin.bottom
+            output_height
+                .saturating_sub(self.margin.top)
+                .saturating_sub(self.margin.bottom)
         } else if desired_height > 0 {
             desired_height
         } else {
             self.configured_size.1
         };
 
+        // A layer surface is chrome on one output; it cannot be larger than the
+        // output it is anchored to, however it was configured.
+        let width = width.clamp(0, output_width.max(0));
+        let height = height.clamp(0, output_height.max(0));
+
         // Calculate position based on anchors
-        let x = if self.anchor.left && !self.anchor.right {
-            self.margin.left
-        } else if self.anchor.right && !self.anchor.left {
-            output_width - width - self.margin.right
+        let x = if self.anchor.right && !self.anchor.left {
+            output_width
+                .saturating_sub(width)
+                .saturating_sub(self.margin.right)
         } else {
-            // Centered or stretched
+            // Left-anchored, centered, or stretched.
             self.margin.left
         };
 
-        let y = if self.anchor.top && !self.anchor.bottom {
-            self.margin.top
-        } else if self.anchor.bottom && !self.anchor.top {
-            output_height - height - self.margin.bottom
+        let y = if self.anchor.bottom && !self.anchor.top {
+            output_height
+                .saturating_sub(height)
+                .saturating_sub(self.margin.bottom)
         } else {
-            // Centered or stretched
+            // Top-anchored, centered, or stretched.
             self.margin.top
         };
 
         Rect {
-            x,
-            y,
+            x: x.clamp(0, output_width.saturating_sub(width).max(0)),
+            y: y.clamp(0, output_height.saturating_sub(height).max(0)),
             width,
             height,
         }
@@ -506,9 +602,38 @@ impl SurfaceManager {
         if self.surfaces.contains_key(&(session_id, id)) {
             return Err("Surface ID already exists".to_string());
         }
+        if self.session_surfaces(session_id) >= MAX_SURFACES_PER_SESSION {
+            return Err(format!(
+                "A session may hold at most {MAX_SURFACES_PER_SESSION} surfaces"
+            ));
+        }
         self.surfaces
             .insert((session_id, id), ScpSurface::new(id, app_id));
         Ok(())
+    }
+
+    /// Surfaces currently held by one client.
+    pub fn session_surfaces(&self, session_id: SessionId) -> usize {
+        self.surfaces
+            .keys()
+            .filter(|(owner, _)| *owner == session_id)
+            .count()
+    }
+
+    /// Toplevels currently held by one client.
+    pub fn session_toplevels(&self, session_id: SessionId) -> usize {
+        self.toplevels
+            .values()
+            .filter(|toplevel| toplevel.session_id == session_id)
+            .count()
+    }
+
+    /// Layer surfaces currently held by one client.
+    pub fn session_layer_surfaces(&self, session_id: SessionId) -> usize {
+        self.layer_surfaces
+            .values()
+            .filter(|layer| layer.session_id == session_id)
+            .count()
     }
 
     /// Remove a surface and the window state attached to its role.
@@ -559,15 +684,27 @@ impl SurfaceManager {
         surface_id: SurfaceId,
         title: String,
     ) -> Result<ToplevelId, String> {
+        if self.session_toplevels(session_id) >= MAX_TOPLEVELS_PER_SESSION {
+            return Err(format!(
+                "A session may hold at most {MAX_TOPLEVELS_PER_SESSION} toplevel windows"
+            ));
+        }
+
+        let toplevel_id = self.next_toplevel_id;
+        // Wrapping would let a later toplevel take an id an earlier one still
+        // holds, and `toplevels.insert` would then evict another client's window
+        // from the map. Every other id space here is already checked.
+        let next_toplevel_id = self
+            .next_toplevel_id
+            .checked_add(1)
+            .ok_or("Toplevel ID space exhausted")?;
+
         let surface = self
             .surfaces
             .get_mut(&(session_id, surface_id))
             .ok_or_else(|| "Surface not found".to_string())?;
-
-        let toplevel_id = self.next_toplevel_id;
-        self.next_toplevel_id += 1;
-
         surface.assign_role(SurfaceRole::Toplevel(toplevel_id))?;
+        self.next_toplevel_id = next_toplevel_id;
 
         let toplevel = Toplevel::new(
             toplevel_id,
@@ -604,6 +741,12 @@ impl SurfaceManager {
         layer: Layer,
         namespace: String,
     ) -> Result<LayerSurfaceId, String> {
+        if self.session_layer_surfaces(session_id) >= MAX_LAYER_SURFACES_PER_SESSION {
+            return Err(format!(
+                "A session may hold at most {MAX_LAYER_SURFACES_PER_SESSION} layer surfaces"
+            ));
+        }
+
         let surface = self
             .surfaces
             .get_mut(&(session_id, surface_id))
@@ -671,5 +814,176 @@ impl SurfaceManager {
             }
         }
         callbacks
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app() -> AppId {
+        AppId("org.sol.test".to_string())
+    }
+
+    fn layer_surface() -> LayerSurface {
+        LayerSurface::new(1, 1, 1, app(), Layer::Top, "panel".to_string())
+    }
+
+    #[test]
+    fn a_hostile_margin_does_not_overflow() {
+        // Margins are client-chosen i32s, and this runs on the input path with
+        // the compositor state lock held: plain subtraction here used to panic.
+        let mut surface = layer_surface();
+        surface.anchor = Anchor {
+            top: true,
+            bottom: true,
+            left: true,
+            right: true,
+        };
+        surface.margin = Margin {
+            top: i32::MIN,
+            right: i32::MIN,
+            bottom: i32::MAX,
+            left: i32::MIN,
+        };
+
+        let geometry = surface.calculate_geometry(1920, 1080);
+        assert!(geometry.width <= 1920 && geometry.height <= 1080);
+        assert!(geometry.x >= 0 && geometry.y >= 0);
+    }
+
+    #[test]
+    fn a_layer_surface_cannot_exceed_its_output() {
+        let mut surface = layer_surface();
+        surface.size = (10_000, 10_000);
+
+        let geometry = surface.calculate_geometry(1920, 1080);
+        assert_eq!((geometry.width, geometry.height), (1920, 1080));
+        assert_eq!((geometry.x, geometry.y), (0, 0));
+    }
+
+    #[test]
+    fn surfaces_are_capped_per_session() {
+        let mut manager = SurfaceManager::new();
+        for id in 0..MAX_SURFACES_PER_SESSION {
+            manager
+                .create_surface(1, id as SurfaceId, app())
+                .expect("surfaces within the limit");
+        }
+
+        let error = manager
+            .create_surface(1, MAX_SURFACES_PER_SESSION as SurfaceId, app())
+            .expect_err("the limit must hold");
+        assert!(error.contains("at most"), "unexpected: {error}");
+
+        manager
+            .create_surface(2, 0, app())
+            .expect("the cap is per session, not global");
+    }
+
+    #[test]
+    fn toplevels_are_capped_per_session() {
+        let mut manager = SurfaceManager::new();
+        for id in 0..=MAX_TOPLEVELS_PER_SESSION {
+            manager
+                .create_surface(1, id as SurfaceId, app())
+                .expect("create surface");
+        }
+
+        for id in 0..MAX_TOPLEVELS_PER_SESSION {
+            manager
+                .create_toplevel(1, id as SurfaceId, "window".to_string())
+                .expect("toplevels within the limit");
+        }
+
+        let error = manager
+            .create_toplevel(
+                1,
+                MAX_TOPLEVELS_PER_SESSION as SurfaceId,
+                "one too many".to_string(),
+            )
+            .expect_err("the limit must hold");
+        assert!(error.contains("at most"), "unexpected: {error}");
+    }
+
+    #[test]
+    fn a_refused_toplevel_leaves_the_surface_roleless() {
+        let mut manager = SurfaceManager::new();
+        manager.create_surface(1, 1, app()).expect("create surface");
+        manager
+            .create_toplevel(1, 1, "first".to_string())
+            .expect("first role");
+
+        // A second role on the same surface must fail without having consumed an
+        // id, or the id space drifts ahead of the windows that exist.
+        manager
+            .create_toplevel(1, 1, "second".to_string())
+            .expect_err("a surface takes one role");
+
+        manager.create_surface(1, 2, app()).expect("create surface");
+        let next = manager
+            .create_toplevel(1, 2, "next".to_string())
+            .expect("create toplevel");
+        assert_eq!(next, 1, "the refused attempt must not have burned an id");
+    }
+
+    #[test]
+    fn retained_buffers_do_not_grow_without_bound() {
+        let mut surface = ScpSurface::new(1, app());
+        for id in 0..(MAX_RETAINED_BUFFERS as u32 * 4) {
+            surface.attach_buffer(SurfaceBuffer {
+                buffer_id: id,
+                // -1 so dropping these closes nothing real.
+                fd: -1,
+                width: 16,
+                height: 16,
+                stride: 64,
+                format: BufferFormat::Argb8888,
+            });
+            surface.commit();
+        }
+
+        assert!(
+            surface.old_buffers.len() <= MAX_RETAINED_BUFFERS,
+            "an attach/commit loop must not pin descriptors without bound: {}",
+            surface.old_buffers.len()
+        );
+    }
+
+    #[test]
+    fn damage_coalesces_instead_of_growing() {
+        let mut surface = ScpSurface::new(1, app());
+        for index in 0..(MAX_DAMAGE_RECTS as i32 * 4) {
+            surface.add_damage(Rect {
+                x: index,
+                y: index,
+                width: 1,
+                height: 1,
+            });
+        }
+
+        assert!(
+            surface.pending_damage.len() <= MAX_DAMAGE_RECTS,
+            "damage must coalesce: {}",
+            surface.pending_damage.len()
+        );
+        // Coalescing may only ever grow the redrawn area, never shrink it.
+        let covered = bounding_box(&surface.pending_damage).expect("damage is present");
+        assert!(covered.width >= MAX_DAMAGE_RECTS as i32);
+    }
+
+    #[test]
+    fn frame_callbacks_do_not_grow_without_bound() {
+        let mut surface = ScpSurface::new(1, app());
+        for id in 0..(MAX_FRAME_CALLBACKS as u32 * 4) {
+            surface.request_frame(id);
+            surface.commit();
+        }
+
+        assert!(
+            surface.frame_callbacks.len() <= MAX_FRAME_CALLBACKS,
+            "uncollected callbacks must not accumulate: {}",
+            surface.frame_callbacks.len()
+        );
     }
 }

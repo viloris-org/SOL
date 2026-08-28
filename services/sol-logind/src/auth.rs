@@ -13,8 +13,44 @@ pub struct AuthToken {
     pub session_id: String,
 }
 
+/// A PAM session opened by a successful login.
+///
+/// The `pam` crate's `Authenticator` closes its session when dropped, so
+/// this must be kept alive for as long as the user's desktop session is
+/// running — not just for the duration of authentication — or the session
+/// closes (resource limits, systemd-logind registration, audit trail) the
+/// instant login finishes.
+pub struct PamSession {
+    // Never read directly — held only so its `Drop` impl (which closes the
+    // PAM session) runs when this is dropped or `close`d.
+    #[allow(dead_code)]
+    authenticator: Authenticator<'static, PasswordConversation>,
+}
+
+impl PamSession {
+    /// Close the session now, once the desktop session it belongs to has
+    /// ended.
+    pub fn close(self) {}
+}
+
+impl Drop for PamSession {
+    fn drop(&mut self) {
+        tracing::debug!("Closing PAM session");
+    }
+}
+
+/// Outcome of a successful authentication.
+///
+/// For PAM logins, `session` must be held until the user's desktop session
+/// ends and then dropped (or explicitly closed via `PamSession::close`) —
+/// see `PamSession`. Stub logins never open a real session.
+pub struct AuthOutcome {
+    pub token: AuthToken,
+    pub session: Option<PamSession>,
+}
+
 /// Authentication service result.
-pub type AuthResult = Result<AuthToken>;
+pub type AuthResult = Result<AuthOutcome>;
 
 /// Authentication mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,9 +111,13 @@ impl AuthService {
         // Create a custom conversation handler
         let conv = PasswordConversation::new(username.to_string(), password.to_string());
 
-        // Create PAM authenticator for the "login" service
-        let mut auth = Authenticator::with_handler("login", conv)
-            .context("Failed to initialize PAM authenticator")?;
+        // Create PAM authenticator for the "login" service. Typed `'static`
+        // deliberately: the returned `Authenticator` must outlive this
+        // function so the caller can keep the session open for the lifetime
+        // of the desktop session, not just this authentication call.
+        let mut auth: Authenticator<'static, PasswordConversation> =
+            Authenticator::with_handler("login", conv)
+                .context("Failed to initialize PAM authenticator")?;
 
         // Perform authentication
         match auth.authenticate() {
@@ -85,12 +125,24 @@ impl AuthService {
                 tracing::info!("PAM authentication successful for user: {}", username);
 
                 // Open PAM session - required for a fully valid login (resource
-                // limits, systemd-logind registration, audit trail).
+                // limits, systemd-logind registration, audit trail). Stays open
+                // until the caller drops/closes the returned `PamSession`.
                 auth.open_session().context("Failed to open PAM session")?;
 
-                Ok(AuthToken {
+                // The plaintext password isn't needed past this point; don't
+                // keep it resident in memory for the rest of the desktop
+                // session's lifetime.
+                auth.get_handler().clear_password();
+
+                let token = AuthToken {
                     username: username.to_string(),
                     session_id: format!("session-{}-{}", username, generate_session_id()),
+                };
+                Ok(AuthOutcome {
+                    token,
+                    session: Some(PamSession {
+                        authenticator: auth,
+                    }),
                 })
             }
             Err(e) => {
@@ -112,9 +164,13 @@ impl AuthService {
             anyhow::bail!("Password cannot be empty");
         }
 
-        Ok(AuthToken {
+        let token = AuthToken {
             username: username.to_string(),
             session_id: format!("session-{}-{}", username, generate_session_id()),
+        };
+        Ok(AuthOutcome {
+            token,
+            session: None,
         })
     }
 
@@ -146,6 +202,13 @@ impl PasswordConversation {
         Self {
             username,
             password: Arc::new(Mutex::new(Some(password))),
+        }
+    }
+
+    /// Drop the held plaintext password once it's no longer needed.
+    fn clear_password(&mut self) {
+        if let Ok(mut password) = self.password.lock() {
+            *password = None;
         }
     }
 }
@@ -208,9 +271,10 @@ mod tests {
         let auth = AuthService::new_stub();
         let result = auth.authenticate("testuser", "password");
         assert!(result.is_ok());
-        let token = result.unwrap();
-        assert_eq!(token.username, "testuser");
-        assert!(!token.session_id.is_empty());
+        let outcome = result.unwrap();
+        assert_eq!(outcome.token.username, "testuser");
+        assert!(!outcome.token.session_id.is_empty());
+        assert!(outcome.session.is_none());
     }
 
     #[test]
@@ -238,9 +302,9 @@ mod tests {
     #[test]
     fn session_id_is_unique() {
         let auth = AuthService::new_stub();
-        let token1 = auth.authenticate("user1", "pass").unwrap();
+        let token1 = auth.authenticate("user1", "pass").unwrap().token;
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let token2 = auth.authenticate("user2", "pass").unwrap();
+        let token2 = auth.authenticate("user2", "pass").unwrap().token;
         assert_ne!(token1.session_id, token2.session_id);
     }
 

@@ -179,6 +179,10 @@
 - [x] 崩溃安全 —— locker 退出仅 *abandon*，会话保持锁定
 - [x] `SessionLockEngaged` / `SessionLocked` / `SessionLockFinished` /
       `ConfigureLockSurface` / `SessionLockStateChanged`
+- [x] 客户端实现 —— `sol-logind` 作为 session-lock 客户端接入（握手状态机
+      `services/sol-logind/src/scp/lock.rs`，传输 `client.rs`），登录界面经
+      软件渲染写入 memfd 并以 `AttachBuffer` 提交，输入事件回流至 `LoginUi`
+- [ ] 多输出锁屏覆盖（当前仅主输出；`OutputAdded` 已处理但未在真机验证）
 
 #### sol-securityd 集成
 - [ ] D-Bus IPC 连接

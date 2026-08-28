@@ -44,6 +44,9 @@ pub struct LoginUi {
     pub password_visible: PasswordVisibility,
     /// Current login state.
     pub state: LoginState,
+    /// Feedback for the user — an authentication failure, usually. Empty when
+    /// there is nothing to say.
+    pub status: String,
     /// Login button controller.
     pub login_button: sol_ui::ButtonController,
 }
@@ -57,6 +60,7 @@ impl LoginUi {
             password: String::new(),
             password_visible: PasswordVisibility::Hidden,
             state: LoginState::SelectingUser,
+            status: String::new(),
             login_button: sol_ui::ButtonController::new(
                 Button::new().with_label("Log In").primary(),
             ),
@@ -72,7 +76,7 @@ impl LoginUi {
     pub fn select_next_user(&mut self) {
         if !self.users.is_empty() {
             self.selected_user_index = (self.selected_user_index + 1) % self.users.len();
-            self.password.clear();
+            self.clear_password();
             self.state = LoginState::EnteringPassword;
         }
     }
@@ -85,7 +89,7 @@ impl LoginUi {
             } else {
                 self.selected_user_index -= 1;
             }
-            self.password.clear();
+            self.clear_password();
             self.state = LoginState::EnteringPassword;
         }
     }
@@ -94,7 +98,7 @@ impl LoginUi {
     pub fn select_user(&mut self, index: usize) {
         if index < self.users.len() {
             self.selected_user_index = index;
-            self.password.clear();
+            self.clear_password();
             self.state = LoginState::EnteringPassword;
         }
     }
@@ -110,6 +114,39 @@ impl LoginUi {
     /// Update password input.
     pub fn set_password(&mut self, password: String) {
         self.password = password;
+    }
+
+    /// Append a typed character to the password.
+    ///
+    /// Typing is itself the move from picking a user to entering their password,
+    /// so a keyboard-only login never has to select anything first.
+    pub fn push_password_char(&mut self, character: char) {
+        if matches!(self.state, LoginState::Authenticating) {
+            return;
+        }
+        self.state = LoginState::EnteringPassword;
+        self.status.clear();
+        self.password.push(character);
+    }
+
+    /// Delete the last character of the password.
+    pub fn backspace(&mut self) {
+        if matches!(self.state, LoginState::Authenticating) {
+            return;
+        }
+        self.status.clear();
+        self.password.pop();
+    }
+
+    /// Clear what has been typed without changing the selected user.
+    pub fn clear_password(&mut self) {
+        self.password.clear();
+        self.status.clear();
+    }
+
+    /// Show a message to the user, e.g. why a login failed.
+    pub fn set_status(&mut self, status: impl Into<String>) {
+        self.status = status.into();
     }
 
     /// Check if login button should be enabled.
@@ -149,6 +186,7 @@ impl LoginUi {
             password_visible: matches!(self.password_visible, PasswordVisibility::Visible),
             state: self.state,
             can_login: self.can_login(),
+            status: self.status.clone(),
             // Visual tokens
             page_background: mode.color(Color::Surface),
             panel_background: mode.color(Color::Elevated),
@@ -184,6 +222,7 @@ pub struct LoginFrame {
     pub password_visible: bool,
     pub state: LoginState,
     pub can_login: bool,
+    pub status: String,
 
     // Visual tokens
     pub page_background: Rgba,
@@ -273,6 +312,72 @@ mod tests {
         ui.set_password("secret".into());
         ui.select_user(1);
         assert!(ui.password.is_empty());
+    }
+
+    #[test]
+    fn typing_enters_the_password_state_without_selecting_first() {
+        let mut ui = LoginUi::new(mock_users());
+        assert_eq!(ui.state, LoginState::SelectingUser);
+
+        ui.push_password_char('h');
+        ui.push_password_char('i');
+
+        assert_eq!(ui.state, LoginState::EnteringPassword);
+        assert_eq!(ui.password, "hi");
+        assert!(ui.can_login());
+    }
+
+    #[test]
+    fn backspace_removes_the_last_character_and_stops_at_empty() {
+        let mut ui = LoginUi::new(mock_users());
+        ui.push_password_char('a');
+        ui.push_password_char('b');
+
+        ui.backspace();
+        assert_eq!(ui.password, "a");
+        ui.backspace();
+        ui.backspace();
+        assert!(ui.password.is_empty(), "backspace on empty must not panic");
+    }
+
+    #[test]
+    fn typing_is_ignored_while_authenticating() {
+        let mut ui = LoginUi::new(mock_users());
+        ui.push_password_char('a');
+        ui.begin_authentication();
+        assert_eq!(ui.state, LoginState::Authenticating);
+
+        ui.push_password_char('b');
+        ui.backspace();
+        assert_eq!(
+            ui.password, "a",
+            "the password is frozen mid-authentication"
+        );
+    }
+
+    #[test]
+    fn a_new_keystroke_clears_stale_feedback() {
+        let mut ui = LoginUi::new(mock_users());
+        ui.set_status("Incorrect password");
+        assert_eq!(
+            ui.frame_for(TokenMode::light()).status,
+            "Incorrect password"
+        );
+
+        ui.push_password_char('x');
+        assert!(ui.status.is_empty());
+        assert!(ui.frame_for(TokenMode::light()).status.is_empty());
+    }
+
+    #[test]
+    fn switching_user_clears_feedback_along_with_the_password() {
+        let mut ui = LoginUi::new(mock_users());
+        ui.push_password_char('x');
+        ui.set_status("Incorrect password");
+
+        ui.select_user(1);
+        assert!(ui.password.is_empty());
+        assert!(ui.status.is_empty());
     }
 
     #[test]

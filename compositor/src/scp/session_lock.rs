@@ -372,9 +372,10 @@ impl SessionLockManager {
             return Err("Session lock has not engaged on every output yet".to_string());
         }
 
-        let lock = self.lock.take().expect("lock presence checked above");
-        tracing::info!(lock_id = lock.id, "session lock released");
-        Ok(lock.previous_focus)
+        let previous_focus = lock.previous_focus;
+        self.lock = None;
+        tracing::info!(lock_id, "session lock released");
+        Ok(previous_focus)
     }
 
     /// Give up the lock's client without unlocking the session.

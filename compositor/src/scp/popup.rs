@@ -2,6 +2,13 @@
 
 use crate::scp::protocol::{Edge, Gravity, PopupId, PopupPositioner, Rect, SessionId, SurfaceId};
 
+/// Popups one client may hold at once.
+///
+/// Menu chains are a handful deep in practice. The cap exists because popups are
+/// otherwise an unbounded allocation any application can drive, and each one
+/// takes part in every hit test.
+pub const MAX_POPUPS_PER_SESSION: usize = 32;
+
 /// Resolved popup geometry after constraint adjustment.
 ///
 /// Coordinates are relative to the popup's parent surface, matching the frame
@@ -95,6 +102,12 @@ impl PopupManager {
         parent_popup: Option<PopupId>,
         grab: bool,
     ) -> Result<PopupId, String> {
+        if self.session_popups(session_id) >= MAX_POPUPS_PER_SESSION {
+            return Err(format!(
+                "A session may hold at most {MAX_POPUPS_PER_SESSION} popups"
+            ));
+        }
+
         let id = self.next_id;
         self.next_id = self
             .next_id
@@ -125,6 +138,14 @@ impl PopupManager {
 
     pub fn len(&self) -> usize {
         self.popups.len()
+    }
+
+    /// Popups currently held by one client.
+    pub fn session_popups(&self, session_id: SessionId) -> usize {
+        self.popups
+            .values()
+            .filter(|popup| popup.session_id == session_id)
+            .count()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -275,6 +296,11 @@ impl PopupManager {
 /// therefore be the output rectangle translated into that frame, which is what
 /// lets a constraint compare a popup against a screen edge without either side
 /// needing to know where the parent sits on the layout.
+/// Every field of a [`PopupPositioner`] arrives from a client, so all of the
+/// arithmetic below is saturating. Wrapping here is not a rounding error: the
+/// result becomes a stack entry's absolute rectangle, and a wrapped one is a
+/// window in a place its client never asked for. In a build with overflow checks
+/// it is worse still — a panic taken while holding the compositor state lock.
 pub fn position_popup(positioner: &PopupPositioner, output_bounds: &Rect) -> PopupGeometry {
     let (mut x, mut y) = calculate_initial_position(positioner);
 
@@ -289,20 +315,51 @@ pub fn position_popup(positioner: &PopupPositioner, output_bounds: &Rect) -> Pop
     let mut width = positioner.size.0;
     let mut height = positioner.size.1;
 
-    if !is_fully_visible(&popup_rect, output_bounds)
-        && let Some(adjusted) = apply_constraints(positioner, &popup_rect, output_bounds)
-    {
+    if !is_fully_visible(&popup_rect, output_bounds) {
+        let adjusted = apply_constraints(positioner, &popup_rect, output_bounds);
         x = adjusted.x;
         y = adjusted.y;
         width = adjusted.width;
         height = adjusted.height;
     }
 
+    confine_to_output(
+        PopupGeometry {
+            x,
+            y,
+            width,
+            height,
+        },
+        output_bounds,
+    )
+}
+
+/// Confine a popup to the output it appears on.
+///
+/// A popup is chrome belonging to one window, not a way to paint the desktop. A
+/// client asking for a 10000×10000 popup at a far negative offset gets one the
+/// size of the output, placed inside it — the request is honored as far as it
+/// can be rather than refused, because clamping is what the constraint
+/// adjustments already do for smaller overshoots.
+fn confine_to_output(geometry: PopupGeometry, bounds: &Rect) -> PopupGeometry {
+    let width = geometry.width.clamp(1, bounds.width.max(1));
+    let height = geometry.height.clamp(1, bounds.height.max(1));
+
     PopupGeometry {
-        x,
-        y,
+        x: clamp_span(geometry.x, bounds.x, bounds.width, width),
+        y: clamp_span(geometry.y, bounds.y, bounds.height, height),
         width,
         height,
+    }
+}
+
+/// Clamp `position` so a `span`-long extent stays inside `[origin, origin+length)`.
+fn clamp_span(position: i32, origin: i32, length: i32, span: i32) -> i32 {
+    let limit = origin.saturating_add(length).saturating_sub(span);
+    if limit <= origin {
+        origin
+    } else {
+        position.clamp(origin, limit)
     }
 }
 
@@ -310,63 +367,72 @@ fn calculate_initial_position(positioner: &PopupPositioner) -> (i32, i32) {
     // Anchor rect is in parent-local coordinates, so use it directly
     let anchor_x = positioner.anchor_rect.x;
     let anchor_y = positioner.anchor_rect.y;
+    let half_width = positioner.anchor_rect.width / 2;
+    let half_height = positioner.anchor_rect.height / 2;
 
     // Calculate anchor point based on anchor edge
     let (anchor_px, anchor_py) = match positioner.anchor_edge {
-        Edge::Top => (anchor_x + positioner.anchor_rect.width / 2, anchor_y),
+        Edge::Top => (anchor_x.saturating_add(half_width), anchor_y),
         Edge::Bottom => (
-            anchor_x + positioner.anchor_rect.width / 2,
-            anchor_y + positioner.anchor_rect.height,
+            anchor_x.saturating_add(half_width),
+            anchor_y.saturating_add(positioner.anchor_rect.height),
         ),
-        Edge::Left => (anchor_x, anchor_y + positioner.anchor_rect.height / 2),
+        Edge::Left => (anchor_x, anchor_y.saturating_add(half_height)),
         Edge::Right => (
-            anchor_x + positioner.anchor_rect.width,
-            anchor_y + positioner.anchor_rect.height / 2,
+            anchor_x.saturating_add(positioner.anchor_rect.width),
+            anchor_y.saturating_add(half_height),
         ),
     };
+
+    let (width, height) = (positioner.size.0, positioner.size.1);
 
     // Apply gravity to determine popup position relative to anchor
     let (popup_x, popup_y) = match positioner.gravity {
         Gravity::None => (anchor_px, anchor_py),
         Gravity::Top => (
-            anchor_px - positioner.size.0 / 2,
-            anchor_py - positioner.size.1,
+            anchor_px.saturating_sub(width / 2),
+            anchor_py.saturating_sub(height),
         ),
-        Gravity::Bottom => (anchor_px - positioner.size.0 / 2, anchor_py),
+        Gravity::Bottom => (anchor_px.saturating_sub(width / 2), anchor_py),
         Gravity::Left => (
-            anchor_px - positioner.size.0,
-            anchor_py - positioner.size.1 / 2,
+            anchor_px.saturating_sub(width),
+            anchor_py.saturating_sub(height / 2),
         ),
-        Gravity::Right => (anchor_px, anchor_py - positioner.size.1 / 2),
-        Gravity::TopLeft => (anchor_px - positioner.size.0, anchor_py - positioner.size.1),
-        Gravity::TopRight => (anchor_px, anchor_py - positioner.size.1),
-        Gravity::BottomLeft => (anchor_px - positioner.size.0, anchor_py),
+        Gravity::Right => (anchor_px, anchor_py.saturating_sub(height / 2)),
+        Gravity::TopLeft => (
+            anchor_px.saturating_sub(width),
+            anchor_py.saturating_sub(height),
+        ),
+        Gravity::TopRight => (anchor_px, anchor_py.saturating_sub(height)),
+        Gravity::BottomLeft => (anchor_px.saturating_sub(width), anchor_py),
         Gravity::BottomRight => (anchor_px, anchor_py),
     };
 
-    (popup_x + positioner.offset.0, popup_y + positioner.offset.1)
+    (
+        popup_x.saturating_add(positioner.offset.0),
+        popup_y.saturating_add(positioner.offset.1),
+    )
 }
 
 fn is_fully_visible(rect: &Rect, bounds: &Rect) -> bool {
     rect.x >= bounds.x
         && rect.y >= bounds.y
-        && rect.x + rect.width <= bounds.x + bounds.width
-        && rect.y + rect.height <= bounds.y + bounds.height
+        && rect.x.saturating_add(rect.width) <= bounds.x.saturating_add(bounds.width)
+        && rect.y.saturating_add(rect.height) <= bounds.y.saturating_add(bounds.height)
 }
 
-fn apply_constraints(positioner: &PopupPositioner, popup: &Rect, bounds: &Rect) -> Option<Rect> {
+fn apply_constraints(positioner: &PopupPositioner, popup: &Rect, bounds: &Rect) -> Rect {
     let mut result = *popup;
     let constraint = &positioner.constraint;
+    let right = bounds.x.saturating_add(bounds.width);
+    let bottom = bounds.y.saturating_add(bounds.height);
 
     // Try flip adjustments first (most common)
-    if constraint.flip_x && (popup.x < bounds.x || popup.x + popup.width > bounds.x + bounds.width)
-    {
+    if constraint.flip_x && (popup.x < bounds.x || popup.x.saturating_add(popup.width) > right) {
         result.x = flip_horizontal(positioner);
     }
 
-    if constraint.flip_y
-        && (popup.y < bounds.y || popup.y + popup.height > bounds.y + bounds.height)
-    {
+    if constraint.flip_y && (popup.y < bounds.y || popup.y.saturating_add(popup.height) > bottom) {
         result.y = flip_vertical(positioner);
     }
 
@@ -374,58 +440,74 @@ fn apply_constraints(positioner: &PopupPositioner, popup: &Rect, bounds: &Rect) 
     if constraint.slide_x {
         if result.x < bounds.x {
             result.x = bounds.x;
-        } else if result.x + result.width > bounds.x + bounds.width {
-            result.x = bounds.x + bounds.width - result.width;
+        } else if result.x.saturating_add(result.width) > right {
+            result.x = right.saturating_sub(result.width);
         }
     }
 
     if constraint.slide_y {
         if result.y < bounds.y {
             result.y = bounds.y;
-        } else if result.y + result.height > bounds.y + bounds.height {
-            result.y = bounds.y + bounds.height - result.height;
+        } else if result.y.saturating_add(result.height) > bottom {
+            result.y = bottom.saturating_sub(result.height);
         }
     }
 
     // Try resize adjustments (last resort)
     if constraint.resize_x {
         if result.x < bounds.x {
-            result.width -= bounds.x - result.x;
+            result.width = result
+                .width
+                .saturating_sub(bounds.x.saturating_sub(result.x));
             result.x = bounds.x;
         }
-        if result.x + result.width > bounds.x + bounds.width {
-            result.width = bounds.x + bounds.width - result.x;
+        if result.x.saturating_add(result.width) > right {
+            result.width = right.saturating_sub(result.x);
         }
     }
 
     if constraint.resize_y {
         if result.y < bounds.y {
-            result.height -= bounds.y - result.y;
+            result.height = result
+                .height
+                .saturating_sub(bounds.y.saturating_sub(result.y));
             result.y = bounds.y;
         }
-        if result.y + result.height > bounds.y + bounds.height {
-            result.height = bounds.y + bounds.height - result.y;
+        if result.y.saturating_add(result.height) > bottom {
+            result.height = bottom.saturating_sub(result.y);
         }
     }
 
-    Some(result)
+    result
 }
 
 fn flip_horizontal(positioner: &PopupPositioner) -> i32 {
     let anchor_x = positioner.anchor_rect.x;
     match positioner.anchor_edge {
-        Edge::Left => anchor_x + positioner.anchor_rect.width + positioner.offset.0,
-        Edge::Right => anchor_x - positioner.size.0 - positioner.offset.0,
-        _ => anchor_x + positioner.anchor_rect.width / 2 - positioner.size.0 / 2,
+        Edge::Left => anchor_x
+            .saturating_add(positioner.anchor_rect.width)
+            .saturating_add(positioner.offset.0),
+        Edge::Right => anchor_x
+            .saturating_sub(positioner.size.0)
+            .saturating_sub(positioner.offset.0),
+        _ => anchor_x
+            .saturating_add(positioner.anchor_rect.width / 2)
+            .saturating_sub(positioner.size.0 / 2),
     }
 }
 
 fn flip_vertical(positioner: &PopupPositioner) -> i32 {
     let anchor_y = positioner.anchor_rect.y;
     match positioner.anchor_edge {
-        Edge::Top => anchor_y + positioner.anchor_rect.height + positioner.offset.1,
-        Edge::Bottom => anchor_y - positioner.size.1 - positioner.offset.1,
-        _ => anchor_y + positioner.anchor_rect.height / 2 - positioner.size.1 / 2,
+        Edge::Top => anchor_y
+            .saturating_add(positioner.anchor_rect.height)
+            .saturating_add(positioner.offset.1),
+        Edge::Bottom => anchor_y
+            .saturating_sub(positioner.size.1)
+            .saturating_sub(positioner.offset.1),
+        _ => anchor_y
+            .saturating_add(positioner.anchor_rect.height / 2)
+            .saturating_sub(positioner.size.1 / 2),
     }
 }
 

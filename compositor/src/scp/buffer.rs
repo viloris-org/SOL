@@ -6,6 +6,7 @@
 //! cross-application read rather than merely a naming collision.
 
 use crate::scp::{
+    memfd,
     protocol::{BufferId, PoolId, SessionId, ShmFormat},
     unix_socket,
 };
@@ -16,6 +17,17 @@ use std::collections::HashMap;
 /// The renderer maps a pool on the client's word about its size, so the value
 /// needs a ceiling. 256 MiB holds several double-buffered 4K surfaces.
 pub const MAX_POOL_SIZE: usize = 256 * 1024 * 1024;
+
+/// Pools one client may hold at once.
+///
+/// Each pool pins a descriptor, so an unbounded count exhausts the compositor's
+/// file-descriptor limit long before it exhausts memory — and a compositor that
+/// cannot open a descriptor cannot accept a connection either. Well beyond what
+/// a client double-buffering a few surfaces needs.
+pub const MAX_POOLS_PER_SESSION: usize = 64;
+
+/// Buffers one client may hold at once, across all of its pools.
+pub const MAX_BUFFERS_PER_SESSION: usize = 1024;
 
 /// Shared memory pool.
 #[derive(Debug)]
@@ -86,6 +98,41 @@ pub fn validate_geometry(
     Ok(size)
 }
 
+/// Check that a descriptor really backs `declared` bytes, and keeps doing so.
+///
+/// Two separate promises are needed before the renderer can map client memory:
+///
+/// 1. The file is at least as large as the client says. `fstat` answers that,
+///    rather than taking the declaration on trust.
+/// 2. It cannot become smaller afterwards. Without `F_SEAL_SHRINK` the check
+///    above is only true at the instant it runs — the client can `ftruncate`
+///    the memfd a moment later, and the compositor takes a SIGBUS reading a
+///    page that no longer exists. A client crashing its own process is its
+///    business; crashing the compositor ends every session on the machine.
+pub fn validate_descriptor(fd: i32, declared: usize) -> Result<(), String> {
+    if fd < 0 {
+        return Err("Invalid buffer file descriptor".to_string());
+    }
+
+    let actual = unix_socket::fd_size(fd)
+        .map_err(|error| format!("Cannot size the buffer descriptor: {error}"))?;
+    if u64::try_from(declared).unwrap_or(u64::MAX) > actual {
+        return Err(format!(
+            "Declared size {declared} exceeds the descriptor's {actual} bytes"
+        ));
+    }
+
+    if !memfd::is_shrink_sealed(fd) {
+        return Err(
+            "Buffer descriptors must be memfds sealed with F_SEAL_SHRINK so the mapping \
+             cannot be truncated out from under the compositor"
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 /// Buffer manager — tracks every client's SHM pools and buffers.
 #[derive(Debug, Default)]
 pub struct BufferManager {
@@ -126,6 +173,11 @@ impl BufferManager {
         if self.pools.contains_key(&(session_id, id)) {
             return Err("Pool ID already exists".to_string());
         }
+        if self.session_pools(session_id) >= MAX_POOLS_PER_SESSION {
+            return Err(format!(
+                "A session may hold at most {MAX_POOLS_PER_SESSION} shared-memory pools"
+            ));
+        }
         if size == 0 {
             return Err("Pool size must be positive".to_string());
         }
@@ -135,18 +187,10 @@ impl BufferManager {
             ));
         }
 
-        // The descriptor is authoritative about how much memory actually exists.
-        // Checking against it whenever one is present means the bounds test below
-        // stops depending on the client's declaration being honest.
-        if fd >= 0 {
-            let actual = unix_socket::fd_size(fd)
-                .map_err(|error| format!("Cannot size the pool descriptor: {error}"))?;
-            if u64::try_from(size).unwrap_or(u64::MAX) > actual {
-                return Err(format!(
-                    "Declared pool size {size} exceeds the descriptor's {actual} bytes"
-                ));
-            }
-        }
+        // The descriptor is authoritative about how much memory exists, and its
+        // seals about whether that stays true. A pool is a mapping the renderer
+        // will read from, so neither may be taken on the client's word.
+        validate_descriptor(fd, size)?;
 
         self.pools.insert(
             (session_id, id),
@@ -188,6 +232,11 @@ impl BufferManager {
     ) -> Result<(), String> {
         if self.buffers.contains_key(&(session_id, id)) {
             return Err("Buffer ID already exists".to_string());
+        }
+        if self.session_buffers(session_id) >= MAX_BUFFERS_PER_SESSION {
+            return Err(format!(
+                "A session may hold at most {MAX_BUFFERS_PER_SESSION} buffers"
+            ));
         }
         let pool = self
             .pools
@@ -268,6 +317,22 @@ impl BufferManager {
         self.pools.get(&(session_id, id))
     }
 
+    /// Pools currently held by one client.
+    pub fn session_pools(&self, session_id: SessionId) -> usize {
+        self.pools
+            .keys()
+            .filter(|(owner, _)| *owner == session_id)
+            .count()
+    }
+
+    /// Buffers currently held by one client.
+    pub fn session_buffers(&self, session_id: SessionId) -> usize {
+        self.buffers
+            .keys()
+            .filter(|(owner, _)| *owner == session_id)
+            .count()
+    }
+
     /// Drop every pool and buffer belonging to a departing client.
     ///
     /// Pools own their descriptors, so this is also what keeps a disconnect from
@@ -284,9 +349,33 @@ mod tests {
 
     const POOL: usize = 4096;
 
+    /// A shrink-sealed memfd of exactly `bytes` length, as a raw descriptor.
+    ///
+    /// This is the shape of descriptor a client has to send: sized to what it
+    /// declares, and sealed so it stays that size.
+    fn sealed_descriptor(bytes: usize) -> i32 {
+        let fd = unsealed_descriptor(bytes);
+        memfd::add_seals(fd, memfd::F_SEAL_SHRINK).expect("seal the memfd");
+        fd
+    }
+
+    /// A memfd of the right size that the client can still shrink.
+    fn unsealed_descriptor(bytes: usize) -> i32 {
+        use std::io::Write;
+        use std::os::unix::io::{FromRawFd, IntoRawFd};
+
+        let fd = memfd::create("pool-fixture", true).expect("create memfd");
+        // SAFETY: create returned a fresh owned descriptor nothing else holds.
+        let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+        file.write_all(&vec![0_u8; bytes]).expect("size the memfd");
+        file.into_raw_fd()
+    }
+
     fn manager_with_pool() -> BufferManager {
         let mut manager = BufferManager::new();
-        manager.create_pool(1, 1, -1, POOL).expect("create pool");
+        manager
+            .create_pool(1, 1, sealed_descriptor(POOL), POOL)
+            .expect("create pool");
         manager
     }
 
@@ -357,7 +446,7 @@ mod tests {
 
         // Another client may reuse the same numeric id for its own pool.
         manager
-            .create_pool(2, 1, -1, POOL)
+            .create_pool(2, 1, sealed_descriptor(POOL), POOL)
             .expect("pool ids are per-session");
 
         // But it cannot build a buffer out of session 1's pool, because the
@@ -390,7 +479,9 @@ mod tests {
         manager
             .create_buffer(1, 1, 1, 0, 16, 16, 64, ShmFormat::Argb8888)
             .expect("create buffer");
-        manager.create_pool(2, 1, -1, POOL).expect("other client");
+        manager
+            .create_pool(2, 1, sealed_descriptor(POOL), POOL)
+            .expect("other client");
 
         manager.destroy_session(1);
 
@@ -403,29 +494,68 @@ mod tests {
     fn rejects_an_absurd_pool_size() {
         let mut manager = BufferManager::new();
         let error = manager
-            .create_pool(1, 1, -1, MAX_POOL_SIZE + 1)
+            .create_pool(1, 1, sealed_descriptor(0), MAX_POOL_SIZE + 1)
             .expect_err("an oversized pool must be refused");
         assert!(error.contains("exceeds"), "unexpected: {error}");
     }
 
-    /// A memfd of exactly `bytes` length, as a raw descriptor.
-    fn sized_descriptor(bytes: usize) -> i32 {
-        use crate::scp::memfd;
-        use std::io::Write;
-        use std::os::unix::io::{FromRawFd, IntoRawFd};
+    #[test]
+    fn refuses_a_descriptor_the_client_can_still_shrink() {
+        let mut manager = BufferManager::new();
+        let error = manager
+            .create_pool(1, 1, unsealed_descriptor(POOL), POOL)
+            .expect_err("an unsealed pool must be refused");
+        assert!(error.contains("F_SEAL_SHRINK"), "unexpected: {error}");
+    }
 
-        let fd = memfd::create("pool-fixture", false).expect("create memfd");
-        // SAFETY: create returned a fresh owned descriptor nothing else holds.
-        let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
-        file.write_all(&vec![0_u8; bytes]).expect("size the memfd");
-        file.into_raw_fd()
+    #[test]
+    fn refuses_a_descriptor_that_cannot_be_sealed_at_all() {
+        // A socket is the shape of thing an attacker reaches for: it passes
+        // through SCM_RIGHTS like a memfd but has no size and no seals.
+        use std::os::unix::io::IntoRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let (socket, _peer) = UnixStream::pair().expect("create socket pair");
+        let mut manager = BufferManager::new();
+        let error = manager
+            .create_pool(1, 1, socket.into_raw_fd(), POOL)
+            .expect_err("a socket is not shared memory");
+        assert!(
+            error.contains("exceeds the descriptor") || error.contains("F_SEAL_SHRINK"),
+            "unexpected: {error}"
+        );
+    }
+
+    #[test]
+    fn refuses_more_pools_than_a_session_may_hold() {
+        let mut manager = BufferManager::new();
+        for id in 0..MAX_POOLS_PER_SESSION {
+            manager
+                .create_pool(1, id as PoolId, sealed_descriptor(POOL), POOL)
+                .expect("pools within the limit");
+        }
+
+        let error = manager
+            .create_pool(
+                1,
+                MAX_POOLS_PER_SESSION as PoolId,
+                sealed_descriptor(POOL),
+                POOL,
+            )
+            .expect_err("the limit must hold");
+        assert!(error.contains("at most"), "unexpected: {error}");
+
+        // The cap is per session, not global.
+        manager
+            .create_pool(2, 0, sealed_descriptor(POOL), POOL)
+            .expect("another client is unaffected");
     }
 
     #[test]
     fn checks_a_declared_size_against_the_real_descriptor() {
         let mut manager = BufferManager::new();
         let error = manager
-            .create_pool(1, 1, sized_descriptor(512), 4096)
+            .create_pool(1, 1, sealed_descriptor(512), 4096)
             .expect_err("a declaration larger than the descriptor must be refused");
         assert!(
             error.contains("exceeds the descriptor"),
@@ -433,7 +563,7 @@ mod tests {
         );
 
         manager
-            .create_pool(1, 1, sized_descriptor(4096), 4096)
+            .create_pool(1, 1, sealed_descriptor(4096), 4096)
             .expect("a declaration the descriptor covers is accepted");
     }
 }

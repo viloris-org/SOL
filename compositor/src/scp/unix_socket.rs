@@ -50,8 +50,13 @@ pub fn recvmsg_with_fds(
         if cmsg_ref.cmsg_level == libc::SOL_SOCKET && cmsg_ref.cmsg_type == libc::SCM_RIGHTS {
             // SAFETY: CMSG_DATA points to the file descriptor array
             let data_ptr = unsafe { libc::CMSG_DATA(cmsg) } as *const RawFd;
-            let data_len = cmsg_ref.cmsg_len as usize - unsafe { libc::CMSG_LEN(0) } as usize;
-            let fd_count = data_len / std::mem::size_of::<RawFd>();
+            // The kernel never reports a cmsg_len below the header size, but a
+            // plain subtraction would turn any such value into a huge count and
+            // read past the buffer. Saturating costs nothing and removes the
+            // question.
+            let data_len =
+                (cmsg_ref.cmsg_len as usize).saturating_sub(unsafe { libc::CMSG_LEN(0) } as usize);
+            let fd_count = (data_len / std::mem::size_of::<RawFd>()).min(max_fds);
 
             for i in 0..fd_count {
                 let fd = unsafe { *data_ptr.add(i) };

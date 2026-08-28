@@ -11,7 +11,7 @@ protocols to the compositor, shell, and apps.
 | `sol-notificationd` | `services/sol-notificationd/` | Typed notification daemon, `org.sol.Notifications1`, and freedesktop notification interoperability | Phase 4; native surface and real action callback delivery pending |
 | `sol-portal` | `services/sol-portal/` | Permission-bound document/capture authorization and `org.sol.Portal1` session-bus adapter | Phase 5 foundation; XDG portal/PipeWire adapters pending |
 | `sol-ime` | `services/sol-ime/` | First-party IME frontend + fcitx5 engine bridge | Phase 0 scaffold → Phase 1 |
-| `sol-logind` | `services/sol-logind/` | macOS-inspired login screen with user selection and authentication | Phase 1 visual-only; PAM integration pending |
+| `sol-logind` | `services/sol-logind/` | Login screen and authentication, presented as the SCP session-lock client | PAM and SCP lock complete; compositor renderer/input backend pending |
 | `sol-diagnostics` | `services/sol-diagnostics/` | Typed, redacted, bounded local diagnostics store | Phase 5 foundation |
 | `sol-ntpd` | `services/sol-ntpd/` | NTPv4/NTS time sampling, authenticated source selection, and bounded privileged clock synchronization | NTS complete; frequency discipline pending |
 | `sol-networkd` | `services/sol-networkd/` | Network device management, connection profiles, DHCP client, DNS integration, and connectivity monitoring over `org.sol.Network1` | Phase 1 complete; WiFi scanning/auth and VPN pending Phase 2 |

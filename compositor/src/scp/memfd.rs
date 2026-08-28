@@ -12,6 +12,7 @@ const MFD_ALLOW_SEALING: u32 = 0x0002;
 
 // fcntl sealing constants
 pub const F_ADD_SEALS: i32 = 1033;
+pub const F_GET_SEALS: i32 = 1034;
 pub const F_SEAL_SHRINK: i32 = 0x0002;
 pub const F_SEAL_GROW: i32 = 0x0004;
 pub const F_SEAL_WRITE: i32 = 0x0008;
@@ -58,6 +59,31 @@ pub fn add_seals(fd: RawFd, seals: i32) -> io::Result<()> {
 /// This makes the fd effectively read-only and immutable.
 pub fn seal_readonly(fd: RawFd) -> io::Result<()> {
     add_seals(fd, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE)
+}
+
+/// Read the seals currently set on a descriptor.
+///
+/// Fails with `EINVAL` for anything that does not support sealing, which is how
+/// a caller distinguishes a sealable memfd from an ordinary file or socket.
+pub fn seals(fd: RawFd) -> io::Result<i32> {
+    // SAFETY: fcntl F_GET_SEALS takes no argument and returns the seal bits.
+    let result = unsafe { libc::fcntl(fd, F_GET_SEALS) };
+
+    if result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(result)
+}
+
+/// Whether a descriptor can no longer be shrunk by whoever else holds it.
+///
+/// This is what makes a client's shared memory safe to map: without
+/// `F_SEAL_SHRINK` the client can `ftruncate` the file after the compositor has
+/// checked its size, and the next read of a page past the new end raises SIGBUS
+/// — in the compositor, not in the client.
+pub fn is_shrink_sealed(fd: RawFd) -> bool {
+    seals(fd).is_ok_and(|seals| seals & F_SEAL_SHRINK != 0)
 }
 
 #[cfg(test)]

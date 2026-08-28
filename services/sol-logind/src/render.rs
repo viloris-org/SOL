@@ -1,8 +1,31 @@
-//! Slint rendering for the login UI.
+//! Slint rendering for the login UI, targeting an SCP lock surface.
+//!
+//! There is no windowing backend here. The compositor owns the display, so the
+//! login screen installs a custom Slint [`Platform`] whose only window is a
+//! [`MinimalSoftwareWindow`], and rasterizes into the shared buffer that goes
+//! over SCP with `AttachBuffer`.
+//!
+//! Two consequences worth knowing:
+//!
+//! - There is no Slint event loop. Frames are drawn when the caller asks
+//!   ([`LoginRenderer::draw_into`]), and `slint::quit_event_loop` must never be
+//!   called — without an event-loop proxy it panics. The login button records an
+//!   action for the caller to notice instead.
+//! - The password field does not edit text. `LoginUi` owns the password and
+//!   hands over a string that is already masked or revealed; keystrokes never
+//!   enter Slint's text-input stack.
 
 use std::{cell::Cell, rc::Rc};
 
-use crate::ui::LoginFrame;
+use slint::{
+    ComponentHandle, LogicalPosition, Model, PhysicalSize,
+    platform::{
+        Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent,
+        software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+    },
+};
+
+use crate::{scp::FrameBuffer, ui::LoginFrame};
 
 slint::slint! {
     export struct UserRow {
@@ -58,17 +81,20 @@ slint::slint! {
         }
     }
 
+    // Displays the password; it does not edit it. The login service owns the
+    // text and decides whether it arrives masked, so that a typed password
+    // never passes through a UI toolkit's input handling.
     component PasswordField inherits Rectangle {
         in property <string> password;
+        in property <string> placeholder;
         in property <bool> password-visible;
         in property <color> bg;
         in property <color> text-color;
+        in property <color> placeholder-color;
         in property <color> brd-color;
         in property <length> corner-radius;
         in property <length> font-size;
-        callback text-changed(string);
         callback toggle-visibility();
-        callback submit();
 
         height: 48px;
         border-radius: root.corner-radius;
@@ -81,15 +107,13 @@ slint::slint! {
             padding-right: 16px;
             spacing: 8px;
 
-            input := TextInput {
-                text: root.password;
-                color: root.text-color;
+            Text {
+                text: root.password.character-count > 0 ? root.password : root.placeholder;
+                color: root.password.character-count > 0 ? root.text-color : root.placeholder-color;
                 font-size: root.font-size;
-                input-type: root.password-visible ? InputType.text : InputType.password;
                 horizontal-alignment: left;
                 vertical-alignment: center;
-                edited => { root.text-changed(self.text); }
-                accepted => { root.submit(); }
+                overflow: elide;
             }
 
             Rectangle {
@@ -146,6 +170,7 @@ slint::slint! {
         in property <string> password;
         in property <bool> password-visible;
         in property <bool> can-login;
+        in property <string> status;
         in property <color> page-background;
         in property <color> panel-background;
         in property <color> text-primary;
@@ -166,7 +191,6 @@ slint::slint! {
         in property <length> spacing-xlarge;
 
         callback user-selected(int);
-        callback password-changed(string);
         callback toggle-password-visibility();
         callback login-clicked();
 
@@ -218,15 +242,15 @@ slint::slint! {
                     // Password field
                     PasswordField {
                         password: root.password;
+                        placeholder: "Password";
                         password-visible: root.password-visible;
                         bg: root.elevated;
                         text-color: root.text-primary;
+                        placeholder-color: root.text-secondary;
                         brd-color: root.border;
                         corner-radius: root.control-radius;
                         font-size: root.body-size;
-                        text-changed(text) => { root.password-changed(text); }
                         toggle-visibility => { root.toggle-password-visibility(); }
-                        submit => { if root.can-login { root.login-clicked(); } }
                     }
 
                     // Login button
@@ -239,122 +263,225 @@ slint::slint! {
                         font-size: root.label-size;
                         clicked => { root.login-clicked(); }
                     }
+
+                    // Authentication feedback, empty when there is nothing to say.
+                    Text {
+                        text: root.status;
+                        color: root.text-secondary;
+                        font-size: root.label-size;
+                        horizontal-alignment: center;
+                    }
                 }
             }
         }
     }
 }
 
-/// Result of running the login screen.
+/// A request from the on-screen controls.
+///
+/// Only the login button produces one today; the system actions the design calls
+/// for (sleep, shut down) will join it here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginAction {
-    /// User successfully authenticated.
-    Authenticated,
-    /// Window was dismissed without logging in.
-    Dismissed,
+    /// Submit the entered credentials.
+    Authenticate,
 }
 
-/// Slint-backed login screen renderer.
+thread_local! {
+    /// The one window this platform ever creates.
+    ///
+    /// Full repaints every frame: the buffer is reallocated on resize and the
+    /// compositor may still be reading the previous one, so assuming the target
+    /// still holds the last frame — what `ReusedBuffer` requires — would be
+    /// wrong.
+    static WINDOW: Rc<MinimalSoftwareWindow> =
+        MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+}
+
+/// A Slint platform with no event loop and no display of its own.
+struct ScpPlatform;
+
+impl Platform for ScpPlatform {
+    fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
+        WINDOW.with(|window| Ok(window.clone() as Rc<dyn WindowAdapter>))
+    }
+}
+
+/// Install [`ScpPlatform`] for this thread, once.
+///
+/// Slint's platform is per-thread and can only be set before the first
+/// component is created, so this must run before [`LoginScreen::new`]. A second
+/// call is a no-op rather than an error, which is what lets several tests each
+/// build a renderer.
+fn install_platform() -> Result<(), String> {
+    thread_local! {
+        static INSTALLED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    INSTALLED.with(|installed| {
+        if installed.get() {
+            return Ok(());
+        }
+        slint::platform::set_platform(Box::new(ScpPlatform))
+            .map_err(|error| format!("could not install the SCP Slint platform: {error}"))?;
+        installed.set(true);
+        Ok(())
+    })
+}
+
+/// Draws the login UI into a shared buffer and turns pointer input into actions.
 pub struct LoginRenderer {
     screen: LoginScreen,
+    window: Rc<MinimalSoftwareWindow>,
+    /// The avatar row model, held rather than rebuilt.
+    ///
+    /// `ModelRc` compares by pointer, so handing Slint a freshly allocated model
+    /// each frame reads as a change every time — which redraws the whole surface
+    /// on a login screen that is doing nothing at all.
+    users: Rc<slint::VecModel<UserRow>>,
+    action: Rc<Cell<Option<LoginAction>>>,
+    /// Last pointer position, because SCP reports button presses without one.
+    pointer: Rc<Cell<(f32, f32)>>,
 }
 
 impl LoginRenderer {
-    /// Create a new login renderer.
+    /// Create the renderer, installing the software platform on this thread.
     pub fn new() -> Result<Self, String> {
-        LoginScreen::new()
-            .map(|screen| Self { screen })
-            .map_err(|error| error.to_string())
+        install_platform()?;
+        let window = WINDOW.with(Rc::clone);
+        let screen = LoginScreen::new().map_err(|error| error.to_string())?;
+        let users = Rc::new(slint::VecModel::from(Vec::<UserRow>::new()));
+        screen.set_users(users.clone().into());
+        screen.show().map_err(|error| error.to_string())?;
+
+        Ok(Self {
+            screen,
+            window,
+            users,
+            action: Rc::new(Cell::new(None)),
+            pointer: Rc::new(Cell::new((0.0, 0.0))),
+        })
     }
 
-    /// Apply a resolved login UI frame.
+    /// Wire the callbacks the on-screen controls fire.
+    ///
+    /// Keyboard input is deliberately absent: it goes straight to `LoginUi`.
+    /// Only pointer-driven controls need a callback, because Slint is the one
+    /// that knows where the avatars and buttons ended up.
+    pub fn connect(
+        &self,
+        on_user_selected: impl Fn(usize) + 'static,
+        on_toggle_visibility: impl Fn() + 'static,
+    ) {
+        self.screen
+            .on_user_selected(move |index| on_user_selected(index.max(0) as usize));
+        self.screen
+            .on_toggle_password_visibility(on_toggle_visibility);
+
+        let action = Rc::clone(&self.action);
+        self.screen.on_login_clicked(move || {
+            action.set(Some(LoginAction::Authenticate));
+        });
+    }
+
+    /// Match the surface geometry the compositor configured.
+    pub fn resize(&self, width: i32, height: i32) {
+        let width = u32::try_from(width).unwrap_or(0);
+        let height = u32::try_from(height).unwrap_or(0);
+        self.window.set_size(PhysicalSize::new(width, height));
+        self.window.request_redraw();
+    }
+
+    /// Push a resolved frame into the live Slint properties.
+    ///
+    /// Cheap to call every iteration: Slint compares each property and only
+    /// marks the scene dirty when a value really changed, so an idle login
+    /// screen stops redrawing after its first frame.
     pub fn render(&self, frame: &LoginFrame) {
+        self.apply_users(frame);
         apply_frame(&self.screen, frame);
     }
 
-    /// Run the login screen until authentication or dismissal.
-    ///
-    /// `refresh` is called after every user-driven state change (selection,
-    /// password edit, visibility toggle) to recompute the frame and re-push
-    /// it into the live Slint properties — otherwise things like `can-login`
-    /// would stay frozen at whatever they were when `render()` was last
-    /// called explicitly.
-    pub fn run_until_action(
-        &self,
-        on_user_selected: impl Fn(usize) + 'static,
-        on_password_changed: impl Fn(String) + 'static,
-        on_toggle_visibility: impl Fn() + 'static,
-        on_login: impl Fn() + 'static,
-        refresh: impl Fn() -> LoginFrame + 'static,
-    ) -> Result<LoginAction, String> {
-        let result = Rc::new(Cell::new(LoginAction::Dismissed));
-        let refresh = Rc::new(refresh);
+    /// Refresh the avatar row, but only when it differs from what is displayed.
+    fn apply_users(&self, frame: &LoginFrame) {
+        let rows: Vec<UserRow> = frame
+            .users
+            .iter()
+            .enumerate()
+            .map(|(index, user)| UserRow {
+                username: user.username.clone().into(),
+                display_name: user.display_name().into(),
+                selected: index == frame.selected_user_index,
+            })
+            .collect();
 
-        // Connect user selection
-        {
-            let weak = self.screen.as_weak();
-            let refresh = Rc::clone(&refresh);
-            self.screen.on_user_selected(move |index| {
-                on_user_selected(index as usize);
-                if let Some(screen) = weak.upgrade() {
-                    apply_frame(&screen, &refresh());
-                }
-            });
+        if self.users.iter().eq(rows.iter().cloned()) {
+            return;
         }
+        self.users.set_vec(rows);
+    }
 
-        // Connect password changes
-        {
-            let weak = self.screen.as_weak();
-            let refresh = Rc::clone(&refresh);
-            self.screen.on_password_changed(move |text| {
-                on_password_changed(text.to_string());
-                if let Some(screen) = weak.upgrade() {
-                    apply_frame(&screen, &refresh());
-                }
-            });
-        }
-
-        // Connect visibility toggle
-        {
-            let weak = self.screen.as_weak();
-            let refresh = Rc::clone(&refresh);
-            self.screen.on_toggle_password_visibility(move || {
-                on_toggle_visibility();
-                if let Some(screen) = weak.upgrade() {
-                    apply_frame(&screen, &refresh());
-                }
-            });
-        }
-
-        // Connect login button
-        let login_result = Rc::clone(&result);
-        self.screen.on_login_clicked(move || {
-            on_login();
-            login_result.set(LoginAction::Authenticated);
-            let _ = slint::quit_event_loop();
+    /// Note a new pointer position and let Slint update hover state.
+    pub fn pointer_moved(&self, x: f64, y: f64) {
+        self.pointer.set((x as f32, y as f32));
+        self.window.dispatch_event(WindowEvent::PointerMoved {
+            position: LogicalPosition::new(x as f32, y as f32),
         });
+    }
 
-        self.screen.run().map_err(|error| error.to_string())?;
-        Ok(result.get())
+    /// Deliver a pointer button at the last known position.
+    pub fn pointer_button(&self, pressed: bool) {
+        let (x, y) = self.pointer.get();
+        let position = LogicalPosition::new(x, y);
+        let button = PointerEventButton::Left;
+        self.window.dispatch_event(if pressed {
+            WindowEvent::PointerPressed { position, button }
+        } else {
+            WindowEvent::PointerReleased { position, button }
+        });
+    }
+
+    /// Report that the login screen has, or has lost, keyboard focus.
+    pub fn set_active(&self, active: bool) {
+        self.window
+            .dispatch_event(WindowEvent::WindowActiveChanged(active));
+    }
+
+    /// Advance animations and timers. Call once per loop iteration.
+    pub fn tick(&self) {
+        slint::platform::update_timers_and_animations();
+    }
+
+    /// Force the next [`Self::draw_into`] to redraw.
+    pub fn invalidate(&self) {
+        self.window.request_redraw();
+    }
+
+    /// Rasterize into `buffer`, returning whether anything was drawn.
+    ///
+    /// `false` means the scene is unchanged and the previous frame still stands,
+    /// so there is nothing new to hand the compositor.
+    pub fn draw_into(&self, buffer: &mut FrameBuffer) -> bool {
+        let pixel_stride = buffer.pixel_stride();
+        let pixels = buffer.pixels();
+        self.window.draw_if_needed(|renderer| {
+            // The returned dirty region is not useful here: SCP damage covers
+            // the whole surface because the buffer is redrawn in full.
+            let _ = renderer.render(pixels, pixel_stride);
+        })
+    }
+
+    /// Take the pending action, if the user asked for one.
+    pub fn take_action(&self) -> Option<LoginAction> {
+        self.action.take()
     }
 }
 
 /// Push a resolved login UI frame into the live Slint screen properties.
+///
+/// The avatar model is handled by [`LoginRenderer::apply_users`]; everything here
+/// is a scalar, string, or color that Slint compares for itself.
 fn apply_frame(screen: &LoginScreen, frame: &LoginFrame) {
-    // Convert all users to UserRow model
-    let user_rows: Vec<UserRow> = frame
-        .users
-        .iter()
-        .enumerate()
-        .map(|(index, user)| UserRow {
-            username: user.username.clone().into(),
-            display_name: user.display_name().into(),
-            selected: index == frame.selected_user_index,
-        })
-        .collect();
-
-    screen.set_users(slint::ModelRc::new(slint::VecModel::from(user_rows)));
-
     // Set selected user name
     if let Some(user) = &frame.selected_user {
         screen.set_selected_user_name(user.display_name().into());
@@ -364,6 +491,7 @@ fn apply_frame(screen: &LoginScreen, frame: &LoginFrame) {
     screen.set_password(frame.password.clone().into());
     screen.set_password_visible(frame.password_visible);
     screen.set_can_login(frame.can_login);
+    screen.set_status(frame.status.clone().into());
 
     // Set colors
     screen.set_page_background(to_slint_color(frame.page_background));
@@ -397,4 +525,134 @@ fn to_slint_color(rgba: sol_design::color::Rgba) -> slint::Color {
         (rgba.1 * 255.0) as u8,
         (rgba.2 * 255.0) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ui::LoginUi, users::UserAccount};
+    use sol_design::accessibility::TokenMode;
+
+    fn frame() -> LoginFrame {
+        let ui = LoginUi::new(vec![
+            UserAccount::new("jdoe".into(), "John Doe".into(), 1000),
+            UserAccount::new("asmith".into(), "Ann Smith".into(), 1001),
+        ]);
+        ui.frame_for(TokenMode::light())
+    }
+
+    #[test]
+    fn rasterizes_the_login_screen_into_a_shared_buffer() {
+        let renderer = LoginRenderer::new().expect("build the software renderer");
+        let mut buffer = FrameBuffer::new(640, 480).expect("allocate frame buffer");
+
+        renderer.resize(640, 480);
+        renderer.render(&frame());
+        renderer.tick();
+
+        assert!(
+            renderer.draw_into(&mut buffer),
+            "the first frame must be drawn"
+        );
+
+        // A blank buffer would still be "drawn", so check that real pixels
+        // landed: every pixel opaque, and more than one distinct color.
+        let pixels = buffer.pixels();
+        assert!(
+            pixels.iter().all(|pixel| pixel.alpha == u8::MAX),
+            "the login screen must cover its whole surface opaquely"
+        );
+        let distinct = pixels
+            .iter()
+            .map(|pixel| (pixel.red, pixel.green, pixel.blue))
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            distinct.len() > 2,
+            "expected a rendered UI, got {} distinct colors",
+            distinct.len()
+        );
+    }
+
+    #[test]
+    fn an_unchanged_scene_is_not_redrawn() {
+        let renderer = LoginRenderer::new().expect("build the software renderer");
+        let mut buffer = FrameBuffer::new(320, 240).expect("allocate frame buffer");
+        renderer.resize(320, 240);
+        renderer.render(&frame());
+        assert!(renderer.draw_into(&mut buffer), "first frame draws");
+        assert!(
+            !renderer.draw_into(&mut buffer),
+            "a second draw with no change must be skipped"
+        );
+
+        // The login loop re-applies the frame every iteration. Doing so with
+        // identical content must not dirty the scene, or an idle greeter
+        // re-rasterizes its whole surface several times a second forever.
+        for _ in 0..3 {
+            renderer.render(&frame());
+            renderer.tick();
+            assert!(
+                !renderer.draw_into(&mut buffer),
+                "re-applying an identical frame must not request a redraw"
+            );
+        }
+    }
+
+    #[test]
+    fn a_property_change_requests_a_new_frame() {
+        let renderer = LoginRenderer::new().expect("build the software renderer");
+        let mut buffer = FrameBuffer::new(320, 240).expect("allocate frame buffer");
+        renderer.resize(320, 240);
+
+        let mut ui = LoginUi::new(vec![UserAccount::new(
+            "jdoe".into(),
+            "John Doe".into(),
+            1000,
+        )]);
+        renderer.render(&ui.frame_for(TokenMode::light()));
+        assert!(renderer.draw_into(&mut buffer), "first frame draws");
+
+        ui.set_password("secret".into());
+        renderer.render(&ui.frame_for(TokenMode::light()));
+        assert!(
+            renderer.draw_into(&mut buffer),
+            "a changed password must produce a new frame"
+        );
+    }
+
+    #[test]
+    fn the_login_button_records_an_action() {
+        let renderer = LoginRenderer::new().expect("build the software renderer");
+        renderer.connect(|_| {}, || {});
+        assert_eq!(renderer.take_action(), None);
+
+        // Invoking the callback is what a click on the button ends up doing.
+        renderer.screen.invoke_login_clicked();
+        assert_eq!(renderer.take_action(), Some(LoginAction::Authenticate));
+        assert_eq!(renderer.take_action(), None, "an action is taken only once");
+    }
+
+    #[test]
+    fn pointer_callbacks_reach_the_login_state() {
+        let renderer = LoginRenderer::new().expect("build the software renderer");
+        let selected = Rc::new(Cell::new(usize::MAX));
+        let toggled = Rc::new(Cell::new(0_u32));
+
+        renderer.connect(
+            {
+                let selected = Rc::clone(&selected);
+                move |index| selected.set(index)
+            },
+            {
+                let toggled = Rc::clone(&toggled);
+                move || toggled.set(toggled.get() + 1)
+            },
+        );
+
+        renderer.screen.invoke_user_selected(1);
+        renderer.screen.invoke_toggle_password_visibility();
+
+        assert_eq!(selected.get(), 1);
+        assert_eq!(toggled.get(), 1);
+    }
 }

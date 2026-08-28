@@ -21,8 +21,8 @@ fn full_login_flow() {
     let result = service.authenticate();
     assert!(result.is_ok(), "Authentication should succeed with stub");
 
-    let token = result.unwrap();
-    assert_eq!(token.username, service.ui.users[0].username);
+    let outcome = result.unwrap();
+    assert_eq!(outcome.token.username, service.ui.users[0].username);
     assert_eq!(service.ui.state, LoginState::Authenticated);
 }
 
@@ -47,7 +47,7 @@ fn login_flow_with_user_switching() {
     service.ui.set_password("password2".into());
     let result = service.authenticate();
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().username, second_user);
+    assert_eq!(result.unwrap().token.username, second_user);
 }
 
 #[test]

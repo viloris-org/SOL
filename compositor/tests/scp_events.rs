@@ -11,6 +11,9 @@
 //! is blocked in `poll`. That is the path being verified: enqueue → eventfd →
 //! wake → frame on the wire, including descriptor passing via SCM_RIGHTS.
 
+// `expect` in a test is a deliberate assertion, not an unhandled error.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use serial_test::serial;
 use sol_compositor::scp::{
     ScpState,

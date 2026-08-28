@@ -2,15 +2,20 @@
 
 ## What Was Built
 
-A macOS-inspired login screen service (`sol-logind`) for SOL OS, implemented as a system service that runs before the user session.
+A macOS-inspired login screen service (`sol-logind`) for SOL OS, presented as an
+SCP session-lock client of a running compositor.
 
 ## Architecture
 
 **Location**: `services/sol-logind/` - System service
-- Runs before compositor/shell (like a display manager)
+- Runs *after* the compositor and connects to it over SCP; it opens no display of
+  its own (ADR-0028)
+- Holds `Capability::SessionLock`, which the compositor reserves for this service
+  by name and grants to nothing else
 - Built with SolKit components (`sol-ui`, `sol-design`)
-- Renderer-neutral UI state machine
-- Authentication stub for Phase 1 development
+- Renderer-neutral UI state machine, rasterized by Slint's software renderer into
+  a shared buffer
+- Real PAM authentication, with a stub mode for development
 
 ## Components Created
 
@@ -21,12 +26,20 @@ services/sol-logind/
 ├── README.md                     # Architecture and design documentation
 ├── src/
 │   ├── lib.rs                    # LoginService - main service logic
-│   ├── main.rs                   # Service entry point
+│   ├── main.rs                   # connect → lock → render → authenticate loop
 │   ├── ui.rs                     # LoginUi - renderer-neutral state machine
-│   ├── auth.rs                   # AuthService - authentication stub
-│   └── users.rs                  # UserService - user enumeration
+│   ├── render.rs                 # Slint software renderer, custom platform
+│   ├── auth.rs                   # AuthService - PAM authentication
+│   ├── users.rs                  # UserService - user enumeration
+│   ├── session.rs                # launches the authenticated user's session
+│   └── scp/
+│       ├── lock.rs               # session-lock handshake state machine
+│       ├── client.rs             # socket, framing, SCM_RIGHTS buffer handoff
+│       ├── buffer.rs             # memfd the UI rasterizes into
+│       └── keys.rs               # XKB keycode → character
 └── tests/
-    └── login_flow.rs             # Integration tests
+    ├── login_flow.rs             # UI/auth integration tests
+    └── scp_lock.rs               # lock handshake against a real ScpState
 ```
 
 ### Key Features Implemented
@@ -45,11 +58,11 @@ services/sol-logind/
 - Phase 2 ready: Structure supports real /etc/passwd reading
 
 **Authentication** (`src/auth.rs`):
-- `AuthService` with stub implementation
-- Always succeeds in Phase 1 for development
+- `AuthService` over PAM, with a stub mode (`--dev`) that always succeeds
 - Returns `AuthToken` with username and session ID
+- Holds the PAM session open for the desktop session's whole lifetime, closing it
+  only once that session ends
 - Logs all authentication attempts
-- Ready for Phase 2 PAM integration
 
 **Service Integration** (`src/lib.rs`):
 - `LoginService` coordinates all components
@@ -70,26 +83,33 @@ All visual styling uses sol-design tokens:
 
 ## Test Coverage
 
-**23 tests total, all passing**:
+**82 tests total, all passing** (`cargo test -p sol-logind`):
 
-**Unit tests** (18):
-- UI state machine (8 tests)
-- User service (3 tests)  
-- Auth service (3 tests)
-- Login service (4 tests)
+**Unit tests** (69): UI state machine and password editing, user service, auth
+service, login service, the lock handshake state machine, keycode decoding, the
+shared frame buffer, frame splitting, and three that rasterize the login screen
+into a buffer and check real pixels landed.
 
-**Integration tests** (5):
-- Full login flow end-to-end
-- User switching behavior
-- Password validation
-- Authentication state progression
-- Password visibility toggle
+**Integration tests** (13):
+- `login_flow.rs` (5) — login flow, user switching, password validation,
+  authentication state, visibility toggle
+- `scp_lock.rs` (8) — the lock handshake driven through a real `ScpState`:
+  reaching `SessionLocked`, exclusive keyboard focus, typed keys becoming a
+  password, a rendered frame accepted as a lock-surface buffer, unlock/relock,
+  a crashed greeter leaving the session locked, and both ways an unauthorized
+  process is turned away
 
 ## Running the Service
 
+The compositor must be running first, and must trust the local build to claim
+the reserved `sol-logind` identity:
+
 ```bash
-# Run the service (Phase 1 standalone mode)
-cargo run -p sol-logind
+# Terminal 1
+SOL_SCP_TRUSTED_BIN_DIR=$PWD/target/debug cargo run -p sol-compositor
+
+# Terminal 2 — mock users, stub auth
+cargo run -p sol-logind -- --dev
 
 # Run all tests
 cargo test -p sol-logind
@@ -100,13 +120,14 @@ cargo check -p sol-logind
 
 **Current output**:
 ```
-INFO sol_logind: SOL Login Service starting
+INFO sol_logind: SOL login service starting
+INFO sol_logind: running in DEVELOPMENT mode (mock users, stub auth)
 INFO sol_logind::users: Loaded 3 user accounts
-INFO sol_logind: Login service started
-INFO sol_logind: Login screen initialized
-INFO sol_logind: Selected user: John Appleseed
-INFO sol_logind: Phase 1: Visual-only mode - authentication stub active
+INFO sol_logind: login screen initialized users=3
+INFO sol_logind::scp::client: session locked; login screen owns the screen and keyboard width=1920 height=1080
 ```
+
+Nothing appears on screen: the compositor has no renderer or input backend yet.
 
 ## Integration Points
 

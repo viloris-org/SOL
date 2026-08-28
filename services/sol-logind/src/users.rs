@@ -23,16 +23,30 @@ pub struct UserAccount {
     pub avatar_path: Option<PathBuf>,
     /// User ID.
     pub uid: u32,
+    /// Primary group ID.
+    pub gid: u32,
+    /// Home directory.
+    pub home_dir: PathBuf,
+    /// Login shell.
+    pub shell: PathBuf,
 }
 
 impl UserAccount {
     /// Create a new user account.
+    ///
+    /// `gid`/`home_dir`/`shell` default to values derived from `uid`/
+    /// `username` rather than the real account record — callers that need
+    /// the real values (the system user-loading path) set them directly.
     pub fn new(username: String, full_name: String, uid: u32) -> Self {
+        let home_dir = PathBuf::from(format!("/home/{username}"));
         Self {
             username,
             full_name,
             avatar_path: None,
             uid,
+            gid: uid,
+            home_dir,
+            shell: PathBuf::from("/bin/sh"),
         }
     }
 
@@ -134,6 +148,9 @@ impl UserService {
                 full_name,
                 avatar_path,
                 uid,
+                gid: user.primary_group_id(),
+                home_dir: user.home_dir().to_path_buf(),
+                shell: user.shell().to_path_buf(),
             };
 
             users.push(account);

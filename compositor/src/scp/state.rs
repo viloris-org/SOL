@@ -361,19 +361,22 @@ impl ScpState {
             return stack;
         }
 
-        self.push_layer_entries(&mut stack, Layer::Overlay);
-        self.push_layer_entries(&mut stack, Layer::Top);
+        let popup_order = self.popup_order();
 
-        self.push_popup_entries(&mut stack);
+        self.push_layer_entries(&mut stack, Layer::Overlay, &popup_order);
+        self.push_layer_entries(&mut stack, Layer::Top, &popup_order);
 
         for &toplevel_id in &self.toplevel_stack {
             let Some(toplevel) = self.surface_manager.get_toplevel(toplevel_id) else {
                 continue;
             };
-            // A minimized window is off-screen: it must not swallow input.
+            // A minimized window is off-screen: it must not swallow input, and
+            // neither may the menus hanging off it.
             if toplevel.states.minimized {
                 continue;
             }
+            let owner = (toplevel.session_id, toplevel.surface_id);
+            self.push_popups_for(&mut stack, &popup_order, owner);
             stack.push(StackEntry {
                 session_id: toplevel.session_id,
                 surface_id: toplevel.surface_id,
@@ -388,28 +391,64 @@ impl ScpState {
             });
         }
 
-        self.push_layer_entries(&mut stack, Layer::Bottom);
-        self.push_layer_entries(&mut stack, Layer::Background);
+        self.push_layer_entries(&mut stack, Layer::Bottom, &popup_order);
+        self.push_layer_entries(&mut stack, Layer::Background, &popup_order);
 
         stack
     }
 
-    /// Push popups above the windows they belong to, innermost first.
-    fn push_popup_entries(&self, stack: &mut WindowStack) {
-        // The grab chain is ordered outermost-first, so reverse it to put
-        // submenus above the menus that opened them. Grabless popups (tooltips)
-        // follow in arbitrary order; nothing depends on their relative Z.
+    /// Every popup, innermost first.
+    ///
+    /// The grab chain is ordered outermost-first, so reversing it puts submenus
+    /// above the menus that opened them. Grabless popups (tooltips) follow in
+    /// arbitrary order; nothing depends on their relative Z.
+    fn popup_order(&self) -> Vec<PopupId> {
         let mut popup_ids: Vec<PopupId> = self.popups.grab_chain().iter().rev().copied().collect();
         for popup in self.popups.iter() {
             if !popup_ids.contains(&popup.id) {
                 popup_ids.push(popup.id);
             }
         }
+        popup_ids
+    }
 
-        for popup_id in popup_ids {
+    /// The non-popup surface a popup chain ultimately hangs off.
+    ///
+    /// Returns `None` for a chain that is broken or nested past
+    /// [`MAX_POPUP_NESTING`], which is the same thing as far as stacking is
+    /// concerned: a popup nobody owns is not shown.
+    fn popup_root(&self, popup_id: PopupId) -> Option<(SessionId, SurfaceId)> {
+        let mut current = self.popups.get(popup_id)?;
+        for _ in 0..MAX_POPUP_NESTING {
+            match current.parent_popup {
+                Some(parent) => current = self.popups.get(parent)?,
+                None => return Some((current.session_id, current.parent_id)),
+            }
+        }
+        tracing::warn!(?popup_id, "popup parent chain exceeded the nesting limit");
+        None
+    }
+
+    /// Push the popups anchored to one window, directly above it.
+    ///
+    /// A popup belongs to the window it hangs off, not to the desktop. Stacking
+    /// every popup above every window — which is what this used to do — let any
+    /// application put a surface over the whole screen, above other clients'
+    /// windows, and win hit-testing there: an overlay the compositor's own
+    /// server-side chrome could not protect against.
+    fn push_popups_for(
+        &self,
+        stack: &mut WindowStack,
+        popup_order: &[PopupId],
+        owner: (SessionId, SurfaceId),
+    ) {
+        for &popup_id in popup_order {
             let Some(popup) = self.popups.get(popup_id) else {
                 continue;
             };
+            if self.popup_root(popup_id) != Some(owner) {
+                continue;
+            }
             let Some(rect) = self.absolute_surface_rect(popup.session_id, popup.surface_id) else {
                 continue;
             };
@@ -428,7 +467,7 @@ impl ScpState {
         }
     }
 
-    fn push_layer_entries(&self, stack: &mut WindowStack, layer: Layer) {
+    fn push_layer_entries(&self, stack: &mut WindowStack, layer: Layer, popup_order: &[PopupId]) {
         for layer_surface in self.surface_manager.iter_layer_surfaces() {
             if layer_surface.layer != layer {
                 continue;
@@ -438,6 +477,8 @@ impl ScpState {
             else {
                 continue;
             };
+            let owner = (layer_surface.session_id, layer_surface.surface_id);
+            self.push_popups_for(stack, popup_order, owner);
             stack.push(StackEntry {
                 session_id: layer_surface.session_id,
                 surface_id: layer_surface.surface_id,
@@ -494,15 +535,26 @@ impl ScpState {
                 *buffer_fd =
                     received_fd.ok_or("AttachBuffer requires exactly one file descriptor")?;
             }
+            ClientMessage::CreateShmPool { fd, .. } => {
+                *fd = received_fd.ok_or("CreateShmPool requires exactly one file descriptor")?;
+            }
             _ if received_fd.is_some() => {
                 if let Some(fd) = received_fd {
                     unix_socket::close_fd(fd);
                 }
-                return Err("File descriptor is only valid with AttachBuffer".to_string());
+                return Err(
+                    "File descriptor is only valid with AttachBuffer or CreateShmPool".to_string(),
+                );
             }
             _ => {}
         }
 
+        // Only AttachBuffer needs unwinding here: its handler transfers the
+        // descriptor to a `SurfaceBuffer` on success and leaves it untouched on
+        // failure. `CreateShmPool` is deliberately absent — `create_pool` takes
+        // ownership unconditionally and closes on every failure path of its own,
+        // so closing it a second time here would hand back a descriptor number
+        // another thread may already have reused.
         let attached_fd = match &message {
             ClientMessage::AttachBuffer { buffer_fd, .. } => Some(*buffer_fd),
             _ => None,
@@ -745,13 +797,21 @@ impl ScpState {
                     &Capability::Fullscreen,
                     &capability_token,
                 )?;
+                // Use the output's real geometry. The hardcoded 1920×1080 here
+                // disagreed with the SetToplevelState::Fullscreen path, so the
+                // same request answered differently depending on how it was
+                // spelled — and was simply wrong on any other display.
+                let output = self.primary_output_rect();
                 let serial = self.next_serial();
                 if let Some(toplevel) = self.surface_manager.get_toplevel_mut(toplevel_id) {
                     let states = crate::scp::surface::ToplevelStates {
                         fullscreen: true,
                         ..Default::default()
                     };
-                    toplevel.configure(serial, 1920, 1080, states);
+                    toplevel.set_position(output.x, output.y);
+                    toplevel.geometry.width = output.width;
+                    toplevel.geometry.height = output.height;
+                    toplevel.configure(serial, output.width, output.height, states);
                 }
                 self.sessions
                     .get_mut(&session_id)
@@ -765,8 +825,8 @@ impl ScpState {
                 Ok(vec![CompositorMessage::ConfigureToplevel {
                     toplevel_id,
                     serial,
-                    width: 1920,
-                    height: 1080,
+                    width: output.width,
+                    height: output.height,
                     decoration_height: 0,
                     states: crate::scp::protocol::ToplevelStates {
                         fullscreen: true,
@@ -1104,9 +1164,14 @@ impl ScpState {
                 hotspot_x,
                 hotspot_y,
             } => {
-                // Verify serial is valid (from a recent enter/button event)
-                if serial > self.next_serial {
-                    return Err("Invalid cursor serial".to_string());
+                // The serial must be one this client was actually sent. The
+                // old check compared against `next_serial`, a counter that
+                // wraps — which made it true for almost any value, and outright
+                // meaningless after the first wrap.
+                if !self.data_device.is_serial_known(serial, session_id) {
+                    return Err(
+                        "Cursor serial is stale or was issued to another client".to_string()
+                    );
                 }
 
                 if let Some(surface_id) = surface_id {
@@ -1545,8 +1610,8 @@ impl ScpState {
             }
 
             ClientMessage::AcceptDrag { serial, mime_type } => {
-                if serial > self.next_serial {
-                    return Err("Invalid drag serial".to_string());
+                if !self.data_device.is_serial_known(serial, session_id) {
+                    return Err("Drag serial is stale or was issued to another client".to_string());
                 }
                 // Only the surface the drag is currently over may accept it.
                 if !self
@@ -1900,8 +1965,11 @@ impl ScpState {
 
     /// Validate a directly attached buffer.
     ///
-    /// Geometry checking is shared with the SHM path so the two cannot drift into
-    /// disagreeing about what a legal buffer is.
+    /// Both halves of the check are shared with the SHM pool path, so the two
+    /// cannot drift into disagreeing about what a legal buffer is: the geometry
+    /// has to be arithmetically sound, and the descriptor has to actually back
+    /// the bytes that geometry implies — for as long as the compositor will be
+    /// reading them.
     fn validate_buffer(
         &self,
         fd: i32,
@@ -1910,18 +1978,26 @@ impl ScpState {
         stride: i32,
         format: crate::scp::protocol::BufferFormat,
     ) -> Result<(), String> {
-        if fd < 0 {
-            return Err("Invalid buffer file descriptor".to_string());
-        }
-        crate::scp::buffer::validate_geometry(width, height, stride, format.bytes_per_pixel())
-            .map(|_| ())
+        let required =
+            crate::scp::buffer::validate_geometry(width, height, stride, format.bytes_per_pixel())?;
+        crate::scp::buffer::validate_descriptor(fd, required)
     }
 
     // ===== Session lifetime =====
 
     pub fn disconnect(&mut self, session_id: SessionId) {
         self.events.unregister(session_id);
-        self.sessions.remove(&session_id);
+
+        // Grants die with the connection that holds them, so hand the tokens
+        // back rather than leaving the coordinator tracking them forever.
+        if let Some(session) = self.sessions.remove(&session_id) {
+            let tokens: Vec<CapabilityToken> = session
+                .granted_capabilities
+                .into_values()
+                .map(|grant| grant.token)
+                .collect();
+            self.security.release_tokens(&tokens);
+        }
 
         // A locker that dies abandons its lock but does not release it: a crash
         // must never be a way back to the desktop.
@@ -2232,6 +2308,7 @@ impl ScpState {
 
         let serial = self.next_serial();
         let keys = self.modifier_state.pressed_keys();
+        self.record_delivered_serial(serial, session_id);
         self.events.send_logged(
             session_id,
             CompositorMessage::InputEvent {
@@ -2387,7 +2464,7 @@ impl ScpState {
 
         let serial = self.next_serial();
         if state == KeyState::Pressed {
-            self.authorize_serial(serial);
+            self.authorize_serial(serial, session_id);
         }
         self.events.send_logged(
             session_id,
@@ -2490,6 +2567,9 @@ impl ScpState {
         if let Some(entry) = hit {
             let (local_x, local_y) = entry.to_local(x, y);
             let serial = self.next_serial();
+            // A cursor change answers this event, so the client has to be able
+            // to quote the serial back — without it authorizing anything more.
+            self.record_delivered_serial(serial, entry.session_id);
             self.events.send_logged(
                 entry.session_id,
                 CompositorMessage::InputEvent {
@@ -2567,7 +2647,7 @@ impl ScpState {
 
         let serial = self.next_serial();
         if state == ButtonState::Pressed {
-            self.authorize_serial(serial);
+            self.authorize_serial(serial, entry.session_id);
         }
         self.events.send_logged(
             entry.session_id,
@@ -2589,8 +2669,18 @@ impl ScpState {
     /// event. Only deliberate actions — a button press, a key press, a touch —
     /// mint one: passive pointer motion must not be enough to authorize taking
     /// over the clipboard, or merely moving the cursor across a window would.
-    fn authorize_serial(&mut self, serial: u32) {
-        self.data_device.record_serial(serial);
+    fn authorize_serial(&mut self, serial: u32, session_id: SessionId) {
+        self.data_device.record_serial(serial, session_id, true);
+    }
+
+    /// Note a serial the compositor sent a client without authorizing anything.
+    ///
+    /// Enter and leave events carry serials a client may legitimately quote back
+    /// — a cursor change answers a pointer enter — but crossing a window is not
+    /// the user asking for anything, so these do not authorize privileged
+    /// actions.
+    fn record_delivered_serial(&mut self, serial: u32, session_id: SessionId) {
+        self.data_device.record_serial(serial, session_id, false);
     }
 
     /// Route a scroll event to the surface under the cursor.
@@ -2656,7 +2746,7 @@ impl ScpState {
         let (local_x, local_y) = entry.to_local(x, y);
         let serial = self.next_serial();
         // A touch is as deliberate as a click, so it authorizes the same actions.
-        self.authorize_serial(serial);
+        self.authorize_serial(serial, entry.session_id);
         let event = self.input_state.dispatch_touch_down(
             (entry.session_id, entry.surface_id),
             touch_id,
@@ -2787,6 +2877,8 @@ impl ScpState {
         if let Some(entry) = hit {
             let (local_x, local_y) = entry.to_local(x, y);
             let serial = self.next_serial();
+            // AcceptDrag quotes this serial back.
+            self.record_delivered_serial(serial, entry.session_id);
             self.events.send_logged(
                 entry.session_id,
                 CompositorMessage::DragEnter {

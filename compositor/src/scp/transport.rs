@@ -35,6 +35,12 @@ pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
 /// against a missed wakeup, not part of normal operation.
 const POLL_TIMEOUT: Duration = Duration::from_millis(250);
 
+/// How long a write to a client may stall before the client is given up on.
+///
+/// Generous enough that a busy but healthy client is never dropped, short enough
+/// that a wedged one does not hold a thread and its queued descriptors forever.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Running SCP listener. Dropping it stops the accept loop and removes the
 /// filesystem socket. Active client threads finish when their peers disconnect.
 pub struct ScpServer {
@@ -55,13 +61,6 @@ impl ScpServer {
 
     pub fn bind_with_state(socket_path: PathBuf, state: Arc<Mutex<ScpState>>) -> io::Result<Self> {
         let listener = bind_listener(&socket_path)?;
-        if let Err(error) =
-            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
-        {
-            drop(listener);
-            let _ = std::fs::remove_file(&socket_path);
-            return Err(error);
-        }
         listener.set_nonblocking(true)?;
 
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -90,30 +89,79 @@ impl ScpServer {
     }
 }
 
+/// Bind the SCP socket, and publish it only once it is private.
+///
+/// `bind` creates the socket with the process umask, so setting the mode
+/// afterwards leaves a window in which the path already exists and anyone who
+/// can reach the directory may connect. Binding under a temporary name, setting
+/// the mode there, and renaming into place closes that window: the socket
+/// appears at its published path already at 0600, and `rename` is atomic.
+///
+/// It matters because [`resolve_socket_path`] honors an absolute
+/// `SOL_SCP_SOCKET`, which can put the socket outside the 0700 runtime
+/// directory that would otherwise be covering for this.
 fn bind_listener(socket_path: &Path) -> io::Result<UnixListener> {
-    match UnixListener::bind(socket_path) {
-        Ok(listener) => Ok(listener),
-        Err(bind_error) if bind_error.kind() == io::ErrorKind::AddrInUse => {
-            match UnixStream::connect(socket_path) {
-                Ok(_) => Err(bind_error),
-                Err(connect_error)
-                    if matches!(
-                        connect_error.kind(),
-                        io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-                    ) =>
-                {
-                    let metadata = std::fs::symlink_metadata(socket_path)?;
-                    if !metadata.file_type().is_socket() {
-                        return Err(io::Error::new(
-                            io::ErrorKind::AlreadyExists,
-                            "refusing to replace a non-socket SCP path",
-                        ));
-                    }
-                    std::fs::remove_file(socket_path)?;
-                    UnixListener::bind(socket_path)
-                }
-                Err(_) => Err(bind_error),
-            }
+    let parent = socket_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "SCP socket path has no parent directory",
+        )
+    })?;
+    let file_name = socket_path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "SCP socket path has no name")
+    })?;
+
+    claim_socket_path(socket_path)?;
+
+    // Same directory as the target, so the rename below stays within one
+    // filesystem and is therefore atomic.
+    let staging = parent.join(format!(
+        ".{}.{}.staging",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&staging);
+
+    let listener = UnixListener::bind(&staging)?;
+    if let Err(error) = std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600))
+        .and_then(|()| std::fs::rename(&staging, socket_path))
+    {
+        drop(listener);
+        let _ = std::fs::remove_file(&staging);
+        return Err(error);
+    }
+
+    Ok(listener)
+}
+
+/// Make sure nothing else owns the published path, clearing a stale socket.
+fn claim_socket_path(socket_path: &Path) -> io::Result<()> {
+    let metadata = match std::fs::symlink_metadata(socket_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+
+    if !metadata.file_type().is_socket() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to replace a non-socket SCP path",
+        ));
+    }
+
+    // A socket that still accepts connections belongs to a live compositor.
+    match UnixStream::connect(socket_path) {
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "another compositor is listening on this SCP socket",
+        )),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+            ) =>
+        {
+            std::fs::remove_file(socket_path)
         }
         Err(error) => Err(error),
     }
@@ -180,8 +228,15 @@ fn accept_loop(listener: UnixListener, state: Arc<Mutex<ScpState>>, shutdown: Ar
 }
 
 fn serve_client(mut stream: UnixStream, state: &Arc<Mutex<ScpState>>) -> io::Result<()> {
+    // A client that stops reading fills its socket buffer, and a blocking write
+    // then parks this thread indefinitely — including before it can reach the
+    // event-queue overflow check that exists to disconnect exactly this client.
+    // The deadline turns "wedged forever" into "disconnected", which is what the
+    // overflow path already decided is the right answer.
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+
     let mut session_id = None;
-    let mut bytes = Vec::new();
+    let mut bytes = ReceiveBuffer::new();
     let mut pending_fds = Vec::new();
     let sink = SessionSink::new()?;
 
@@ -223,7 +278,7 @@ fn serve_client_inner(
     state: &Arc<Mutex<ScpState>>,
     sink: &Arc<SessionSink>,
     session_id: &mut Option<SessionId>,
-    bytes: &mut Vec<u8>,
+    bytes: &mut ReceiveBuffer,
     pending_fds: &mut Vec<i32>,
 ) -> io::Result<()> {
     let (peer_pid, _, _) = unix_socket::get_peer_credentials(stream.as_raw_fd())?;
@@ -296,15 +351,17 @@ fn serve_client_inner(
                 return Ok(());
             }
 
-            let received_fd = match message {
-                ClientMessage::AttachBuffer { .. } if pending_fds.len() == 1 => pending_fds.pop(),
-                ClientMessage::AttachBuffer { .. } => {
+            let received_fd = match &message {
+                message if carries_descriptor(message) && pending_fds.len() == 1 => {
+                    pending_fds.pop()
+                }
+                message if carries_descriptor(message) => {
                     let count = pending_fds.len();
                     close_all(pending_fds);
                     write_protocol_error(
                         stream,
                         "invalid-fd-count",
-                        format!("AttachBuffer requires one descriptor, received {count}"),
+                        format!("this request requires one descriptor, received {count}"),
                         false,
                     )?;
                     continue;
@@ -315,7 +372,8 @@ fn serve_client_inner(
                     write_protocol_error(
                         stream,
                         "unexpected-fd",
-                        "descriptors are only accepted with AttachBuffer".to_string(),
+                        "descriptors are only accepted with AttachBuffer and CreateShmPool"
+                            .to_string(),
                         false,
                     )?;
                     continue;
@@ -382,6 +440,18 @@ fn serve_client_inner(
 /// Returns `false` when the client has fallen too far behind and must be
 /// disconnected: an unresponsive client cannot be allowed to make the
 /// compositor buffer without bound.
+/// Whether a request carries exactly one descriptor over SCM_RIGHTS.
+///
+/// Both of these hand the compositor shared memory to read from. Every other
+/// request is refused a descriptor outright, so a client cannot smuggle one in
+/// alongside a message that has nowhere to put it.
+const fn carries_descriptor(message: &ClientMessage) -> bool {
+    matches!(
+        message,
+        ClientMessage::AttachBuffer { .. } | ClientMessage::CreateShmPool { .. }
+    )
+}
+
 fn drain_sink(stream: &mut UnixStream, sink: &Arc<SessionSink>) -> io::Result<bool> {
     if sink.is_overflowed() {
         tracing::warn!("SCP client is not draining its event queue; disconnecting");
@@ -410,37 +480,82 @@ fn write_event(stream: &mut UnixStream, event: &OutboundEvent) -> io::Result<()>
 
 fn receive_chunk(
     stream: &UnixStream,
-    bytes: &mut Vec<u8>,
+    bytes: &mut ReceiveBuffer,
     pending_fds: &mut Vec<i32>,
 ) -> io::Result<bool> {
     let mut buffer = [0_u8; 64 * 1024];
-    let (received, fds) = unix_socket::recvmsg_with_fds(stream.as_raw_fd(), &mut buffer, 4)?;
+    let (received, fds) = unix_socket::recvmsg_with_fds(
+        stream.as_raw_fd(),
+        &mut buffer,
+        unix_socket::MAX_FDS_PER_MESSAGE,
+    )?;
 
     if received == 0 {
         return Ok(false);
     }
 
     pending_fds.extend(fds);
-    bytes.extend_from_slice(&buffer[..received]);
+    bytes.extend(&buffer[..received]);
     Ok(true)
 }
 
-fn take_frame(bytes: &mut Vec<u8>) -> io::Result<Option<Vec<u8>>> {
-    if bytes.len() < 4 {
+/// Bytes received but not yet parsed into frames.
+///
+/// A plain `Vec` with a `drain(..n)` per frame moves the whole remaining buffer
+/// on every message, which is quadratic exactly when a client is busiest. A read
+/// cursor makes taking a frame O(frame), and the buffer is compacted only when
+/// the consumed prefix is worth reclaiming.
+#[derive(Debug, Default)]
+struct ReceiveBuffer {
+    bytes: Vec<u8>,
+    start: usize,
+}
+
+/// Consumed prefix tolerated before the buffer is compacted.
+const COMPACT_THRESHOLD: usize = 64 * 1024;
+
+impl ReceiveBuffer {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn extend(&mut self, chunk: &[u8]) {
+        self.bytes.extend_from_slice(chunk);
+    }
+
+    fn pending(&self) -> &[u8] {
+        &self.bytes[self.start..]
+    }
+
+    fn consume(&mut self, count: usize) {
+        self.start += count;
+        if self.start >= self.bytes.len() {
+            self.bytes.clear();
+            self.start = 0;
+        } else if self.start >= COMPACT_THRESHOLD {
+            self.bytes.drain(..self.start);
+            self.start = 0;
+        }
+    }
+}
+
+fn take_frame(bytes: &mut ReceiveBuffer) -> io::Result<Option<Vec<u8>>> {
+    let pending = bytes.pending();
+    if pending.len() < 4 {
         return Ok(None);
     }
-    let frame_len = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let frame_len = u32::from_be_bytes([pending[0], pending[1], pending[2], pending[3]]) as usize;
     if frame_len == 0 || frame_len > MAX_FRAME_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("invalid SCP frame size {frame_len}"),
         ));
     }
-    if bytes.len() < frame_len + 4 {
+    if pending.len() < frame_len + 4 {
         return Ok(None);
     }
-    let payload = bytes[4..frame_len + 4].to_vec();
-    bytes.drain(..frame_len + 4);
+    let payload = pending[4..frame_len + 4].to_vec();
+    bytes.consume(frame_len + 4);
     Ok(Some(payload))
 }
 
@@ -471,7 +586,11 @@ pub fn write_frame<T: Serialize>(stream: &mut UnixStream, value: &T) -> io::Resu
 /// go out in a single `sendmsg`. A short write would leave the receiver holding a
 /// descriptor it cannot yet associate with a message, so it is an error rather
 /// than something to retry.
-fn write_frame_with_fd<T: Serialize>(
+///
+/// Public because it is the client half of [`ClientMessage::AttachBuffer`], the
+/// one request whose descriptor the compositor accepts: without it a client can
+/// name a buffer but never hand one over.
+pub fn write_frame_with_fd<T: Serialize>(
     stream: &mut UnixStream,
     value: &T,
     fd: std::os::fd::RawFd,
@@ -552,6 +671,41 @@ mod tests {
         assert_eq!(server.socket_path(), path);
         drop(server);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_socket_is_never_reachable_before_it_is_private() {
+        let path = fixture_path("mode");
+        let server = ScpServer::bind(path.clone()).expect("bind");
+
+        let mode = std::fs::metadata(&path)
+            .expect("stat socket")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "the published socket must be owner-only from the moment it exists"
+        );
+
+        drop(server);
+    }
+
+    #[test]
+    fn refuses_to_take_a_socket_another_compositor_is_serving() {
+        let path = fixture_path("live");
+        let first = ScpServer::bind(path.clone()).expect("first compositor binds");
+
+        let error = match ScpServer::bind(path.clone()) {
+            Ok(second) => {
+                drop(second);
+                panic!("a live socket must not be stolen")
+            }
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
+
+        drop(first);
     }
 
     #[test]

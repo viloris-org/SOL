@@ -1,14 +1,22 @@
 //! End-to-end native SCP transport and security checks.
 
+// `expect` in a test is a deliberate assertion, not an unhandled error.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use nix::sys::socket::{ControlMessage, MsgFlags, sendmsg};
 use serial_test::serial;
 use sol_compositor::scp::{
+    memfd,
     protocol::{BufferFormat, ClientMessage, CompositorMessage},
     transport::{read_frame, write_frame},
 };
 use std::{
+    fs::File,
     io::IoSlice,
-    os::{fd::AsRawFd, unix::net::UnixStream},
+    os::{
+        fd::{AsRawFd, FromRawFd, OwnedFd},
+        unix::net::UnixStream,
+    },
     path::PathBuf,
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
@@ -152,20 +160,8 @@ fn buffer_fd_arrives_via_scm_rights() {
         stride: 64,
         format: BufferFormat::Argb8888,
     };
-    let payload = serde_json::to_vec(&message).expect("serialize attach");
-    let mut frame = Vec::with_capacity(payload.len() + 4);
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    frame.extend_from_slice(&payload);
-    let (buffer, _peer) = UnixStream::pair().expect("create descriptor fixture");
-    let fds = [buffer.as_raw_fd()];
-    sendmsg::<()>(
-        stream.as_raw_fd(),
-        &[IoSlice::new(&frame)],
-        &[ControlMessage::ScmRights(&fds)],
-        MsgFlags::empty(),
-        None,
-    )
-    .expect("send buffer descriptor");
+    // 16 rows at stride 64 is 1024 bytes, sealed so it cannot shrink afterwards.
+    send_with_descriptor(&mut stream, &message, sealed_memfd(1024));
 
     write_frame(
         &mut stream,
@@ -175,8 +171,107 @@ fn buffer_fd_arrives_via_scm_rights() {
         },
     )
     .expect("send synchronization request");
+    // The attach is silent on success, so the next reply proves it was accepted:
+    // a rejected attach would answer with a ProtocolError first.
     assert!(matches!(
         read_frame::<CompositorMessage>(&mut stream).expect("read decision"),
         CompositorMessage::CapabilityDecision { granted: false, .. }
     ));
+}
+
+#[test]
+#[serial]
+fn a_buffer_descriptor_that_can_shrink_is_refused() {
+    let session = Session::start();
+    let mut stream = session.connect();
+    let _token = authenticate(&mut stream);
+    write_frame(&mut stream, &ClientMessage::CreateSurface { surface_id: 2 })
+        .expect("create surface");
+
+    // Right size, no seal: the client could ftruncate it after this check and
+    // leave the compositor reading pages that no longer exist.
+    let message = ClientMessage::AttachBuffer {
+        surface_id: 2,
+        buffer_fd: -1,
+        width: 16,
+        height: 16,
+        stride: 64,
+        format: BufferFormat::Argb8888,
+    };
+    send_with_descriptor(&mut stream, &message, unsealed_memfd(1024));
+
+    match read_frame::<CompositorMessage>(&mut stream).expect("read rejection") {
+        CompositorMessage::ProtocolError { message, fatal, .. } => {
+            assert!(!fatal, "a bad buffer is the client's mistake, not a kill");
+            assert!(message.contains("F_SEAL_SHRINK"), "unexpected: {message}");
+        }
+        other => panic!("an unsealed buffer must be refused: {other:?}"),
+    }
+}
+
+#[test]
+#[serial]
+fn a_buffer_descriptor_smaller_than_its_geometry_is_refused() {
+    let session = Session::start();
+    let mut stream = session.connect();
+    let _token = authenticate(&mut stream);
+    write_frame(&mut stream, &ClientMessage::CreateSurface { surface_id: 2 })
+        .expect("create surface");
+
+    // Geometry says 1024 bytes; the descriptor backs 512.
+    let message = ClientMessage::AttachBuffer {
+        surface_id: 2,
+        buffer_fd: -1,
+        width: 16,
+        height: 16,
+        stride: 64,
+        format: BufferFormat::Argb8888,
+    };
+    send_with_descriptor(&mut stream, &message, sealed_memfd(512));
+
+    match read_frame::<CompositorMessage>(&mut stream).expect("read rejection") {
+        CompositorMessage::ProtocolError { message, .. } => {
+            assert!(
+                message.contains("exceeds the descriptor"),
+                "unexpected: {message}"
+            );
+        }
+        other => panic!("an undersized buffer must be refused: {other:?}"),
+    }
+}
+
+/// Send one framed message with a descriptor attached via SCM_RIGHTS.
+fn send_with_descriptor(stream: &mut UnixStream, message: &ClientMessage, fd: OwnedFd) {
+    let payload = serde_json::to_vec(message).expect("serialize request");
+    let mut frame = Vec::with_capacity(payload.len() + 4);
+    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&payload);
+
+    let fds = [fd.as_raw_fd()];
+    sendmsg::<()>(
+        stream.as_raw_fd(),
+        &[IoSlice::new(&frame)],
+        &[ControlMessage::ScmRights(&fds)],
+        MsgFlags::empty(),
+        None,
+    )
+    .expect("send descriptor");
+}
+
+/// A memfd of exactly `bytes` length that can still be shrunk.
+fn unsealed_memfd(bytes: usize) -> OwnedFd {
+    use std::io::Write;
+
+    let fd = memfd::create("scp-test-buffer", true).expect("create memfd");
+    // SAFETY: create returned a fresh owned descriptor nothing else holds.
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(&vec![0_u8; bytes]).expect("size the memfd");
+    OwnedFd::from(file)
+}
+
+/// A memfd of exactly `bytes` length, sealed against shrinking.
+fn sealed_memfd(bytes: usize) -> OwnedFd {
+    let fd = unsealed_memfd(bytes);
+    memfd::add_seals(fd.as_raw_fd(), memfd::F_SEAL_SHRINK).expect("seal the memfd");
+    fd
 }

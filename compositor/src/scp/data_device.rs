@@ -12,6 +12,24 @@ use std::time::{Duration, Instant};
 const SERIAL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_MIME_TYPES: usize = 32;
 
+/// Ceiling on tracked serials, in case events outpace the timeout sweep.
+const MAX_TRACKED_SERIALS: usize = 4096;
+
+/// A serial the compositor issued, and what quoting it back proves.
+#[derive(Debug, Clone, Copy)]
+struct SerialRecord {
+    /// The client the event carrying this serial was delivered to.
+    ///
+    /// Serials used to be tracked in one global pool, so any client could quote
+    /// a serial minted for a *different* client's input. A serial only means
+    /// anything as evidence that the user acted on *this* client.
+    session: SessionId,
+    at: Instant,
+    /// Whether it came from a deliberate action — a press, a key, a touch —
+    /// rather than from the pointer merely crossing a window.
+    interactive: bool,
+}
+
 /// Selection source (clipboard owner)
 #[derive(Debug, Clone)]
 pub struct Selection {
@@ -40,8 +58,8 @@ pub struct DataDevice {
     selection: Option<Selection>,
     /// Active drag operation
     drag: Option<DragOperation>,
-    /// Recently valid serials (for validation)
-    recent_serials: HashMap<u32, Instant>,
+    /// Recently issued serials, and who they were issued to.
+    recent_serials: HashMap<u32, SerialRecord>,
     /// Surface the drag is currently over.
     ///
     /// Surface IDs are client-local, so the owning session is part of the
@@ -60,9 +78,20 @@ impl DataDevice {
         }
     }
 
-    /// Record an input serial for later validation
-    pub fn record_serial(&mut self, serial: u32) {
-        self.recent_serials.insert(serial, Instant::now());
+    /// Record a serial the compositor just delivered to a client.
+    ///
+    /// `interactive` distinguishes a deliberate action from the pointer crossing
+    /// a window: only the former may authorize taking over the clipboard or
+    /// starting a drag, or moving the cursor across a window would be enough.
+    pub fn record_serial(&mut self, serial: u32, session: SessionId, interactive: bool) {
+        self.recent_serials.insert(
+            serial,
+            SerialRecord {
+                session,
+                at: Instant::now(),
+                interactive,
+            },
+        );
         self.cleanup_old_serials();
     }
 
@@ -77,8 +106,8 @@ impl DataDevice {
             return Err("Too many MIME types");
         }
 
-        if !self.is_serial_valid(serial) {
-            return Err("Serial is stale or invalid");
+        if !self.is_serial_valid(serial, owner) {
+            return Err("Serial is stale, invalid, or was issued to another client");
         }
 
         self.selection = Some(Selection {
@@ -125,8 +154,8 @@ impl DataDevice {
             return Err("Too many MIME types");
         }
 
-        if !self.is_serial_valid(serial) {
-            return Err("Serial is stale or invalid");
+        if !self.is_serial_valid(serial, source) {
+            return Err("Serial is stale, invalid, or was issued to another client");
         }
 
         self.drag = Some(DragOperation {
@@ -207,18 +236,43 @@ impl DataDevice {
         }
     }
 
-    /// Check if serial is recent and valid
-    fn is_serial_valid(&self, serial: u32) -> bool {
+    /// Whether `serial` is one the compositor recently delivered to `session`.
+    ///
+    /// Enough to prove the client is answering a real event — which is what a
+    /// cursor change needs — but not that the user did anything deliberate.
+    pub fn is_serial_known(&self, serial: u32, session: SessionId) -> bool {
         self.recent_serials
             .get(&serial)
-            .is_some_and(|t| t.elapsed() < SERIAL_TIMEOUT)
+            .is_some_and(|record| record.session == session && record.at.elapsed() < SERIAL_TIMEOUT)
+    }
+
+    /// Whether `serial` proves the user deliberately acted on `session`.
+    fn is_serial_valid(&self, serial: u32, session: SessionId) -> bool {
+        self.recent_serials.get(&serial).is_some_and(|record| {
+            record.interactive && record.session == session && record.at.elapsed() < SERIAL_TIMEOUT
+        })
     }
 
     /// Clean up old serials
     fn cleanup_old_serials(&mut self) {
         let now = Instant::now();
         self.recent_serials
-            .retain(|_, timestamp| now.duration_since(*timestamp) < SERIAL_TIMEOUT);
+            .retain(|_, record| now.duration_since(record.at) < SERIAL_TIMEOUT);
+
+        // The sweep above is normally enough; this only matters if events arrive
+        // faster than they age out. Dropping the oldest costs a client at worst
+        // one refused clipboard write, which it can retry.
+        while self.recent_serials.len() > MAX_TRACKED_SERIALS {
+            let Some(oldest) = self
+                .recent_serials
+                .iter()
+                .min_by_key(|(_, record)| record.at)
+                .map(|(serial, _)| *serial)
+            else {
+                break;
+            };
+            self.recent_serials.remove(&oldest);
+        }
     }
 }
 
@@ -228,29 +282,48 @@ impl Default for DataDevice {
     }
 }
 
-/// Validate MIME type string
+/// Validate MIME type string.
+///
+/// Accepts `type/subtype` with optional parameters, so a client can offer
+/// `text/plain;charset=utf-8` — the form text is most often published in.
+/// Rejecting it left clients unable to say what encoding their clipboard content
+/// was in.
 pub fn is_valid_mime_type(mime: &str) -> bool {
-    // Basic validation: type/subtype format
     if mime.is_empty() || mime.len() > 256 {
         return false;
     }
 
-    let parts: Vec<&str> = mime.split('/').collect();
-    if parts.len() != 2 {
+    // Parameters are validated only for shape: they are opaque to the
+    // compositor, which never interprets clipboard content.
+    let (essence, parameters) = mime
+        .split_once(';')
+        .map_or((mime, None), |(essence, rest)| (essence, Some(rest)));
+
+    let Some((type_part, subtype)) = essence.split_once('/') else {
+        return false;
+    };
+    if subtype.contains('/') {
         return false;
     }
 
-    let [type_part, subtype] = [parts[0], parts[1]];
+    let is_token = |value: &str| {
+        !value.is_empty()
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '+' | '.' | '_'))
+    };
 
-    // Type and subtype must be non-empty and contain valid characters
-    !type_part.is_empty()
-        && !subtype.is_empty()
-        && type_part
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '+' || c == '.')
-        && subtype
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '+' || c == '.')
+    if !is_token(type_part) || !is_token(subtype) {
+        return false;
+    }
+
+    parameters.is_none_or(|parameters| {
+        parameters.split(';').all(|parameter| {
+            parameter
+                .split_once('=')
+                .is_some_and(|(name, value)| is_token(name.trim()) && is_token(value.trim()))
+        })
+    })
 }
 
 #[cfg(test)]
@@ -273,9 +346,57 @@ mod tests {
     }
 
     #[test]
+    fn accepts_the_parameters_text_is_actually_published_with() {
+        assert!(is_valid_mime_type("text/plain;charset=utf-8"));
+        assert!(is_valid_mime_type("text/html;charset=utf-8"));
+        assert!(is_valid_mime_type("application/json; charset = utf-8"));
+
+        // Shape is still checked: a parameter has to be name=value.
+        assert!(!is_valid_mime_type("text/plain;charset"));
+        assert!(!is_valid_mime_type("text/plain;=utf-8"));
+        assert!(!is_valid_mime_type("text/plain;charset="));
+    }
+
+    #[test]
+    fn a_serial_issued_to_one_client_does_not_authorize_another() {
+        let mut device = DataDevice::new();
+        // The user clicked in session 1's window.
+        device.record_serial(7, 1, true);
+
+        assert!(
+            device
+                .set_selection_validated(2, vec!["text/plain".to_string()], 7)
+                .is_err(),
+            "session 2 must not borrow session 1's proof that the user acted"
+        );
+        device
+            .set_selection_validated(1, vec!["text/plain".to_string()], 7)
+            .expect("the client the serial was issued to may use it");
+    }
+
+    #[test]
+    fn passive_pointer_motion_does_not_authorize_a_clipboard_write() {
+        let mut device = DataDevice::new();
+        // A pointer enter carries a serial, but crossing a window is not the
+        // user asking for anything.
+        device.record_serial(7, 1, false);
+
+        assert!(
+            device
+                .set_selection_validated(1, vec!["text/plain".to_string()], 7)
+                .is_err(),
+            "only a deliberate action authorizes taking over the clipboard"
+        );
+        assert!(
+            device.is_serial_known(7, 1),
+            "the serial is still quotable for things like a cursor change"
+        );
+    }
+
+    #[test]
     fn test_selection() {
         let mut device = DataDevice::new();
-        device.record_serial(1);
+        device.record_serial(1, 1, true);
 
         device
             .set_selection_validated(1, vec!["text/plain".to_string()], 1)
@@ -293,7 +414,7 @@ mod tests {
     #[test]
     fn test_drag() {
         let mut device = DataDevice::new();
-        device.record_serial(1);
+        device.record_serial(1, 1, true);
 
         device
             .start_drag_validated(1, 100, None, vec!["text/plain".to_string()], 1)
@@ -307,7 +428,7 @@ mod tests {
     #[test]
     fn drag_target_identity_includes_the_session() {
         let mut device = DataDevice::new();
-        device.record_serial(1);
+        device.record_serial(1, 1, true);
         device
             .start_drag_validated(1, 100, None, vec!["text/plain".to_string()], 1)
             .expect("start drag");
@@ -322,7 +443,7 @@ mod tests {
     #[test]
     fn rejects_a_second_concurrent_drag() {
         let mut device = DataDevice::new();
-        device.record_serial(1);
+        device.record_serial(1, 1, true);
         device
             .start_drag_validated(1, 100, None, vec!["text/plain".to_string()], 1)
             .expect("start first drag");
@@ -339,7 +460,7 @@ mod tests {
     fn test_validated_operations() {
         let mut device = DataDevice::new();
         let serial = 1;
-        device.record_serial(serial);
+        device.record_serial(serial, 1, true);
 
         // Valid serial should work
         assert!(

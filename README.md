@@ -172,6 +172,20 @@ for detailed documentation and CI/CD setup.
 - [ROADMAP](docs/ROADMAP.md) — where SOL is going, phase by phase.
 - [Compositor README](compositor/README.md) — how to run/extend the compositor.
 
+## Star History
+
+<picture>
+  <source
+    media="(prefers-color-scheme: dark)"
+    srcset="https://raw.githubusercontent.com/viloris-org/SOL/star-history/star-history-dark.svg">
+  <img
+    alt="Stargazers over time for viloris-org/SOL"
+    src="https://raw.githubusercontent.com/viloris-org/SOL/star-history/star-history.svg">
+</picture>
+
+Rendered in-repo by [`.github/workflows/star-history.yml`](.github/workflows/star-history.yml)
+— no third-party action and no external chart service.
+
 ## License
 
 SOL is licensed under the [BSD 3-Clause License](LICENSE).

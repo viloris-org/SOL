@@ -20,6 +20,30 @@ The Unix socket defaults to `$XDG_RUNTIME_DIR/sol-compositor-0`. Set
 `SOL_SCP_SOCKET` to a socket name or absolute path to override it. SCP frames
 use a four-byte big-endian length prefix; buffer descriptors use `SCM_RIGHTS`.
 
+### Privileged identities in a development build
+
+`sol-shell` and `sol-logind` gate layer shell and the session lock, so the
+compositor will not hand either identity to a process just because
+`/proc/<pid>/comm` says so — a process writes its own `comm`. The peer's
+executable must also live in the trusted directory, `/usr/lib/sol` by default.
+
+An uninstalled build therefore has to say where its binaries really are:
+
+```bash
+SOL_SCP_TRUSTED_BIN_DIR=$PWD/target/debug cargo run -p sol-compositor
+```
+
+Without it, `sol-shell` and `sol-logind` are refused at connect and the
+compositor logs which directory it checked. Ordinary applications are
+unaffected.
+
+### Client buffers
+
+Descriptors passed to `CreateShmPool` and `AttachBuffer` must be memfds sealed
+with `F_SEAL_SHRINK` and at least as large as the geometry they describe. Both
+are refused otherwise: an unsealed mapping can be truncated after the check, and
+the SIGBUS that follows lands in the compositor, not in the client.
+
 ## Test
 
 ```bash

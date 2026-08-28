@@ -9,17 +9,29 @@ publish = false
 
 [dependencies]
 sol-design = { path = "../../sdk/sol-design" }
-sol-ui = { path = "../../sdk/sol-ui", features = ["native"] }
+sol-ui = { path = "../../sdk/sol-ui" }
 sol-app = { path = "../../sdk/sol-app" }
 sol-graphics = { path = "../../sdk/sol-graphics" }
 sol-system = { path = "../../sdk/sol-system" }
-slint = { version = "=1.13.1", default-features = false, features = ["std", "compat-1-2", "backend-linuxkms", "renderer-software"] }
+# Protocol types and framing for the SCP client; the shell depends on the
+# compositor crate the same way.
+sol-compositor = { path = "../../compositor" }
+# No windowing backend: the compositor owns the display, so the login screen
+# installs its own Slint platform and software-renders into a shared buffer.
+# `software-renderer-systemfonts` is what gives that renderer a font — it
+# picks up installed fonts and falls back to the DejaVu Sans that Slint
+# bundles, so a greeter still draws on a system with no fonts installed.
+slint = { version = "=1.13.1", default-features = false, features = ["std", "compat-1-2", "renderer-software", "software-renderer-systemfonts"] }
 pam = "0.7"
 uzers = "0.12"
 rand = "0.8"
+libc = "0.2"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 serde = { version = "1.0", features = ["derive"] }
+# SCP frames are length-prefixed JSON; the greeter parses them itself so a
+# slow read cannot desynchronize mid-frame.
+serde_json = "1.0"
 
 [dev-dependencies]

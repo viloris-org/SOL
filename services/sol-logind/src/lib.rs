@@ -1,32 +1,62 @@
 //! sol-logind — SOL's login screen service.
 //!
-//! A macOS-inspired authentication interface that displays before the user
-//! session starts. Built with SolKit components and sol-design tokens.
+//! The authentication surface for a SOL machine: it decides who gets a session,
+//! and it is the only client the compositor will let cover the whole screen with
+//! exclusive input.
 //!
 //! # Architecture
 //!
-//! - Runs as a system service before compositor/shell
-//! - Displays visual login UI using Material::Floating panel
-//! - Handles user selection from avatar grid
-//! - Authenticates via password (PAM integration in Phase 2)
-//! - Spawns user session after successful login
+//! sol-logind is an SCP client, not a display server. The compositor starts
+//! first; the greeter connects to it, engages the session lock
+//! ([`Capability::SessionLock`], reserved for this service by name), and
+//! presents the login UI on a lock surface:
 //!
-//! # Phase 1
+//! ```text
+//! sol-compositor (SCP socket)
+//!         ↓
+//! sol-logind connects → LockSession → login UI on the lock surface
+//!         ↓
+//! user authenticates (PAM)
+//!         ↓
+//! UnlockSession → sol-session starts the user's desktop
+//!         ↓
+//! session ends → LockSession again
+//! ```
 //!
-//! Visual-only implementation with authentication stub:
-//! - macOS-like UI layout with generous spacing
-//! - User avatar grid for account selection
-//! - Password field with show/hide toggle
-//! - Primary "Log In" button styled with accent color
-//! - Authentication stub (always succeeds for development)
+//! The lock is what makes this safe to build on. It sits above every layer, so
+//! the shell cannot cover or forge it; it takes keyboard focus exclusively, so
+//! keystrokes cannot reach a window behind it; and if this process dies the
+//! session stays locked rather than falling open (see
+//! `sol_compositor::scp::session_lock`).
+//!
+//! # Layering
+//!
+//! - [`users`] enumerates accounts, [`auth`] authenticates them through PAM
+//! - [`ui`] is the state machine: it owns the password and every login decision,
+//!   and resolves to a renderer-neutral [`ui::LoginFrame`]
+//! - [`render`] rasterizes that frame with Slint's software renderer
+//! - [`scp`] carries the frame to the compositor and input events back
+//! - [`session`] launches the authenticated user's desktop
+//!
+//! Keyboard input goes to [`ui`], never through Slint: the password is this
+//! crate's to hold. Pointer input goes to [`render`], because Slint is what
+//! knows where the avatars and buttons ended up.
+//!
+//! [`Capability::SessionLock`]: sol_compositor::scp::capability::Capability::SessionLock
 
 pub mod auth;
 pub mod render;
+pub mod scp;
+pub mod session;
 pub mod ui;
 pub mod users;
 
-pub use auth::{AuthMode, AuthResult, AuthService, AuthToken};
+pub use auth::{AuthMode, AuthOutcome, AuthResult, AuthService, AuthToken, PamSession};
 pub use render::{LoginAction, LoginRenderer};
+pub use scp::{
+    FrameBuffer, KeyInput, LockDriver, LockError, LockEvent, LockPhase, Modifiers, ScpClient,
+};
+pub use session::launch_user_session;
 pub use ui::{LoginFrame, LoginState, LoginUi, PasswordVisibility};
 pub use users::{UserAccount, UserMode, UserService};
 
@@ -81,7 +111,7 @@ impl LoginService {
     }
 
     /// Attempt to authenticate the current user/password.
-    pub fn authenticate(&mut self) -> Result<AuthToken> {
+    pub fn authenticate(&mut self) -> Result<AuthOutcome> {
         if !self.ui.can_login() {
             anyhow::bail!("Cannot authenticate: no user selected or password not entered");
         }
@@ -97,10 +127,10 @@ impl LoginService {
         let result = self.auth_service.authenticate(&username, &password);
 
         match result {
-            Ok(token) => {
+            Ok(outcome) => {
                 self.ui.authentication_complete();
                 tracing::info!("Authentication successful for user: {}", username);
-                Ok(token)
+                Ok(outcome)
             }
             Err(e) => {
                 tracing::warn!("Authentication failed: {}", e);
@@ -144,8 +174,11 @@ mod tests {
         let result = service.authenticate();
         assert!(result.is_ok());
 
-        let token = result.unwrap();
-        assert_eq!(token.username, service.ui.selected_user().unwrap().username);
+        let outcome = result.unwrap();
+        assert_eq!(
+            outcome.token.username,
+            service.ui.selected_user().unwrap().username
+        );
     }
 
     #[test]

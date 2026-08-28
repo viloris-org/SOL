@@ -20,6 +20,28 @@ serde_json = "1.0"
 thiserror = "1.0"
 libc = "0.2"
 
+# The compositor cannot inherit `[workspace.lints]`. That table sets
+# `unsafe_code = "forbid"`, and `forbid` is deliberately not overridable — but
+# this crate is the one that talks to the kernel directly: SCM_RIGHTS descriptor
+# passing, memfd sealing, getrandom, poll. Inheriting would not compile, so
+# before this table existed the crate simply had *no* lint policy at all: the
+# clippy rules the rest of the workspace agreed on were silently inert exactly
+# where the attack surface is largest.
+#
+# This is that policy, restated locally, with the one exception made explicit.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+# Deferred rather than dismissed: roughly 600 findings, none of them
+# correctness. Worth turning on a module at a time, not as one mechanical sweep
+# that would bury the diff this policy exists to make readable.
+pedantic = "allow"
+nursery = "allow"
+
 [features]
 default = []
 
@@ -38,6 +60,10 @@ path = "tests/scp_input.rs"
 [[test]]
 name = "scp_events"
 path = "tests/scp_events.rs"
+
+[[test]]
+name = "scp_identity"
+path = "tests/scp_identity.rs"
 
 [[example]]
 name = "scp-client"
