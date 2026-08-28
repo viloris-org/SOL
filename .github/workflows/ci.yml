@@ -35,18 +35,12 @@ jobs:
        - name: Install system libs
          run: |
            sudo apt-get update
-           sudo apt-get install -y \
-             libegl1 libgles2 libgbm1 libgl1-mesa-dri \
-             libxkbcommon-dev \
-             libdbus-1-dev
+           sudo apt-get install -y libdbus-1-dev libpam0g-dev
        - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
            toolchain: 1.98.0
        - uses: Swatinem/rust-cache@v2
-       # Default features only. The `udev` feature (DRM/GBM/libseat) requires a
-       # host libdisplay-info < 0.3.0 and a real seat (ADR-0005); it is
-       # exercised on hardware in Phase 1+, not in CI.
        - name: cargo check (workspace, default features)
          run: cargo check --workspace --locked
 
@@ -58,10 +52,7 @@ jobs:
        - name: Install system libs
          run: |
            sudo apt-get update
-           sudo apt-get install -y \
-             libegl1 libgles2 libgbm1 libgl1-mesa-dri \
-             libxkbcommon-dev \
-             libdbus-1-dev
+           sudo apt-get install -y libdbus-1-dev libpam0g-dev
        - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
@@ -74,28 +65,23 @@ jobs:
    test:
      name: Test
      runs-on: ubuntu-latest
-     # The sol_session integration tests drive the compositor in `--headless`
-     # mode (no GPU / no display needed) and exercise two end-to-end paths:
-     #   1. the Phase 0 reference client (`test-client`),
-     #   2. the Phase 1 M1 layer-shell top bar (`sol-shell --once`),
-     # asserting the layer-shell configure round-trip. System libs are still
-     # installed so the binaries build (winit/EGL dev path is the default set).
+     # Native SCP integration tests need only a Unix runtime directory; they do
+     # not open a host display or load a compatibility compositor protocol.
      env:
-       # Required for tests: Wayland socket path resolution.
+       # Required for the SCP Unix socket path.
        XDG_RUNTIME_DIR: /tmp
      steps:
        - uses: actions/checkout@v5
        - name: Install system libs
          run: |
            sudo apt-get update
-           sudo apt-get install -y \
-             libegl1 libgles2 libgbm1 libgl1-mesa-dri \
-             libxkbcommon-dev \
-             libdbus-1-dev
+           sudo apt-get install -y libdbus-1-dev libpam0g-dev
        - name: Install pinned Rust toolchain
          uses: dtolnay/rust-toolchain@stable
          with:
            toolchain: 1.98.0
        - uses: Swatinem/rust-cache@v2
+       - name: Validate SCP-only boundary
+         run: ./scripts/validate-scp-only.sh
        - name: cargo test (workspace)
          run: cargo test --workspace --locked -- --nocapture
