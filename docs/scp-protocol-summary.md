@@ -2,7 +2,7 @@
 
 > **快速参考**：SCP 是 SOL 的原生 compositor 协议，基于能力模型的权限最小化设计。
 > 
-> **完整设计**：见 [ADR-0027](decisions/ADR-0027-sol-compositor-protocol.md)  
+> **完整设计**：见 [ADR-0027](decisions/0027-sol-compositor-protocol.md)
 > **实现状态**：见 [scp-implementation-checklist.md](scp-implementation-checklist.md)
 
 ## 核心设计原则
@@ -344,16 +344,15 @@ SOL 是 **Linux Family OS**（类似 Android/Chrome OS），而非 Linux 发行�
 
 ## 开发资源
 
-- **完整设计**：[ADR-0027](decisions/ADR-0027-sol-compositor-protocol.md)
+- **完整设计**：[ADR-0027](decisions/0027-sol-compositor-protocol.md)
 - **实现清单**：[scp-implementation-checklist.md](scp-implementation-checklist.md)
-- **设计总结**：[scp-design-summary.md](scp-design-summary.md)
 - **示例客户端**：`compositor/examples/scp-client.rs`
 - **代码位置**：`compositor/src/scp/`
 
 ## 下一步
 
-1. **P0 - 核心功能**：缓冲区管理、输入事件、输出管理
-2. **P1 - 基础能力**：Popup、触摸、剪贴板、DnD、sol-securityd 集成
+1. **P0 - 原生后端**：SCP-owned surface 渲染、硬件输入、DRM/KMS 输出
+2. **P1 - 基础能力闭环**：Popup、触摸、剪贴板、DnD、sol-securityd 集成
 3. **P2 - 高级能力**：屏幕捕获、全局快捷键、Fullscreen
-4. **P3 - 协议演进**：迁移到 protobuf，版本协商
-5. **P4 - 工具和文档**：scp-inspector、SDK 封装、迁移指南
+4. **P3 - 协议演进**：稳定 schema、版本协商和非 Rust bindings
+5. **P4 - 工具和文档**：scp-inspector、SDK 封装、开发者指南

@@ -30,7 +30,7 @@ top-bar configure/commit slice plus renderer-neutral Dock/Launcher, top-bar,
 overview, notifications, Quick Settings, consent, and overlay models. Native
 mapping/rendering and the compositor D-Bus service/proxy remain incomplete.
 
-- The first shell surface (layer-shell top bar) is an open **Phase 1** M1
+- The first SCP layer surface (top bar) is an open **Phase 1** M1
   deliverable until it is visibly mapped/rendered and survives restart/reconnect.
 - The full desktop interaction model (Dock / Launcher / Overview / notifications /
   quick settings / global menu / Live Capsule / touchpad gestures) is **Phase 4**.

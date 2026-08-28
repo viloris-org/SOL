@@ -9,7 +9,7 @@ Documentation is organized by audience and lifecycle:
 | [Shell Spatial and Live Activity Contract](shell-experience.md) | Product / Shell / application engineering | Dock, Launcher, global menu, window controls, right-side status, tray, and Live Capsule |
 | [Contextual IME PRD](contextual-ime-prd.md) | Product / IME engineering | Proposal and staged requirements for local contextual candidate ranking over fcitx5 |
 | [ROADMAP](ROADMAP.md) | Engineering / product | Execution view of the PRD phases split into milestones, deliverables, and acceptance points |
-| [Wayland protocol matrix](status/wayland-protocol-matrix.md) | Compositor / Shell engineering | Per-interface advertisement, semantic maturity, missing behavior, and promotion evidence |
+| [Historical Wayland protocol matrix](status/wayland-protocol-matrix.md) | Compositor / Shell engineering | Retired frontend evidence retained for migration history |
 | [Architecture](architecture.md) | Engineering | How the logical layers map to the monorepo, and boundary rules |
 | [SolKit getting started](solkit-getting-started.md) | Application developers | Start a renderer-independent native app from the SolKit starter template |
 | [Decision log](decisions/README.md) | Engineering | Architecture Decision Records (ADR) and the status-bearing decision register (PRD §41) |
@@ -21,7 +21,7 @@ Documentation is organized by audience and lifecycle:
 2. **PRD** — the broader "what and why."
 3. **Architecture** — the layer-to-code map and boundary rules.
 4. **ROADMAP** — the "what, in what order" engineering view mapped to code.
-5. **Protocol matrix** — exact Wayland and compositor↔Shell maturity.
+5. **Protocol docs** — current SCP status plus the historical frontend matrix.
 6. **Decision log** — the "why this trade-off" records and what is still open.
 7. **Component READMEs** — the "current state" of a given crate.
 
@@ -34,17 +34,17 @@ of truth.
 
 | Area | Status |
 |---|---|
-| Platform / compositor | Phase 0 foundation spike accepted; Phase 1 reopened for protocol, integration, interoperability, and real DRM closure |
+| Platform / compositor | Native SCP transport/state work headlessly; rendering, input, output, and real DRM closure remain |
 | Shell | Top-bar configure/commit slice exists; layer mapping/rendering and compositor D-Bus remain Phase 1 gates; broader experience is Phase 4 |
 | SolKit SDK | Phase 2 in progress — token, semantic-component, layout, lifecycle/command, graphics, and motion foundations are implemented; rendering, accessibility, and keyboard work remain |
 | Services | Mixed S1–S3 foundations — `sol-ime` has protocol/frontend seams and an fcitx5 transport slice; candidate rendering and end-to-end desktop input remain open |
 | Apps | Scaffolds — Files/Terminal/Settings in Phase 3 |
-| Protocols / packaging | Early — no SOL-owned stable schema; standard Wayland coverage is tracked per interface; PKGBUILDs follow milestone completion |
+| Protocols / packaging | Early — Rust SCP messages work internally; no stable language-neutral SCP schema yet |
 | OS boot / image | Foundations — UKI-aware deployment manifests and deterministic A/B trial policy are implemented; signed UEFI execution, redundant boot/recovery authorities, durable state, and graphics handoff remain Phase 7 work |
 | Native app platform | Planned — `.app`, `sol-pkg`, sandbox enforcement, and major/revision/feature runtime compatibility are Phases 8–9 |
 | Accounts | Planned — `sol-securityd`-coordinated account grants, system-owned metadata, encrypted credentials, and generation-fenced leases |
 | Material | Token foundation implemented — compositor-backed adaptive glass and hardware QA remain |
-| GTK/Qt compatibility | Architecture accepted — private bundled runtimes, optional official adapters, equal capability/security contracts |
+| GTK/Qt adapters | Architecture accepted — private bundled runtimes, explicit SOL adapters, equal capability/security contracts |
 | Shell spatial model | Accepted — bottom Dock, upper-left foreground menu, upper-right status/Live Capsule; native surfaces pending |
 
 ## Conventions

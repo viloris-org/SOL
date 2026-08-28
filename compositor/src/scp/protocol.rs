@@ -15,6 +15,8 @@ pub type OutputId = u32;
 pub type BufferId = u32;
 pub type PoolId = u32;
 pub type LayerSurfaceId = u32;
+pub type LockId = u32;
+pub type LockSurfaceId = u32;
 
 /// Client → Compositor messages.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,13 +125,19 @@ pub enum ClientMessage {
     },
 
     // ===== Popup Windows =====
-    /// Create a popup window
+    /// Create a popup window (requires WindowPopup capability).
+    ///
+    /// `parent_id` may name a toplevel surface or another popup's surface; the
+    /// latter forms a nested popup chain.
     CreatePopup {
         surface_id: SurfaceId,
         parent_id: SurfaceId,
         positioner: PopupPositioner,
         grab: bool,
     },
+
+    /// Dismiss a popup this client created.
+    DestroyPopup { popup_id: PopupId },
 
     // ===== Toplevel State Management =====
     /// Request state change (maximize, minimize, fullscreen)
@@ -143,6 +151,9 @@ pub enum ClientMessage {
         toplevel_id: ToplevelId,
         app_id: String,
     },
+
+    /// Close a toplevel this client owns, releasing its window and popups.
+    CloseToplevel { toplevel_id: ToplevelId },
 
     // ===== Input =====
     /// Set cursor image
@@ -203,6 +214,37 @@ pub enum ClientMessage {
         serial: u32,
     },
 
+    // ===== Session Lock =====
+    /// Engage the session lock (requires SessionLock capability).
+    ///
+    /// The lock takes effect immediately: other clients stop receiving input
+    /// before this client has drawn anything. The client must then cover every
+    /// output with a lock surface, after which the compositor replies
+    /// `SessionLocked`.
+    LockSession { capability_token: Vec<u8> },
+
+    /// Create a lock surface covering one output.
+    ///
+    /// `output_id` omitted means the primary output. Lock surfaces are always
+    /// output-sized; there is no anchor, margin, or client-chosen geometry.
+    CreateLockSurface {
+        surface_id: SurfaceId,
+        lock_id: LockId,
+        output_id: Option<OutputId>,
+    },
+
+    /// Acknowledge a lock surface configure
+    AckLockConfigure {
+        lock_surface_id: LockSurfaceId,
+        serial: u32,
+    },
+
+    /// Release the session lock after successful authentication.
+    ///
+    /// Only the lock's owner may unlock, and only once the lock has engaged on
+    /// every output.
+    UnlockSession { lock_id: LockId },
+
     // ===== Data Transfer (Clipboard/DnD) =====
     /// Offer data to clipboard (requires ClipboardWrite capability + recent interaction)
     SetSelection {
@@ -210,12 +252,14 @@ pub enum ClientMessage {
         serial: u32, // Must match recent input serial
     },
 
-    /// Send clipboard data to compositor
-    SendSelectionData {
-        mime_type: String,
-        #[serde(skip, default = "invalid_fd")]
-        fd: i32,
-    },
+    /// Read the current clipboard selection (requires ClipboardRead capability
+    /// and foreground focus).
+    ///
+    /// The compositor creates a pipe, hands the write end to the selection owner
+    /// in `RequestSelectionData`, and returns the read end here in
+    /// `SelectionData`. Content flows directly between the two clients: the
+    /// compositor never buffers or inspects clipboard bytes.
+    RequestSelection { mime_type: String },
 
     /// Start drag-and-drop operation (requires DragAndDrop capability)
     StartDrag {
@@ -226,12 +270,12 @@ pub enum ClientMessage {
         serial: u32,
     },
 
-    /// Send drag data
-    SendDragData {
-        mime_type: String,
-        #[serde(skip, default = "invalid_fd")]
-        fd: i32,
-    },
+    /// Read the dragged data, sent by the drop target after `Drop`.
+    ///
+    /// Uses the same pipe handoff as `RequestSelection`: the source receives the
+    /// write end via `RequestDragData` and the target the read end via
+    /// `DragData`.
+    ReceiveDragData { mime_type: String },
 
     /// Accept a drag offer
     AcceptDrag {
@@ -399,12 +443,51 @@ pub enum CompositorMessage {
     /// Layer surface closed
     LayerSurfaceClosed { layer_id: LayerSurfaceId },
 
+    // ===== Session Lock =====
+    /// The lock is engaged and owned by this client.
+    ///
+    /// Sent as the direct reply to `LockSession`, before any lock surface
+    /// exists: the client needs `lock_id` in order to create them. The desktop
+    /// is already cut off at this point, but nothing is drawn yet.
+    SessionLockEngaged { lock_id: LockId },
+
+    /// The session is locked: every output is covered by an acknowledged lock
+    /// surface. Sent only to the lock's owner.
+    SessionLocked { lock_id: LockId },
+
+    /// The compositor will not honor this client's lock, or has taken it away.
+    ///
+    /// The client owns no lock objects after this and must not assume the
+    /// session is locked or unlocked on its behalf.
+    SessionLockFinished { reason: String },
+
+    /// Configure a lock surface. Always the full output size.
+    ConfigureLockSurface {
+        lock_surface_id: LockSurfaceId,
+        serial: u32,
+        width: i32,
+        height: i32,
+    },
+
+    /// The session's lock state changed, broadcast to every other client so it
+    /// can drop sensitive on-screen content while it is not visible.
+    SessionLockStateChanged { locked: bool },
+
     // ===== Data Transfer (Clipboard/DnD) =====
     /// Selection offered (clipboard content available)
     SelectionOffer { mime_types: Vec<String> },
 
-    /// Request clipboard data
+    /// Sent to the selection owner: write the named MIME type into `fd`, then
+    /// close it. The compositor never inspects clipboard bytes.
     RequestSelectionData {
+        mime_type: String,
+        #[serde(skip, default = "invalid_fd")]
+        fd: i32,
+    },
+
+    /// Sent to a client that called `RequestSelection`: read the clipboard
+    /// content from `fd` until EOF.
+    SelectionData {
         mime_type: String,
         #[serde(skip, default = "invalid_fd")]
         fd: i32,
@@ -431,8 +514,16 @@ pub enum CompositorMessage {
     /// Drop occurred
     Drop,
 
-    /// Request drag data
+    /// Sent to the drag source: write the named MIME type into `fd`, then close
+    /// it.
     RequestDragData {
+        mime_type: String,
+        #[serde(skip, default = "invalid_fd")]
+        fd: i32,
+    },
+
+    /// Sent to the drop target: read the dragged content from `fd` until EOF.
+    DragData {
         mime_type: String,
         #[serde(skip, default = "invalid_fd")]
         fd: i32,
@@ -460,6 +551,15 @@ pub enum BufferFormat {
     Rgba8888,
 }
 
+impl BufferFormat {
+    /// Bytes one pixel occupies, which is what a stride must at minimum cover.
+    pub const fn bytes_per_pixel(self) -> i32 {
+        match self {
+            Self::Argb8888 | Self::Xrgb8888 | Self::Rgba8888 => 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShmFormat {
     Argb8888,
@@ -467,7 +567,17 @@ pub enum ShmFormat {
     Rgb565,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl ShmFormat {
+    /// Bytes one pixel occupies, which is what a stride must at minimum cover.
+    pub const fn bytes_per_pixel(self) -> i32 {
+        match self {
+            Self::Argb8888 | Self::Xrgb8888 => 4,
+            Self::Rgb565 => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,

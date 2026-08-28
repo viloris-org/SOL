@@ -9,8 +9,11 @@
 > [OS Platform Definition](os-platform.md), Shell behavior in the
 > [Shell Spatial and Live Activity Contract](shell-experience.md), engineering
 > decisions in the [decision log](decisions/README.md), and product
-> requirements in the [PRD](PRD.md). Wayland implementation status is tracked
-> separately in the [Wayland protocol matrix](status/wayland-protocol-matrix.md).
+> requirements in the [PRD](PRD.md). Evidence from the retired frontend is
+> preserved in the historical
+> [Wayland protocol matrix](status/wayland-protocol-matrix.md). ADR-0028 and
+> ADR-0032 supersede those compatibility milestones: current compositor work
+> is SCP-only.
 >
 > This Roadmap is an **engineering execution view** of the PRD: it decomposes
 > each Phase into shippable work items, acceptance points, and milestones, and
@@ -23,14 +26,20 @@ decisions, and this file owns sequencing and closure evidence. Component
 READMEs and tests describe implementation evidence; they do not relax a
 normative acceptance gate.
 
+> **Migration note (2026-08-28):** Phase 0 and early Phase 1 entries below
+> preserve evidence from the retired Wayland spike. They are historical, not
+> current acceptance criteria. New compositor, application, shell, clipboard,
+> input-method, and toolkit work must use SCP and must pass
+> `scripts/validate-scp-only.sh`.
+
 ---
 
 ## Overview
 
 | Phase | Name | Goal | Success criterion (from PRD §38) | Status |
 |---|---|---|---|---|
-| 0 | Foundation | Standalone Wayland session | Start a standalone SOL Wayland session and run standard Wayland apps | ⚠ Accepted foundation spike; not a release claim |
-| 1 | Desktop Core | A usable daily Wayland compositor | SOL works as a basic daily-use Wayland compositor | ⏳ **Reopened — integration and real-session closure pending** |
+| 0 | Foundation | Native SCP session | Complete an authenticated SCP surface/toplevel round trip | ✅ Headless protocol foundation accepted |
+| 1 | Desktop Core | Visible native SCP desktop | SOL runs a visible, input-capable SCP session on supported hardware | ⏳ Native renderer/input/output closure pending |
 | 2 | SolKit | Native app framework | Build an app with native SOL look and interaction entirely in SolKit | ⏳ In progress (real-platform closure pending) |
 | 3 | First-party Applications | First-party apps | The three first-party apps share a unified UX | ⏳ In progress |
 | 4 | Shell Experience | Complete desktop interaction model | SOL forms a complete, coherent desktop interaction model | ⏳ In progress |
@@ -147,100 +156,90 @@ later implementation.
 
 ---
 
-## Phase 0 — Foundation spike ⚠
+## Phase 0 — Native SCP foundation ✅
 
-> **Goal:** set up the development environment, Rust workspace, Smithay
-> compositor, basic Wayland client, input, and basic rendering.
+> **Goal:** establish an authenticated, capability-scoped SCP transport and
+> native reference client without a compatibility frontend.
 
 ### Accepted evidence
 
 | Deliverable | Maturity | Evidence and limit |
 |---|---|---|
 | Dev environment / Rust workspace (monorepo, ADR-0001/0002) | S3 | Workspace builds and tests as an integrated repository; release reproducibility is owned by Phase 7. |
-| `sol-compositor` Smithay compositor (winit backend) | S3 | Starts a nested `wayland-sol` development session; this is not real DRM/session validation. |
-| Base Wayland protocols | S2–S3 by interface | Basic globals and selected round trips exist; exact status is normative in the [protocol matrix](status/wayland-protocol-matrix.md). |
-| GL rendering + frame-callback loop | S3 development backend | winit renders client buffers and sends frame callbacks; multi-window geometry, layer surfaces, damage/pacing, and hardware behavior remain Phase 1 gates. |
-| `test-client` reference client | S3 fixture | The repository-owned client validates a narrow `wl_shm`/`xdg_toplevel` path, not general application compatibility. |
-| Headless integration tests | S3 fixture boundary | `cargo test -p sol-compositor --test sol_session` validates selected protocol round trips without a GPU or visible rendering. |
-| winit-first dev path (ADR-0005) | S3 | Developable with no root/VT; real DRM/GBM validation is not implied. |
+| SCP Unix transport | S3 | Authenticates peer PID/AppId, frames bounded messages, and transfers buffer FDs with `SCM_RIGHTS`. |
+| `ScpState` | S3 narrow | Owns sessions, capabilities, surface/toplevel/layer objects, and rejects forged tokens and cross-session object access. |
+| `scp-client` reference client | S3 fixture | Completes connect → surface → toplevel → configure/ack against the real server. |
+| Headless integration tests | S3 fixture boundary | `cargo test -p sol-compositor --test scp_session` validates native round trips without claiming visible rendering. |
+| SCP-only regression guard | S3 | `scripts/validate-scp-only.sh` rejects retired packages, socket variables, manifests, and source paths. |
 | `sol-design` token seed | S2 | Token consistency tests exist; this is not a compositor closure item. |
 
 ### Acceptance baseline
 
-The spike demonstrated that the architecture can host a Wayland socket, run a
-repository-owned client, and render through the development backend. The
-automated test runs headless and therefore does not by itself prove the full
-success criterion of running representative standard applications in a usable
-standalone session.
+The foundation demonstrates a real SCP client/server boundary, capability
+checks, and object lifecycle. It is headless and does not prove visible
+rendering, physical input, or a usable hardware session.
 
 ### Phase 0 → Phase 1 handoff
 
-The reusable core (`SolState`) has implementation slices for window management,
-workspace state, layer-shell, output discovery, and IME globals. Phase 1 owns
-turning those slices into a coherent real session; none is promoted merely
-because its handler, model, or fixture exists.
+The reusable core is `ScpState`. Phase 1 owns connecting SCP-owned surfaces to
+native rendering, input, output, shell policy, and a real session.
 
 ---
 
 ## Phase 1 — Desktop Core ⏳
 
-> **Status:** Reopened on 2026-08-24 after implementation/evidence audit.
+> **Status:** Rebaselined to SCP-only on 2026-08-28.
 
-> **Goal:** evolve from "minimal well-formed compositor" into a **basic
-> daily-use Wayland compositor**: window management, focus, move/resize,
-> workspaces, multi-monitor, basic shell IPC, and input-method protocols.
+> **Goal:** evolve from the headless SCP foundation into a visible,
+> input-capable native desktop on supported hardware.
 
 ### Audited implementation baseline
 
-This table records the strongest currently evidenced maturity. Detailed
-Wayland interface coverage lives in the [protocol matrix](status/wayland-protocol-matrix.md).
+This table records the strongest currently evidenced maturity.
 
 | Capability | Current maturity | Evidence and open boundary |
 |---|---|---|
-| `xdg_toplevel` creation/configure | S3 narrow integration | Repository clients complete headless configure/ack round trips. Full lifecycle, state transitions, representative clients, and visible multi-window behavior remain open. |
-| Hit testing, focus, move/resize, snap | S2 | Models and grabs exist. The winit renderer still places toplevel render trees at a fixed origin, and focus does not yet prove correct activated/unactivated delivery. |
-| Workspaces | S2 | In-memory grouping/switch methods and fixtures exist; there is no real input or Shell IPC path that makes the user-visible session switch work. |
-| `wl_output` and DRM topology | S2–S3 | udev feature builds and topology fixtures exist. Correct global retirement, xdg-output, cross-output window behavior, persisted layout, and real hotplug remain open. |
-| Fractional scale | S2 | A preferred-scale event round trip exists. `viewporter`, cross-output transitions, rendered sharpness, damage, and hardware validation remain open. |
-| layer-shell and first Shell surface | S2 | The Shell receives configure and commits a buffer. Mapping, layout/exclusive zones, focus, rendering layer surfaces, and crash/restart behavior are not yet end-to-end. |
+| SCP toplevel creation/configure | S3 narrow integration | Native clients complete authenticated headless configure/ack round trips; visible multi-window behavior remains open. |
+| Native renderer and composition | S0 | SCP buffers/state exist, but no active renderer presents them to a display. |
+| Input and window policy | S0–S2 by model | SCP input state and renderer-neutral shell models exist; physical event ingestion, hit testing, focus, move/resize, and workspaces are not integrated. |
+| Native output/DRM topology | S0 | Output protocol state exists; DRM/KMS discovery, modesetting, hotplug, and multi-output composition require a new native backend. |
+| Fractional scale | S2 model | SCP output scale can be represented; cross-output rendering and hardware sharpness remain open. |
+| SCP layer surface and Shell | S3 narrow | Shell obtains a capability, configures a top layer surface, and commits headlessly; mapping and rendering remain open. |
 | Compositor↔Shell typed D-Bus | S1 | ADR-0006 selects D-Bus. The compositor service, schema/bindings, Shell proxy, reconnect, and integration test remain unimplemented. |
-| Clipboard | S3 headless integration | UTF-8 selection transfer passes in an isolated session; real application interoperability and persistence remain open. |
-| Drag and drop | S2 or lower | Data-device plumbing exists, but server-send/product flows and app-to-app native transfer are not complete. |
-| text-input v3 / input-method v2 | S2 | Globals and handlers are registered; popup geometry and compositor→IME→application commit are incomplete. |
+| SCP clipboard/drag state | S2 | Capability-scoped state exists; cross-process FD transfer and application adapters remain open. |
+| SCP text input | S0 | `sol-ime` model/engine transport exists, but native focus/preedit/commit messages and candidate surface routing remain open. |
 | `sol-ime` ↔ fcitx5 | S2 | Model/transport fixtures exist. Candidate rendering and real multilingual desktop validation remain open. |
 
 ### M1 success criterion
 
-> "SOL can be used as a basic daily-use Wayland compositor."
+> "SOL can run a visible, input-capable SCP desktop session on supported hardware."
 
 This criterion is not satisfied by handler registration, a model, or a
 headless round trip. M1 closes only when all of the following are S5:
 
-1. **Window lifecycle:** representative GTK4, Qt6, SDL/Wayland, terminal, and
-   browser clients can create multiple windows and complete focus, popup,
+1. **Window lifecycle:** representative SCP-native applications can create
+   multiple windows and complete focus, popup,
    move, resize, maximize, restore, fullscreen, minimize, close, disconnect,
-   and invalid-request paths with correct visible geometry and xdg state.
+   and invalid-request paths with correct visible geometry and SCP state.
 2. **Shell lifecycle:** top bar and the Phase-1-required Shell surface are
    actually mapped, laid out, rendered, and focus-safe; the typed D-Bus
    contract drives workspace/window state; Shell crash, restart, and reconnect
    do not disrupt the compositor or applications.
-3. **Protocol baseline:** every required interface in the protocol matrix has
-   declared versions, semantic coverage, negative tests, and representative
-   client evidence. Protocols not required for M1 remain explicitly visible as
-   planned rather than silently absent.
+3. **Protocol baseline:** every required SCP capability has a declared version,
+   semantic coverage, negative tests, and representative native-client evidence.
 4. **Data and input:** clipboard and drag-and-drop work between real
-   applications; text-input/input-method completes an application →
+   applications; SCP text input completes an application →
    compositor → fcitx5 → candidate UI → application commit flow for at least
    Chinese, Japanese, and Korean scenarios.
 5. **Outputs and scaling:** a two-output session supports placement, cross-
    output movement, hotplug fallback, unplug cleanup, and 1.0/1.25/1.5/2.0
-   scale transitions without stale globals or unusable windows.
+   scale transitions without stale output state or unusable windows.
 6. **Real session:** local VT/libseat/DRM/GBM smoke passes on the initial Intel
    and AMD target matrix. NVIDIA status is recorded explicitly and cannot be
    represented as complete without its own evidence.
 7. **Regression gate:** all Phase 1 CI tests pass from a clean checkout; the
    hardware/interop report identifies the exact commit, devices, drivers,
-   clients, protocol versions, failures, and waivers.
+   clients, SCP versions, failures, and waivers.
 
 Anything not satisfying these gates remains Phase 1 work; it may not be moved
 to Phase 5 solely to preserve a completed Phase 1 label.
@@ -311,8 +310,8 @@ to Phase 5 solely to preserve a completed Phase 1 label.
       and accessibility variants.
 
 > **Platform limit:** the SolUI semantic tree is ready to map into an
-> accessibility bridge, but real Wayland screen-reader/AT-SPI transport and
-> input-method interaction remain integration work; no system assistive-tech
+> accessibility bridge, but real SCP surface/input integration and
+> screen-reader/AT-SPI validation remain integration work; no system assistive-tech
 > claim is made by the headless tests.
 
 **Settings boundary**
@@ -341,9 +340,9 @@ to Phase 5 solely to preserve a completed Phase 1 label.
       covers layout/components, command execution, interruptible motion,
       token-mode accessibility preferences, keyboard navigation, and the
       semantic accessibility tree without importing a concrete backend.
-- [S2] **Native Wayland session smoke:** the Slint-backed showcase ran against
-      a live `sol-compositor` Wayland socket on 2026-08-16. The bounded run
-      reached the native event loop without a protocol or renderer failure.
+- [S0] **Native SCP application surface:** connect the private SolUI adapter to
+      an SCP toplevel, submit buffers, and drive its event loop against the
+      compositor. The current showcase proves only the renderer-neutral API.
 - [S0] **Accessibility-platform closure:** verify a real accessibility bridge
       with assistive technology. The native smoke does not prove GPU pacing,
       input latency, multi-output behavior, or AT-SPI/screen-reader transport.
@@ -355,7 +354,7 @@ to Phase 5 solely to preserve a completed Phase 1 label.
 
 **M2 remains in progress until the real-platform closure item is evidenced.**
 The example proves the framework API workflow; it must not be mistaken for a
-claim that the unavailable Wayland and assistive-technology environment passed.
+claim that the unavailable SCP display and assistive-technology environment passed.
 
 ---
 
@@ -378,7 +377,7 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       grid with Unicode and true color, bounded scrollback/search, tabs,
       selection/clipboard and keyboard/resize contracts, renderer-neutral
       SolUI/graphics projection, and command palette navigation. Native
-      Wayland/GPU rendering, PTY read-loop wiring, and system clipboard smoke
+      SCP/GPU rendering, PTY read-loop wiring, and system clipboard smoke
       validation remain platform-adapter follow-ups.
 - [S0] **Files (PRD §25):** sidebar / tabs / search / drag & drop / preview /
       removable storage / network locations / context actions / trash /
@@ -394,7 +393,7 @@ claim that the unavailable Wayland and assistive-technology environment passed.
   - [S2] **Bounded image thumbnails:** local PNG/JPEG/GIF/WebP previews decode
         into renderer-neutral RGBA thumbnails capped at 256 px with strict
         dimension/allocation limits; malformed images fall back to binary.
-  - [S0] **Desktop and platform integrations:** native Wayland/GPU rendering,
+  - [S0] **Desktop and platform integrations:** native SCP/GPU rendering,
         removable and network locations, portal-backed trash, and real desktop
         drag/drop transport.
 - [S2] Dogfooding loop (§24): first-party command-palette divergence found in
@@ -444,8 +443,8 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         Dock-anchored interruptible presentation, `Super+A`, keyboard/a11y,
         fractional scaling, and reduced-motion/transparency behavior.
   - [S0] **Left-side window controls:** native and server-side decorations use
-        Close / Minimize / Maximize-Restore; GTK/Qt adapter conformance and
-        generic CSD fallback remain explicit compatibility work.
+        Close / Minimize / Maximize-Restore; GTK/Qt adapter conformance must
+        preserve compositor-owned chrome without a generic CSD fallback.
 - [S0] **Overview / Workspace:** workspace overview, visual switching
   - [S2] **Renderer-neutral overview core:** typed workspace/window snapshots,
         accessibility and keyboard model, switch/move-window intents, and a
@@ -561,12 +560,12 @@ claim that the unavailable Wayland and assistive-technology environment passed.
       exclusive-zone, input-region, focus, Escape/dismiss, accessibility, and
       token-motion contracts with deterministic SolUI fixtures (ADR-0015).
       Screen-recording and IME candidate-window product surfaces remain open.
-- [S2] **Layer-shell popup integration validation (ADR-0004 validation point #1):**
+- [S2] **SCP layer-surface popup model validation (ADR-0004 validation point #1):**
       repeatable headless compositor + SolUI fixture validates placement,
       fractional scale, input, focus, and lifecycle contracts. The existing
-      `sol_session` test remains the real top-bar layer-shell round trip;
-      native transient popup, physical multi-output, GPU, and AT-SPI validation
-      remain field work rather than CI claims.
+      `sol-shell --once` exercises the real SCP top-bar configure/commit path;
+      automated cross-process popup, physical multi-output, GPU, and AT-SPI
+      validation remain field work rather than CI claims.
 
 ### M4 success criterion
 
@@ -602,12 +601,10 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 - [S0] **Multi-monitor:** hotplug, independent configuration, per-monitor
       workspaces
 - [S0] **Fractional scaling:** crisp rendering at non-integer scales
-  - [S2] **Fractional-scale protocol and renderer boundary:** compositor output
-        configuration validates scales from 0.5x to 8x, advertises
-        `wp_fractional_scale_v1`, updates each surface's preferred scale, and
-        renders using the fractional value. A headless 1.25x Wayland client
-        round-trip verifies the 150/120 protocol value; physical GPU/display
-        sharpness validation remains required.
+  - [S2] **Fractional-scale state boundary:** SCP output configuration validates
+        scale values and SolUI converts logical sizes at the host boundary.
+        Per-output surface updates, physical GPU rendering, and display
+        sharpness validation remain required.
 - [S0] **NVIDIA:** driver path, private GBM / VRAM parameters
 - [S0] **Touchpad / gestures:** mature gesture stack
 - [S0] **Display hotplug:** complete
@@ -629,30 +626,23 @@ claim that the unavailable Wayland and assistive-technology environment passed.
 
 **Desktop core capabilities**
 
-- [S2] **Session-launch foundation:** installed `sol-session` validates an
-      XDG runtime directory and deterministic socket name, starts
-      `sol-compositor --tty-udev`, waits for its Wayland socket, then starts
-      settingsd, notificationd, and portal session-bus services before
-      `sol-shell` with the matching desktop/Wayland environment. The
-      compositor remains session-critical while shell/service crashes restart
-      independently. Dry-run and process supervision tests do not require DRM,
-      a VT, or a login manager; `scripts/validate-session-services.sh` runs the
-      real service daemons under an isolated session bus, probes all three
-      names, and verifies shutdown releases them. Real
-      display-manager, libseat/DRM, VT, and desktop-session validation remain
-      required before calling this a field-validated session path.
+- [S2] **SCP session-launch foundation:** installed `sol-session` validates an
+      XDG runtime directory and deterministic `SOL_SCP_SOCKET`, starts the
+      native compositor, waits for its SCP socket, then starts session services
+      and `sol-shell` with the same environment. `sol-logind` now launches this
+      plan after authentication while retaining the PAM session. Native
+      rendering, libseat/DRM, VT, and field desktop-session validation remain
+      required.
 - [S0] Clipboard, drag & drop fully polished
   - [S2] **Renderer-neutral clipboard and drag foundation:** Terminal exposes a
         typed `ClipboardAdapter` with a deterministic memory fixture, and
         Files validates typed `DropRequest` copy/move operations against local
-        fixtures. Native Wayland data-device transport and desktop smoke
+        fixtures. Native SCP data-device transport and desktop smoke
         validation remain required.
-  - [S2] **Native Wayland clipboard transport foundation:** compositor keyboard
-        focus now drives Smithay data-device focus, and an isolated headless
-        client publishes a UTF-8 `wl_data_source`, receives the resulting
-        `wl_data_offer`, requests it over a file descriptor, and verifies the
-        exact bytes. Cross-application desktop-session clipboard behavior,
-        persistence, and native drag/drop transport remain open.
+  - [S2] **Native SCP clipboard state foundation:** the SCP state machine owns
+        capability-checked selection and drag/drop messages. Cross-process FD
+        transfer, application adapters, persistence, and native desktop-session
+        behavior remain open.
 - [S2] **Portal authorization foundation:** `sol-portal` maps typed document
       open and screen-capture requests through the caller-attributed
       `SystemActionApi`; default-deny and explicit authorization are fixture
@@ -671,19 +661,15 @@ claim that the unavailable Wayland and assistive-technology environment passed.
         and owns cleanup through a typed compositor/PipeWire adapter boundary.
         XDG portal interfaces, picker UI, real streams, and desktop validation
         remain open.
-- [S0] Application compatibility matrix (GTK / Qt / SDL / Flutter / Electron —
-      Wayland-native, §4.2)
-  - [S2] **GTK 4 / Qt 6 / SDL 2 protocol smoke:** native toolkit probes compile
-        against the installed development stacks, force their Wayland backends,
-        create a window against the real headless `sol-compositor`, and exit
-        cleanly under `scripts/validate-wayland-compatibility.sh`. Flutter,
-        Electron, GPU rendering, input, and full desktop-session behavior remain
-        unvalidated.
+- [S0] SOL toolkit adapter matrix (GTK / Qt / SDL / Flutter / Electron)
+  - [S0] Each supported toolkit needs a bundled SOL adapter that targets SCP
+        explicitly. The retired compatibility probes are removed; no toolkit
+        receives an implicit legacy display socket.
 - [S0] **IME complete (§21.1):** stable end-to-end flow for mainstream languages
   - [S2] **First-party frontend and fcitx5 transport foundation:** `sol-ime`
         owns typed preedit/candidate state, keyboard selection, and a live
         `org.fcitx.Fcitx.InputContext1` adapter with deterministic engine
-        fixtures. Real compositor text-input-v3/input-method-v2 wiring,
+        fixtures. Real SCP text-input capability wiring,
         fcitx5 availability, and mainstream-language desktop validation remain
         required.
 
@@ -945,7 +931,7 @@ well as in deterministic VM/fault-injection coverage.
 
 - [S0] `sol-securityd` authenticates durable and release identities, creates
       isolated data roots, and enforces default deny with namespaces, cgroups,
-      seccomp, Wayland mediation, and the selected Landlock/LSM composition.
+      seccomp, SCP capability enforcement, and the selected Landlock/LSM composition.
 - [S0] Replace the Phase 5 grant/audit prototype stores with one authoritative
       ledger where the minimum-scope grant, audit record, and lease or allow-once
       consumption commit together or not at all.
@@ -954,7 +940,7 @@ well as in deterministic VM/fault-injection coverage.
       discontinuity inherit nothing; uninstall/reinstall requires new consent.
 - [S0] File, device, media, secret, and other protected capabilities use typed
       brokers/portals and trusted point-of-use Shell consent. Direct service,
-      socket, filesystem, and Wayland-protocol bypass attempts fail closed.
+      socket, filesystem, and SCP authorization-bypass attempts fail closed.
 - [S0] Revocation invalidates authority before cleanup and remains effective
       across app/security-service crashes, stale handles, replay, and offline use.
 
@@ -1042,12 +1028,12 @@ and repeat the update/rollback/revocation paths with crash injection.
 - [S0] Software catalog remains an unprivileged client of `sol-packaged`; CLI and
       GUI installation share the same trust, transaction, and policy path.
 
-### M9.3 — Toolkit and Shell integration compatibility
+### M9.3 — Toolkit adapters and Shell integration
 
 - [S0] Close PRD §41 decisions #26 and #27 for the adapter/protocol matrix and
       Live Activity/menu/status IPC schema.
-- [S0] Publish compatibility recipes for Wayland-native GTK, Qt, SDL, Flutter,
-      and Electron bundles that vendor their tested non-SOL runtimes and plugins.
+- [S0] Publish SOL-adapter recipes for selected GTK, Qt, SDL, Flutter, and
+      Electron bundles that vendor their tested non-SOL runtimes and plugins.
 - [S0] `sol-gtk` and `sol-qt` adapters map public toolkit APIs to lifecycle,
       documents, notifications, atomic permissions, accounts, appearance,
       accessibility, windowing/decorations, global menus, status items, Live
@@ -1055,15 +1041,15 @@ and repeat the update/rollback/revocation paths with crash injection.
 - [S0] Shell integrations are authenticated, declarative, leased/rate-limited,
       removed on crash/replacement/expiry, and never grant their underlying
       media, capture, device, or background authority.
-- [S0] Native / Integrated / Compatible conformance proves identical sandbox,
+- [S0] Native / Integrated / Adapted conformance proves identical sandbox,
       denial, account, update, rollback, and fresh-handle semantics; adapters
-      load no mutable host toolkit/plugin and fall back to baseline Wayland/
-      portal behavior when possible.
+      load no mutable host toolkit/plugin and fail explicitly when the SCP/SOL
+      Runtime adapter is unavailable.
 
 ### M9.4 — Compositor-backed Fluid Material
 
 - [S0] Close PRD §41 decision #25 and prototype a constrained semantic-material
-      Wayland protocol: clients request bounded roles/regions only; the
+      SCP capability: clients request bounded roles/regions only; the
       compositor returns no pixels and may consolidate, reject, or render solid.
 - [S0] Implement secure backdrop groups, adaptive contrast, bounded refraction/
       grain/blur, interruptible materialization from live state, and nested-glass
@@ -1076,7 +1062,7 @@ and repeat the update/rollback/revocation paths with crash injection.
       fractional-scale, GPU frame-time, memory, and power tests pass on the
       supported hardware matrix.
 
-### M9.5 — Ecosystem compatibility release gate
+### M9.5 — Runtime and adapter conformance release gate
 
 - [S0] Side-by-side runtime-major and system-rollback tests prove first-compatible
       non-revoked hash selection, explicit unavailable state, protected
@@ -1111,7 +1097,7 @@ and repeat the update/rollback/revocation paths with crash injection.
 
 **Required closure evidence:** repeat the external sample lifecycle against the
 current and retained known-good deployments, then run Native/Integrated/
-Compatible security and accessibility conformance on supported and fallback
+Adapted security and accessibility conformance on supported and fallback
 material render paths.
 
 ---
@@ -1129,7 +1115,7 @@ material render paths.
 | Managed accounts | Phase 8 | `sol-accountsd`/`sol-vaultd`; apps receive scoped handles, not durable credentials |
 | Fluid material | Phase 2/4/9 | Semantic tokens now; protected compositor effects and fallback QA later |
 | Shell spatial grammar | Phase 4 | ADR-0025 fixes Dock/menu/window-control/right-zone placement and Live Capsule trust |
-| Toolkit compatibility | Phase 9 | Bundled private runtime + optional official adapter; capability equality, not pixel-identical widgets |
+| Toolkit adapters | Phase 9 | Bundled private runtime + explicit SOL adapter; capability equality, not pixel-identical widgets |
 | Boot / deployment trust | Phase 7 | Redundant EFI/recovery trial state, slot-bound signed deployments, boot success, and fallback are one contract |
 | Package identity | Phase 8 | `.app` App ID/publisher/hash must remain correlated from repository to process |
 | Runtime compatibility | Phase 9 | Stable major slots; C-compatible ABI + versioned IPC, never internal Rust ABI |
@@ -1157,7 +1143,7 @@ SOL Applications → Third-party Applications
 - **Technical-asset focus:** Boot + System Image + Package Manager + Security +
   Compositor + Framework Runtime + Design System + Applications.
 - **Direction call:** users should not perceive underlying complexity because
-  of Linux / Wayland — what they see is *SOL*.
+  of Linux or compositor internals — what they see is *SOL*.
 - **Ongoing evaluation:** long-term ARM64 support (§32), after the x86-64 boot
   and recovery contract is proven.
 
@@ -1167,8 +1153,8 @@ SOL Applications → Third-party Applications
 
 - **2026-08-24** — Reopened Phase 1 after auditing implementation against its
   daily-use success criterion. Replaced binary completion semantics with S0–S5
-  maturity stages and a uniform Definition of Done; added a normative Wayland
-  protocol matrix and real-session, interoperability, Shell IPC, transfer,
+  maturity stages and a uniform Definition of Done; added the then-normative,
+  now-retired Wayland protocol matrix and real-session, interoperability, Shell IPC, transfer,
   IME, multi-output, and hardware closure gates. Earlier Phase 1 “complete”
   entries below are retained as historical records and explicitly superseded.
 

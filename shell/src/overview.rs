@@ -3,7 +3,7 @@
 //! The compositor remains authoritative for live surfaces and workspace
 //! membership. This module consumes snapshots through [`WorkspaceBridge`] and
 //! emits typed [`WorkspaceAction`] intent; it deliberately has no libinput,
-//! Smithay, Wayland, or renderer dependency.
+//! compositor wire or renderer dependency.
 
 use sol_animation::InterruptibleAnimation;
 use sol_design::{
@@ -121,7 +121,7 @@ pub enum WorkspaceAction {
 /// The shell/compositor boundary required by overview and gesture models.
 ///
 /// A future D-Bus proxy or in-process fixture implements this trait. Keeping
-/// the boundary snapshot- and action-based avoids leaking Wayland surfaces
+/// the boundary snapshot- and action-based avoids leaking SCP surfaces
 /// into the shell and makes all behavior testable without a GPU session.
 pub trait WorkspaceBridge {
     /// Read the compositor's current workspace/window snapshot.

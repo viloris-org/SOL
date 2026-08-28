@@ -1,10 +1,10 @@
 # SOL Operating System — Product Requirements Document
 
-**Version:** v0.2
+**Version:** v0.3
 **Status:** Concept / Pre-Alpha
 **Platform:** SOL OS / Linux kernel
 **Project name:** SOL
-**Core technology stack:** Rust + Wayland + Smithay
+**Core technology stack:** Rust + native SOL Compositor Protocol (SCP)
 
 ---
 
@@ -23,7 +23,7 @@ SOL will own its own:
 - Package manager and signed `.app` bundle format
 - Application identity, sandbox, and atomic permission control
 - System-managed accounts and encrypted credential storage
-- Wayland compositor
+- Native SCP compositor
 - Desktop shell
 - Application SDK
 - Design system
@@ -61,7 +61,7 @@ Key goals include:
 - A coherent, default-deny application permission model
 - System-managed account and credential lifecycle
 - A coherent, accessible fluid-glass material system
-- Compatibility with the broader Linux application ecosystem
+- A curated application ecosystem through explicit SOL adapters
 - Remaining open to power users while preserving core Linux flexibility
 - Hiding unnecessary Linux system complexity from casual users
 
@@ -120,15 +120,15 @@ Apps must not re-implement these interaction patterns independently.
 
 ---
 
-## 4.2 Wayland Native
+## 4.2 SCP Native
 
-SOL uses Wayland as the sole first-class graphics protocol.
+SOL uses the SOL Compositor Protocol (SCP) as its sole graphics protocol.
 
-SOL does not ship an independent X11 session.
+SOL does not expose Wayland, X11, or XWayland compatibility sockets.
 
-Traditional X11 applications are not a compatibility target. SOL focuses on the
-modern Linux application ecosystem: GTK, Qt, SDL, Wayland-native, Electron,
-and Flutter apps.
+Applications target SOL through SolKit, the stable SOL Runtime, or an explicit
+toolkit adapter. Repackaging an unmodified Linux desktop application does not
+make it compatible.
 
 ---
 
@@ -184,28 +184,27 @@ Play animation
 
 ---
 
-## 4.5 Linux Compatibility
+## 4.5 Explicit Toolkit Adaptation
 
-SOL does not build a closed application ecosystem.
+SOL supports non-SolKit technologies only through explicit SOL adapters.
 
-The system supports mainstream Linux application technologies:
+Planned adapter targets include:
 
 - GTK
 - Qt
 - SDL
 - Electron
 - Flutter
-- Native Wayland applications packaged as `.app`
-- Flatpak through an optional compatibility subsystem
+- Other toolkits that can implement the SCP and SOL Runtime contracts
 
 First-party apps prioritize SolKit.
 
-Compatibility has three support levels:
+The application support model has three levels:
 
 ```text
 Native      SolKit/SolUI                     full SOL UX and framework contract
 Integrated  GTK/Qt + official SOL adapter   full capabilities + mapped system UX
-Compatible  generic Wayland .app            standard Wayland/portal behavior
+Adapted     other toolkit + SOL adapter     declared adapter capabilities
 ```
 
 All levels use the same `.app` identity, sandbox, explicit atomic permissions,
@@ -273,7 +272,7 @@ reduced transparency and high contrast always have solid alternatives.
 ├──────────────────────────────────────────────┤
 │               SOL Compositor                 │
 │                                              │
-│ Smithay / Wayland / Scene / WM / Input      │
+│ SCP state / Scene / WM / Input               │
 ├──────────────────────────────────────────────┤
 │       SOL OS Services / Security / Packages  │
 │                                              │
@@ -381,7 +380,7 @@ Key tested layers:
 - Kernel
 - Mesa
 - systemd
-- Wayland
+- SCP protocol and runtime
 - PipeWire
 - NVIDIA drivers
 - AMD drivers
@@ -402,15 +401,15 @@ Core language:
 Rust
 ```
 
-Wayland compositor framework:
+Client protocol:
 
 ```text
-Smithay
+SOL Compositor Protocol (SCP)
 ```
 
-SOL Compositor does not re-implement Wayland, DRM/KMS, and the input stack
-from scratch. Smithay provides the foundational compositor building blocks;
-SOL builds on top:
+SOL Compositor owns SCP state directly. Native renderer, DRM/KMS, and input
+backends are internal implementation layers and cannot expose a second client
+protocol. SOL builds the following policy on top:
 
 - Window model
 - Scene model
@@ -426,22 +425,27 @@ SOL builds on top:
 
 ```text
 sol-compositor
-├── backend/
-│   ├── drm/
+├── scp/
+│   ├── transport.rs
+│   ├── state.rs
+│   ├── surface.rs
+│   ├── buffer.rs
+│   ├── input.rs
+│   ├── output.rs
+│   ├── popup.rs
+│   ├── data_device.rs
+│   ├── capability.rs
+│   └── security.rs
+│
+├── native-backend/     # pending
+│   ├── renderer/
+│   ├── drm-kms/
 │   ├── input/
-│   ├── session/
-│   └── devices/
+│   └── session/
 │
-├── protocol/
-│   ├── xdg-shell/
-│   ├── layer-shell/
-│   ├── output/
-│   └── screencopy/
-│
-├── scene/
-│   ├── surface/
+├── scene-policy/       # pending
 │   ├── window/
-│   ├── layer/
+│   ├── workspace/
 │   └── effects/
 │
 ├── wm/
@@ -516,7 +520,7 @@ cannot be hidden by apps, and expose system-owned Stop/Revoke controls.
 
 The compositor owns:
 
-- Wayland surfaces
+- SCP surfaces
 - Windows
 - Input
 - Focus
@@ -551,8 +555,8 @@ Power users can enable more sophisticated window-layout capabilities.
 SOL-native window controls live at the physical upper-left of each window in
 `Close, Minimize, Maximize/Restore` order. Server-side decorations use this
 layout. GTK/Qt adapters request it through supported public APIs; generic
-client-decorated Wayland applications may retain their own controls rather than
-being patched through private toolkit internals.
+adapted toolkit applications use compositor-rendered SOL decorations rather
+than private toolkit patches or client-controlled chrome.
 
 ---
 
@@ -629,7 +633,7 @@ Renderer
 └── Present
 ```
 
-The first phase reuses Smithay's existing renderer capabilities.
+The first native rendering phase consumes SCP-owned buffers directly.
 
 Vulkan / wgpu / custom rendering pipelines are evaluated later per need.
 
@@ -889,7 +893,7 @@ SOL treats the two consistency goals separately:
 SolKit apps                   → architecturally enforced component consistency
 GTK/Qt with SOL adapter       → mapped appearance, accessibility, windowing,
                                 portals, accounts, and semantic materials
-Generic Wayland .app          → baseline Wayland/portal compatibility
+Other adapted toolkit app     → declared adapter capabilities and SOL portals
 ```
 
 Official `sol-gtk` and `sol-qt` adapters are bundled with the application at a
@@ -982,7 +986,7 @@ engine backend.**
 
 ```text
 sol-compositor
-     │ target: text-input v4 / input-method v3 protocols
+     │ native SCP text-input capability
      ▼
 sol-ime   (first-party frontend + candidate-window/preedit model; sol-ui rendering pending)
      │            ↘ engine: reuse fcitx5
@@ -993,11 +997,9 @@ fcitx5-ime / fcitx5-chinese-addons (pinyin and other mainstream language engines
 - `sol-ime` owns the first-party IME frontend and candidate-window/preedit
   model. Candidate-window rendering with `sol-ui` and the fcitx5 transport are
   follow-on work.
-- The protocol target is `text-input v4` + `input-method v3`. The current
-  Smithay 0.7 implementation advertises and dispatches `text-input v3` +
-  `input-method v2`; SOL will evaluate the newer staging protocols when
-  Smithay supports them. This protocol integration remains a Phase 1 concern,
-  not Phase 5/6.
+- The compositor exposes a capability-scoped SCP text-input contract for focus,
+  surrounding text, preedit, candidates, and commit. This integration remains
+  a Phase 1 concern, not Phase 5/6.
 - **We do not self-host a pinyin engine**: pinyin segmentation / candidate
   ranking is a decade-scale accumulation (`libpinyin` / `rime` / `fcitx5`
   among others). SOL reuses `fcitx5` addon engines, starting with Chinese
@@ -1019,8 +1021,7 @@ not produce a differentiating desktop experience.
 
 ### Why not skip IME entirely
 
-IME is not an X11 legacy issue (dropping XWayland is the right call); it is
-part of "consistent experience across SOL's app ecosystem." It belongs as a
+IME is a native platform requirement, not a compatibility feature. It belongs as a
 first-class citizen in the compositor / sol-ui / sol-design stack, not as a
 late-stage bolt-on.
 
@@ -1358,7 +1359,7 @@ xdg-desktop-portal
 Secret Service
 namespaces / cgroups / seccomp
 Landlock and/or a selected LSM
-Wayland protocol mediation
+SCP capability and object-ownership enforcement
 ```
 
 Every third-party `.app` is sandboxed by default. Its signature-authenticated
@@ -1613,15 +1614,16 @@ Goal:
 ```text
 Development environment
 Rust workspace
-Smithay compositor
-Basic Wayland client
+Native SCP compositor
+Reference SCP client
 Input
 Basic rendering
 ```
 
 Success criterion:
 
-> Start a standalone SOL Wayland session and run standard Wayland applications.
+> Start a standalone SCP session and complete an authenticated native-client
+> surface/toplevel round trip.
 
 ---
 
@@ -1641,7 +1643,7 @@ Basic shell IPC
 
 Success criterion:
 
-> SOL can be used as a basic daily-use Wayland compositor.
+> SOL can run a visible, input-capable SCP desktop session on supported hardware.
 
 ---
 
@@ -1800,7 +1802,7 @@ Planned deliverables:
 ```text
 sol-runtime-1 major/revision/feature ABI/IPC descriptor
 SolKit bindings, templates, and .app packaging pipeline
-Compatibility packaging for major Wayland-native Linux stacks
+Explicit SOL adapters for selected non-native toolkits
 Software catalog client over sol-packaged
 Runtime side-by-side, compatibility resolution, fallback, and retention policy
 Compositor-backed SOL fluid material rendering and fallbacks
@@ -1868,9 +1870,9 @@ Currently settled:
 | Product boundary | Complete Linux-kernel operating system |
 | Build inputs | Upstream projects |
 | Primary language | Rust |
-| Display protocol | Wayland |
-| Compositor framework | Smithay |
-| X11 compatibility | Not provided (focus on Wayland-native) |
+| Display protocol | SOL Compositor Protocol (SCP) only |
+| Compositor architecture | SCP-owned state with native renderer/input/output backends |
+| Legacy display compatibility | No Wayland, X11, or XWayland compatibility layer |
 | Audio | PipeWire |
 | Networking | NetworkManager |
 | Bluetooth | BlueZ |
@@ -1885,7 +1887,7 @@ Currently settled:
 | System material | Semantic SOL fluid material with solid accessibility fallbacks |
 | Shared runtime | Side-by-side major + monotonic contract revision + named-feature ABI/IPC descriptors |
 | Non-native toolkits | Private bundled runtime + optional bundled SOL adapter |
-| Compatibility levels | Native / Integrated / Compatible; equal security and system capabilities |
+| Application levels | Native / Integrated / Adapted; equal security and system capabilities |
 | First-party SDK | SolKit |
 | First-party UI | SolUI |
 | Desktop shell | SOL Shell |
@@ -1906,7 +1908,7 @@ open and must be decided during prototyping.
 
 1. **Accepted — ADR-0004:** Slint-backed SolUI rendering architecture
 2. **Accepted — ADR-0004:** retained/reactive declarative UI model
-3. Whether the Smithay renderer is sufficient long-term
+3. Native renderer implementation and hardware backend boundaries
 4. Long-term role of Vulkan / wgpu
 5. Compositor ↔ Shell IPC protocol (transport)
 6. **Accepted — ADR-0011:** daemon-owned typed settings storage boundary
@@ -1936,7 +1938,7 @@ open and must be decided during prototyping.
 23. System-image filesystem and delta-update encoding
 24. Account vault database and hardware-sealing implementation
 25. Fluid-material compositor sampling/refraction path and fallback thresholds
-26. Toolkit-adapter implementation matrix and semantic-material Wayland schema
+26. Toolkit-adapter implementation matrix and semantic-material SCP schema
 27. Live Activity registration/menu/status-item IPC schema and persistence
 
 ---
@@ -1974,8 +1976,7 @@ SolKit is the core bridge between the system experience and the application
 ecosystem.
 
 Ultimately, users should not perceive internal system complexity because an
-application happens to run on Linux, Wayland, or any other underlying
-technology.
+application happens to run on Linux or any other underlying technology.
 
 What users see should simply be:
 

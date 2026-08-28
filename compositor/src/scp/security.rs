@@ -59,6 +59,12 @@ pub enum AuditOutcome {
     Used,
 }
 
+/// Verified identity permitted to engage the session lock.
+///
+/// Real policy belongs in sol-securityd; this constant is what the stub
+/// coordinator enforces until that IPC exists.
+pub const LOCK_SERVICE_APP_ID: &str = "sol-logind";
+
 /// Stub security coordinator for Phase 1 development.
 ///
 /// Grants default capabilities without external coordination. Used until
@@ -94,6 +100,16 @@ impl SecurityCoordinator for StubSecurityCoordinator {
         if capability::shell_only_capabilities().contains(cap) && app_id.0 != "sol-shell" {
             return Decision::Denied {
                 reason: "Reserved for sol-shell".to_string(),
+            };
+        }
+
+        // The session lock is the authentication surface: nothing but the login
+        // service may draw it, not even the shell. The stub grants everything
+        // else for development, so this has to be denied explicitly rather than
+        // left to fall through.
+        if capability::lock_only_capabilities().contains(cap) && app_id.0 != LOCK_SERVICE_APP_ID {
+            return Decision::Denied {
+                reason: format!("Reserved for {LOCK_SERVICE_APP_ID}"),
             };
         }
 

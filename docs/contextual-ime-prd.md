@@ -156,8 +156,8 @@ invalid data, the original fcitx5 order is used without dropping input.
 
 ### 5.4 Minimum necessary context
 
-SOL uses the smallest context source that can support the feature. Generic
-applications provide bounded Wayland surrounding text. SOL applications may
+SOL uses the smallest context source that can support the feature. SCP clients
+provide bounded surrounding text through an explicit text-input capability. SOL applications may
 explicitly provide document chunks through a future SolKit API. Neither path
 authorizes unrelated system-wide collection.
 
@@ -259,7 +259,7 @@ exists, but all controls must have typed service boundaries.
 
 | Capability | Foundation | MVP | Follow-up |
 |---|---:|---:|---:|
-| Real Wayland input-method round trip | Required | Required | Maintain |
+| Real SCP input-method round trip | Required | Required | Maintain |
 | SOL candidate-window rendering | Required | Required | Polish |
 | Simplified Chinese Pinyin | Required | Required | Maintain |
 | Stable candidate source identity | Required | Required | Maintain |
@@ -312,7 +312,7 @@ identities.
 
 ### 9.3 Context
 
-**IME-CTX-001** — Generic applications may contribute only bounded Wayland
+**IME-CTX-001** — Applications may contribute only bounded SCP text-input
 surrounding text, content type, cursor position, change cause, and an
 OS-authenticated application identity.
 
@@ -459,11 +459,11 @@ The UI must never infer source identity from candidate text.
 ### 11.1 MVP path
 
 ```text
-Wayland client
-    │ text-input state
+SCP client
+    │ capability-scoped text-input state
     ▼
 SOL compositor
-    │ input-method protocol
+    │ native SCP input-method routing
     ▼
 sol-ime
     ├── privacy policy
@@ -624,7 +624,7 @@ is unavailable. Skipping is a normal control path, not an error.
 | Data | In memory | Persistent MVP | Network |
 |---|---:|---:|---:|
 | Current composition | Yes | No raw log | No |
-| Wayland surrounding text | Bounded | No | No |
+| SCP surrounding text | Bounded | No | No |
 | Session committed text | Bounded | No | No |
 | Candidate set | Yes | Optional bounded evaluation record | No |
 | Selected term statistics | Yes | Yes, when enabled | No |
@@ -824,7 +824,7 @@ At minimum:
 
 ## 19. Dependencies
 
-- Stable compositor text-input v3 and input-method v2 behavior.
+- Stable SCP text-input capability, focus, preedit, candidate, and commit behavior.
 - A runnable, supervised `sol-ime` client.
 - fcitx5 and Chinese addon availability in packaging.
 - Candidate-window rendering through SolUI/SOL design tokens.
@@ -856,7 +856,7 @@ At minimum:
 
 1. Is visible contextual reranking opt-in or opt-out after Gate C?
 2. What is the reference low-end device for the 4 ms P95 target?
-3. What maximum Wayland surrounding-text length should the MVP accept?
+3. What maximum SCP surrounding-text length should the MVP accept?
 4. Should personal vocabulary be global, per app, or a weighted combination?
 5. How should users inspect or edit learned terms without exposing raw history?
 6. Which applications form the initial field-test cohort?

@@ -1,6 +1,6 @@
 # Services
 
-Independent daemons exposing system capabilities over D-Bus / Wayland
+Independent daemons exposing system capabilities over typed IPC and SCP
 protocols to the compositor, shell, and apps.
 
 ## Services

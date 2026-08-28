@@ -1,9 +1,15 @@
 # ADR-0024: GTK, Qt, and non-native toolkit compatibility
 
-- **Status:** Accepted (architecture; adapters pending)
+- **Status:** Partially superseded by ADR-0028
 - **Date:** 2026-08-22
 - **Target phase:** Phase 9
 - **Extends:** ADR-0020 through ADR-0023
+
+> **Supersession note (2026-08-28):** ADR-0028 removes the generic Wayland
+> compatibility level, baseline fallback, and Wayland material extension
+> described below. The still-active portion of this decision is limited to
+> private bundled toolkit runtimes and explicit adapters that target SCP and
+> stable SOL Runtime APIs. The original text is retained as decision history.
 
 ## Context
 

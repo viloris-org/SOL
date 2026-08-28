@@ -11,7 +11,7 @@ implementation claim.
 Applications  (apps/)       Files · Terminal · Settings · third-party .app
 ─────────────
 SolKit        (sdk/)        source SDK and language bindings
-Compat        (planned)     bundled sol-gtk · sol-qt · portal/toolkit adapters
+Adapters      (planned)     bundled sol-gtk · sol-qt · portal/toolkit bridges
 SOL Runtime   (planned)     stable sol-runtime-* ABI + versioned IPC
 ─────────────
 Runtime       (services/)   settings · notifications · portal · IME
@@ -20,7 +20,7 @@ Accounts      (planned)     sol-accountsd · sol-vaultd · provider brokers
 Packages      (planned)     sol-pkg · sol-packaged · sol-bundle · app store
 ─────────────
 Shell         (shell/)      dock · launcher · global menu · status · capsule
-Compositor    (compositor/) Smithay · Wayland · scene · WM · input
+Compositor    (compositor/) SCP state · capabilities · surfaces · transport
 ─────────────
 System image  (foundation)  sol-image manifest · planned read-only A/B slots
 Boot          (foundation)  sol-boot core · planned signed UEFI/UKI · GOP handoff
@@ -68,7 +68,7 @@ operation rewinds user data.
 | UI → material | Components select semantic material roles; `sol-design` resolves tokens and the compositor owns protected backdrop effects/fallbacks | ADR-0023 |
 | GTK/Qt → SOL | Toolkit/runtime/plugins stay private in `.app`; bundled adapters use stable SOL ABI/IPC and cannot inject host libraries or access backdrop pixels | ADR-0024 |
 | App → global chrome | Menus, tray/status, badges, and live activities are authenticated declarative records; Shell owns rendering/input and brokers own privacy truth | ADR-0025 |
-| Compositor ↔ backend | `SolState` owns all protocol state; backends only drive it | ADR-0005, ADR-0006 |
+| Compositor ↔ backend | `ScpState` owns client protocol state; native renderer/input/output backends only drive it | ADR-0028, ADR-0032 |
 | Compositor ↔ Shell | Separate processes over typed IPC; a shell crash never kills the compositor | PRD §11, ADR-0006 |
 | App → SolKit → renderer | Apps and Shell never touch a renderer/Slint directly; `sol-ui` owns semantic components and `sol-design` owns visual parameters | PRD §19.1 |
 | Monorepo crates | Each crate can eventually split out; no hidden coupling across public/private boundaries | ADR-0001, ADR-0017 |
@@ -118,14 +118,14 @@ participants activate idempotently; stale generations remain denied
 
 ## Key current compositor state
 
-- `compositor/src/state.rs` — `SolState`: Smithay protocol state and handlers.
-- `compositor/src/main.rs` — backend event loop, rendering, client dispatch,
-  frame callbacks, and sockets.
-- `compositor/examples/test-client.rs` — reference client proving a round trip.
-- `compositor/tests/sol_session.rs` — end-to-end session test.
+- `compositor/src/scp/state.rs` — `ScpState`: authenticated native protocol
+  state, capability checks, and object routing.
+- `compositor/src/main.rs` — SCP service lifetime and socket ownership.
+- `compositor/examples/scp-client.rs` — reference native client.
+- `compositor/tests/scp_session.rs` — end-to-end native session test.
 
-Every feature that grows the compositor belongs in `SolState` (as a new
-handler/state), not in `main.rs`.
+Every feature that grows the compositor belongs in `ScpState` or a focused
+`scp/` module, not in `main.rs`.
 
 ## Rendering and framework stack
 
@@ -138,7 +138,7 @@ stable sol-runtime-N ABI and versioned service IPC
    ↓
 private Slint adapter + sol-graphics
    ↓
-Wayland surface → SOL Compositor
+SCP surface → SOL Compositor
 ```
 
 The framework boundary is deliberately not Rust ABI. Rust applications consume
@@ -153,18 +153,18 @@ private toolkit runtime + toolkit-matching bundled SOL adapter
    ↓
 stable portals / accounts / accessibility / lifecycle ABI or IPC
    ↓
-Wayland surface + optional semantic material-role request
+SCP surface + optional semantic material-role request
    ↓
 SOL Compositor (renders or safely falls back; returns no backdrop pixels)
 ```
 
-Adapter absence or failure falls back to baseline Wayland/portal behavior where
-the toolkit supports it; it never changes the application's authority.
+Adapter absence or failure makes the application unavailable; SOL does not
+expose an implicit compatibility socket or broaden the application's authority.
 
 ## Shell spatial and live-activity flow
 
 ```text
-focused Wayland surface → authenticated AppId → atomic global-menu snapshot
+focused SCP surface → authenticated AppId → atomic global-menu snapshot
 
 app live activity ── declared capability + explicit grant ──┐
                                                             ├→ Live Capsule

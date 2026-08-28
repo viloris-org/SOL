@@ -2,8 +2,8 @@
 //!
 //! The notification service and [`crate::notification_center::NotificationCenter`]
 //! own lifecycle and action policy.  This module is the shell boundary that
-//! turns that state into one bounded, keyboard-interactive layer-shell frame.
-//! Wayland objects stay behind [`NotificationSurfaceHost`], which keeps the
+//! turns that state into one bounded, keyboard-interactive SCP layer frame.
+//! SCP objects stay behind [`NotificationSurfaceHost`], which keeps the
 //! contract deterministic for headless tests and for the eventual native host.
 
 use std::time::Duration;
@@ -229,7 +229,7 @@ impl From<NotificationCenterError> for NotificationSurfaceError {
     }
 }
 
-/// Native host boundary implemented by the Wayland layer-shell adapter.
+/// Native host boundary implemented by the SCP layer-surface adapter.
 pub trait NotificationSurfaceHost {
     /// Present a frame and its premultiplied RGBA pixels.
     fn present(&mut self, contract: &NotificationSurfaceContract, pixels: &[u8]);

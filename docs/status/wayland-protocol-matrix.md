@@ -1,11 +1,16 @@
-# SOL Wayland Protocol Matrix
+# Historical SOL Wayland Protocol Matrix
 
-> **Status:** Normative execution status for compositor protocol coverage.
+> **Status:** Retired migration evidence; non-normative since 2026-08-28.
 > **Last audited:** 2026-08-24 against the current `sol-compositor` state,
 > renderer paths, Shell client, and compositor integration tests.
 > **Related:** [Roadmap](../ROADMAP.md), [PRD](../PRD.md),
 > [Compositor development ADR](../decisions/0005-compositor-dev-path.md), and
 > [IME ADR](../decisions/0007-ime-frontend-fcitx5-engine.md).
+
+The implementation described below has been removed from the active source
+tree. SOL exposes SCP only (ADR-0028/0032); none of these globals, tests, or
+compatibility claims describe the current compositor. This file is retained
+solely to preserve the evidence and gaps that informed the migration.
 
 This matrix prevents three different claims from being collapsed into one:
 

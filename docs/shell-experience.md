@@ -90,10 +90,8 @@ feedback occurs on pointer-down; destructive close still follows the
 application's document/lifecycle safeguards.
 
 SolKit uses this layout automatically. Official GTK/Qt adapters request the
-same layout through supported toolkit/window-decoration APIs. A generic
-client-side-decorated Wayland application may retain its own buttons; SOL does
-not patch private toolkit internals to force the layout. Server-side
-decorations, when used, follow the SOL order.
+same layout through supported toolkit APIs and SCP toplevel metadata. SCP uses
+server-side decorations, so clients cannot replace trusted window chrome.
 
 ## 5. Application Sidebar material
 
@@ -144,8 +142,8 @@ posting notifications.
 The application tray is a typed status-item registry, not arbitrary embedded
 client windows. A status item supplies authenticated App ID, semantic icon,
 short label, state, and typed actions. Shell controls size, material, input,
-overflow, accessibility, and rate limits. Legacy tray protocols may be bridged
-through a constrained compatibility adapter but receive no extra authority.
+overflow, accessibility, and rate limits. Non-native toolkits participate only
+through an explicit SOL adapter; the Shell exposes no legacy tray server.
 
 ## 8. Live Capsule
 

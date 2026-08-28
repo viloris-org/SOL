@@ -42,8 +42,12 @@ pub struct DataDevice {
     drag: Option<DragOperation>,
     /// Recently valid serials (for validation)
     recent_serials: HashMap<u32, Instant>,
-    /// Current drag target surface (if any)
-    drag_surface: Option<SurfaceId>,
+    /// Surface the drag is currently over.
+    ///
+    /// Surface IDs are client-local, so the owning session is part of the
+    /// identity: without it, two clients that both use surface ID 1 would look
+    /// like the same drop target.
+    drag_surface: Option<(SessionId, SurfaceId)>,
 }
 
 impl DataDevice {
@@ -60,16 +64,6 @@ impl DataDevice {
     pub fn record_serial(&mut self, serial: u32) {
         self.recent_serials.insert(serial, Instant::now());
         self.cleanup_old_serials();
-    }
-
-    /// Set clipboard selection (simplified version without serial validation)
-    pub fn set_selection(&mut self, owner: SessionId, mime_types: Vec<String>) {
-        self.selection = Some(Selection {
-            owner,
-            mime_types,
-            serial: 0,
-            timestamp: Instant::now(),
-        });
     }
 
     /// Set clipboard selection with serial validation
@@ -114,24 +108,6 @@ impl DataDevice {
         self.selection = None;
     }
 
-    /// Start drag operation (simplified version)
-    pub fn start_drag(
-        &mut self,
-        source: SessionId,
-        origin_surface: SurfaceId,
-        mime_types: Vec<String>,
-    ) {
-        self.drag = Some(DragOperation {
-            source,
-            origin_surface,
-            icon_surface: None,
-            mime_types,
-            serial: 0,
-            target: None,
-            accepted_mime: None,
-        });
-    }
-
     /// Start drag operation with full validation
     pub fn start_drag_validated(
         &mut self,
@@ -173,18 +149,18 @@ impl DataDevice {
             .map(|d| (d.source, d.origin_surface, d.mime_types.clone()))
     }
 
-    /// Set drag target surface
-    pub fn set_drag_surface(&mut self, surface: SurfaceId) {
-        self.drag_surface = Some(surface);
+    /// Set the surface the drag is currently over.
+    pub fn set_drag_surface(&mut self, surface: Option<(SessionId, SurfaceId)>) {
+        self.drag_surface = surface;
     }
 
     /// Check if drag is over a specific surface
-    pub fn is_drag_over_surface(&self, surface: SurfaceId) -> bool {
+    pub fn is_drag_over_surface(&self, surface: (SessionId, SurfaceId)) -> bool {
         self.drag_surface == Some(surface)
     }
 
-    /// Get current drag target surface
-    pub fn drag_surface(&self) -> Option<SurfaceId> {
+    /// Get the surface the drag is currently over.
+    pub fn drag_surface(&self) -> Option<(SessionId, SurfaceId)> {
         self.drag_surface
     }
 
@@ -299,10 +275,16 @@ mod tests {
     #[test]
     fn test_selection() {
         let mut device = DataDevice::new();
+        device.record_serial(1);
 
-        device.set_selection(1, vec!["text/plain".to_string()]);
-        assert!(device.get_selection().is_some());
-        assert_eq!(device.get_selection().unwrap().0, 1);
+        device
+            .set_selection_validated(1, vec!["text/plain".to_string()], 1)
+            .expect("set selection");
+        assert_eq!(
+            device.get_selection().expect("selection is set").0,
+            1,
+            "the setting session owns the selection"
+        );
 
         device.clear_selection();
         assert!(device.get_selection().is_none());
@@ -311,12 +293,46 @@ mod tests {
     #[test]
     fn test_drag() {
         let mut device = DataDevice::new();
+        device.record_serial(1);
 
-        device.start_drag(1, 100, vec!["text/plain".to_string()]);
+        device
+            .start_drag_validated(1, 100, None, vec!["text/plain".to_string()], 1)
+            .expect("start drag");
         assert!(device.active_drag().is_some());
 
-        let _ = device.finish_drag();
+        device.finish_drag().expect("finish drag");
         assert!(device.active_drag().is_none());
+    }
+
+    #[test]
+    fn drag_target_identity_includes_the_session() {
+        let mut device = DataDevice::new();
+        device.record_serial(1);
+        device
+            .start_drag_validated(1, 100, None, vec!["text/plain".to_string()], 1)
+            .expect("start drag");
+
+        device.set_drag_surface(Some((2, 1)));
+
+        assert!(device.is_drag_over_surface((2, 1)));
+        // Same client-local surface ID, different client: not the same target.
+        assert!(!device.is_drag_over_surface((3, 1)));
+    }
+
+    #[test]
+    fn rejects_a_second_concurrent_drag() {
+        let mut device = DataDevice::new();
+        device.record_serial(1);
+        device
+            .start_drag_validated(1, 100, None, vec!["text/plain".to_string()], 1)
+            .expect("start first drag");
+
+        assert!(
+            device
+                .start_drag_validated(2, 200, None, vec!["text/plain".to_string()], 1)
+                .is_err(),
+            "a drag already in progress must block another"
+        );
     }
 
     #[test]

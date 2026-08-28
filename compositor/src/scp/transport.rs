@@ -4,6 +4,7 @@
 //! Client buffer descriptors are delivered out-of-band with SCM_RIGHTS.
 
 use crate::scp::{
+    event_queue::{OutboundEvent, SessionSink},
     protocol::{ClientMessage, CompositorMessage, SessionId},
     state::ScpState,
     unix_socket,
@@ -27,6 +28,12 @@ use std::{
 
 pub const DEFAULT_SOCKET_NAME: &str = "sol-compositor-0";
 pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
+
+/// How long a client thread waits before rechecking its socket and event queue.
+///
+/// Both wake sources are edge-triggered, so this bound is only a backstop
+/// against a missed wakeup, not part of normal operation.
+const POLL_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Running SCP listener. Dropping it stops the accept loop and removes the
 /// filesystem socket. Active client threads finish when their peers disconnect.
@@ -176,26 +183,45 @@ fn serve_client(mut stream: UnixStream, state: &Arc<Mutex<ScpState>>) -> io::Res
     let mut session_id = None;
     let mut bytes = Vec::new();
     let mut pending_fds = Vec::new();
+    let sink = SessionSink::new()?;
+
     let result = serve_client_inner(
         &mut stream,
         state,
+        &sink,
         &mut session_id,
         &mut bytes,
         &mut pending_fds,
     );
 
     close_all(&mut pending_fds);
-    if let Some(session_id) = session_id
-        && let Ok(mut state) = state.lock()
-    {
-        state.disconnect(session_id);
+    // Closing the sink first stops other threads from queueing events — and
+    // closes the descriptors of any that are still pending — before the session
+    // is torn down.
+    sink.close();
+    if let Some(session_id) = session_id {
+        lock_state(state).disconnect(session_id);
     }
     result
+}
+
+/// Acquire the shared compositor state, recovering from a poisoned lock.
+///
+/// A poisoned lock means some client thread panicked while holding it. Treating
+/// that as fatal would let one malformed request disconnect every other client
+/// and leave the state permanently unreachable, so the panic is contained to the
+/// thread that caused it and everyone else keeps running.
+fn lock_state(state: &Arc<Mutex<ScpState>>) -> std::sync::MutexGuard<'_, ScpState> {
+    state.lock().unwrap_or_else(|poisoned| {
+        tracing::error!("SCP state mutex was poisoned by a panicking client thread; recovering");
+        poisoned.into_inner()
+    })
 }
 
 fn serve_client_inner(
     stream: &mut UnixStream,
     state: &Arc<Mutex<ScpState>>,
+    sink: &Arc<SessionSink>,
     session_id: &mut Option<SessionId>,
     bytes: &mut Vec<u8>,
     pending_fds: &mut Vec<i32>,
@@ -203,8 +229,41 @@ fn serve_client_inner(
     let (peer_pid, _, _) = unix_socket::get_peer_credentials(stream.as_raw_fd())?;
 
     loop {
-        if !receive_chunk(stream, bytes, pending_fds)? {
+        // Two things can need this thread: the client sending a request, or
+        // another thread queueing an event for it. Waiting on both is what lets
+        // input and frame callbacks reach a client that is not talking.
+        let readiness =
+            unix_socket::poll_readable(stream.as_raw_fd(), sink.wake_fd(), POLL_TIMEOUT)?;
+
+        if !drain_sink(stream, sink)? {
             break;
+        }
+
+        if readiness.primary && !receive_chunk(stream, bytes, pending_fds)? {
+            break;
+        }
+        // A hangup with no data left means the peer is gone for good.
+        if readiness.hangup && !readiness.primary {
+            break;
+        }
+
+        // Descriptors are only consumed once a whole frame has arrived, so a
+        // client that dribbles descriptors without ever completing one would
+        // otherwise accumulate them here until the compositor runs out.
+        if pending_fds.len() > unix_socket::MAX_FDS_PER_MESSAGE {
+            let count = pending_fds.len();
+            close_all(pending_fds);
+            tracing::warn!(
+                count,
+                "SCP client sent unattached descriptors; disconnecting"
+            );
+            write_protocol_error(
+                stream,
+                "too-many-descriptors",
+                format!("received {count} descriptors with no frame to attach them to"),
+                true,
+            )?;
+            return Ok(());
         }
 
         while let Some(payload) = take_frame(bytes)? {
@@ -263,10 +322,27 @@ fn serve_client_inner(
                 }
             };
 
-            let responses = state
-                .lock()
-                .map_err(|_| io::Error::other("SCP state lock poisoned"))?
-                .handle_transport_message(*session_id, message, received_fd);
+            let responses = {
+                let mut guard = lock_state(state);
+                let responses = guard.handle_transport_message(*session_id, message, received_fd);
+
+                // Register this connection's outbound queue while still holding
+                // the lock that created the session. Releasing it first would
+                // leave a window where another thread could route an event to a
+                // session that has no sink yet, and silently drop it.
+                if let Ok(responses) = &responses {
+                    for response in responses {
+                        if let CompositorMessage::Connected {
+                            session_id: connected,
+                            ..
+                        } = response
+                        {
+                            guard.register_session_sink(*connected, Arc::clone(sink));
+                        }
+                    }
+                }
+                responses
+            };
 
             match responses {
                 Ok(responses) => {
@@ -289,10 +365,47 @@ fn serve_client_inner(
                     write_protocol_error(stream, "invalid-request", message, false)?;
                 }
             }
+
+            // Handling a request can queue events for this same client, so flush
+            // before blocking again.
+            if !drain_sink(stream, sink)? {
+                return Ok(());
+            }
         }
     }
 
     Ok(())
+}
+
+/// Write every pending event for this connection.
+///
+/// Returns `false` when the client has fallen too far behind and must be
+/// disconnected: an unresponsive client cannot be allowed to make the
+/// compositor buffer without bound.
+fn drain_sink(stream: &mut UnixStream, sink: &Arc<SessionSink>) -> io::Result<bool> {
+    if sink.is_overflowed() {
+        tracing::warn!("SCP client is not draining its event queue; disconnecting");
+        let _ = write_protocol_error(
+            stream,
+            "event-queue-overflow",
+            "client fell too far behind on compositor events".to_string(),
+            true,
+        );
+        return Ok(false);
+    }
+
+    for event in sink.drain() {
+        write_event(stream, &event)?;
+    }
+    Ok(true)
+}
+
+/// Write one event, passing any attached descriptor via SCM_RIGHTS.
+fn write_event(stream: &mut UnixStream, event: &OutboundEvent) -> io::Result<()> {
+    match &event.fd {
+        Some(fd) => write_frame_with_fd(stream, &event.message, fd.as_raw_fd()),
+        None => write_frame(stream, &event.message),
+    }
 }
 
 fn receive_chunk(
@@ -348,6 +461,36 @@ fn write_protocol_error(
 }
 
 pub fn write_frame<T: Serialize>(stream: &mut UnixStream, value: &T) -> io::Result<()> {
+    let frame = encode_frame(value)?;
+    stream.write_all(&frame)
+}
+
+/// Write a frame with a descriptor attached via SCM_RIGHTS.
+///
+/// The descriptor rides on the first byte of the frame, so the whole frame must
+/// go out in a single `sendmsg`. A short write would leave the receiver holding a
+/// descriptor it cannot yet associate with a message, so it is an error rather
+/// than something to retry.
+fn write_frame_with_fd<T: Serialize>(
+    stream: &mut UnixStream,
+    value: &T,
+    fd: std::os::fd::RawFd,
+) -> io::Result<()> {
+    let frame = encode_frame(value)?;
+    let sent = unix_socket::sendmsg_with_fds(stream.as_raw_fd(), &frame, &[fd])?;
+    if sent != frame.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            format!(
+                "SCP descriptor frame was truncated: sent {sent} of {} bytes",
+                frame.len()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn encode_frame<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
     let payload = serde_json::to_vec(value).map_err(io::Error::other)?;
     if payload.is_empty() || payload.len() > MAX_FRAME_SIZE {
         return Err(io::Error::new(
@@ -357,8 +500,11 @@ pub fn write_frame<T: Serialize>(stream: &mut UnixStream, value: &T) -> io::Resu
     }
     let length = u32::try_from(payload.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "SCP frame is too large"))?;
-    stream.write_all(&length.to_be_bytes())?;
-    stream.write_all(&payload)
+
+    let mut frame = Vec::with_capacity(payload.len() + 4);
+    frame.extend_from_slice(&length.to_be_bytes());
+    frame.extend_from_slice(&payload);
+    Ok(frame)
 }
 
 pub fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> io::Result<T> {

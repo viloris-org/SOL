@@ -6,17 +6,17 @@ each crate (`<crate>/tests/`).
 ## Status
 
 No top-level harness exists yet. The first cross-component capability is
-already proven in-crate: `compositor/tests/sol_session.rs` boots
-`sol-compositor`, waits for its socket, and drives a real Wayland client
-round-trip.
+already proven in-crate: `compositor/tests/scp_session.rs` boots
+`sol-compositor`, waits for its socket, and drives authenticated native SCP
+round-trips.
 
 ## Where the pieces live today
 
 | Concern | Location | Notes |
 |---|---|---|
-| Compositor session round-trip | `compositor/tests/sol_session.rs` | starts compositor, runs `test-client`, asserts toplevel ack |
-| Reference Wayland client | `compositor/examples/test-client.rs` | used by the session test and manual checks |
-| Wayland clipboard round-trip | `compositor/examples/clipboard-client.rs` | isolated UTF-8 data-source/data-offer transfer; no live desktop clipboard |
+| Compositor session round-trip | `compositor/tests/scp_session.rs` | starts compositor and validates native transport, identity, capabilities, and toplevel state |
+| Reference SCP client | `compositor/examples/scp-client.rs` | authenticated surface/toplevel round-trip used for manual checks |
+| SCP-only boundary | `scripts/validate-scp-only.sh` | rejects legacy dependencies, socket variables, and retired source paths |
 | Design-token consistency | `sdk/sol-design/tests/tokens.rs` | monotonic spacing, color alpha range, motion durations |
 | Future shell + compositor IPC | `tests/` | lands with Phase 1 typed IPC |
 
@@ -24,11 +24,11 @@ round-trip.
 
 ```bash
 cargo test --workspace          # all component + integration tests
-cargo test -p sol-compositor --test sol_session
+cargo test -p sol-compositor --test scp_session
 ```
 
-> The compositor session suite runs the compositor with `--headless`, so it
-> does not require a host display, GPU, or window manager.
+> The compositor session suite is headless by construction, so it does not
+> require a host display, GPU, or window manager.
 
 ## Roadmap
 

@@ -4,7 +4,7 @@
 //! selection and keyboard input) but deliberately does not own a concrete
 //! renderer, display connection, or clipboard protocol. Platform adapters plug
 //! into the small traits below; deterministic fixtures exercise the same core
-//! in CI without claiming a GPU, Wayland, or system clipboard was available.
+//! in CI without claiming a GPU, SCP surface, or system clipboard was available.
 
 use std::{
     collections::VecDeque,
@@ -676,7 +676,7 @@ fn unicode_cell_width(character: char) -> u16 {
     }
 }
 
-/// Clipboard contract. A native Wayland clipboard bridge can implement this;
+/// Clipboard contract. A native SCP data-device adapter can implement this;
 /// CI uses [`MemoryClipboard`] and does not claim desktop clipboard coverage.
 pub trait ClipboardAdapter {
     /// Store selected text.
@@ -1034,7 +1034,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         TerminalApp::<NativePtyFactory, MemoryClipboard>::commands("")
     );
     println!(
-        "Native display/GPU and Wayland clipboard adapters are required for an interactive desktop window."
+        "Native SCP display/GPU and clipboard adapters are required for an interactive desktop window."
     );
     terminal.shutdown()?;
     Ok(())
