@@ -30,6 +30,7 @@
 pub mod audit;
 pub mod buffer;
 pub mod capability;
+pub mod compose;
 pub mod data_device;
 pub mod event_queue;
 pub mod input;
@@ -52,10 +53,11 @@ pub mod toml_parser;
 pub mod transport;
 pub mod unix_socket;
 
+pub use compose::{CAPTURE_REDACTION, Framebuffer, RenderPurpose, Rgba8};
 pub use event_queue::{EventRouter, OutboundEvent, SessionSink};
 pub use permission_manager::PermissionManager;
 pub use session_lock::{LockSurface, SessionLock, SessionLockManager};
 pub use stack::{StackEntry, StackKind, WindowStack};
 pub use state::ScpState;
-pub use surface::{Layer, LayerSurface};
+pub use surface::{CapturePolicy, Layer, LayerSurface, ProtectionReason};
 pub use transport::{ScpServer, resolve_socket_path};

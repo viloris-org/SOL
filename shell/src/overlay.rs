@@ -108,8 +108,17 @@ pub enum OverlayRole {
 }
 
 /// Layer selection requested from a native layer-shell adapter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Ordered bottom to top, matching the compositor's own stacking order. The
+/// desktop background is the one Shell surface that belongs *below* application
+/// windows, which is why the enum reaches further down than the overlay roles
+/// above ever need to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LayerShellLayer {
+    /// The desktop background: wallpaper, below every application window.
+    Background,
+    /// Chrome that sits on the desktop but still beneath application windows.
+    Bottom,
     /// Panels are placed above regular application surfaces.
     Top,
     /// Transient system UI is placed in the overlay layer.

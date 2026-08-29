@@ -1,8 +1,10 @@
 //! Authorized screen-cast session lifecycle.
 //!
-//! XDG portal and compositor/PipeWire adapters consume this state machine;
-//! they cannot start a stream before the shared permission layer has produced
-//! a matching [`PortalAuthorization`].
+//! XDG portal, compositor capture, and media-transport adapters consume this
+//! state machine. Capture production is deliberately separate from PipeWire:
+//! only a compositor-produced [`SafeCaptureFeed`] may be published, and neither
+//! stage can start before the shared permission layer has produced a matching
+//! [`PortalAuthorization`].
 
 use crate::{PortalAuthorization, PortalRequest};
 use sol_system::AppId;
@@ -37,10 +39,26 @@ pub enum CursorMode {
     Metadata,
 }
 
+/// One compositor-produced feed whose protected pixels have already been
+/// replaced.
+///
+/// This is the trust boundary between capture composition and a transport such
+/// as PipeWire. Implementors of [`CaptureProducer`] must source screenshots,
+/// recording, sharing, remote desktop, previews, and machine-vision consumers
+/// from the same protected-content-aware compositor path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SafeCaptureFeed {
+    pub feed_id: u64,
+    pub source: ScreenCastSource,
+    pub size: (u32, u32),
+}
+
 /// One PipeWire-compatible stream description returned by a capture backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenCastStream {
     pub node_id: u32,
+    /// The safe compositor feed this transport node publishes.
+    pub feed_id: u64,
     pub source: ScreenCastSource,
     pub size: (u32, u32),
 }
@@ -66,17 +84,32 @@ pub struct ScreenCastSession {
     pub streams: Vec<ScreenCastStream>,
 }
 
-/// Compositor screencopy and PipeWire integration boundary.
-pub trait ScreenCastBackend {
+/// Protected-content-aware compositor capture boundary.
+pub trait CaptureProducer {
     fn start(
         &mut self,
         session: ScreenCastSessionId,
         caller: &AppId,
         sources: &[ScreenCastSource],
         cursor_mode: CursorMode,
-    ) -> Result<Vec<ScreenCastStream>, String>;
+    ) -> Result<Vec<SafeCaptureFeed>, String>;
 
     fn stop(&mut self, session: ScreenCastSessionId) -> Result<(), String>;
+}
+
+/// Transport boundary for already-safe capture feeds.
+///
+/// PipeWire belongs here: it exports buffers and controls client visibility,
+/// but it never decides which compositor surfaces are safe to capture.
+pub trait StreamTransport {
+    fn publish(
+        &mut self,
+        session: ScreenCastSessionId,
+        caller: &AppId,
+        feeds: &[SafeCaptureFeed],
+    ) -> Result<Vec<ScreenCastStream>, String>;
+
+    fn unpublish(&mut self, session: ScreenCastSessionId) -> Result<(), String>;
 }
 
 /// Invalid lifecycle or adapter result.
@@ -126,17 +159,19 @@ impl fmt::Display for ScreenCastError {
 impl Error for ScreenCastError {}
 
 /// Portal-owned session coordinator.
-pub struct ScreenCastManager<B> {
-    backend: B,
+pub struct ScreenCastManager<P, T> {
+    producer: P,
+    transport: T,
     next_id: u64,
     sessions: BTreeMap<ScreenCastSessionId, ScreenCastSession>,
 }
 
-impl<B: ScreenCastBackend> ScreenCastManager<B> {
+impl<P: CaptureProducer, T: StreamTransport> ScreenCastManager<P, T> {
     #[must_use]
-    pub fn new(backend: B) -> Self {
+    pub fn new(producer: P, transport: T) -> Self {
         Self {
-            backend,
+            producer,
+            transport,
             next_id: 1,
             sessions: BTreeMap::new(),
         }
@@ -203,11 +238,26 @@ impl<B: ScreenCastBackend> ScreenCastManager<B> {
             expected: ScreenCastState::SourcesSelected,
             actual: session.state,
         })?;
-        let streams = self
-            .backend
+        let feeds = self
+            .producer
             .start(id, &session.caller, &session.sources, cursor_mode)
             .map_err(ScreenCastError::Backend)?;
-        validate_streams(&streams, &session.sources)?;
+        if let Err(error) = validate_feeds(&feeds, &session.sources) {
+            let _ = self.producer.stop(id);
+            return Err(error);
+        }
+        let streams = match self.transport.publish(id, &session.caller, &feeds) {
+            Ok(streams) => streams,
+            Err(error) => {
+                let _ = self.producer.stop(id);
+                return Err(ScreenCastError::Backend(error));
+            }
+        };
+        if let Err(error) = validate_streams(&streams, &feeds) {
+            let _ = self.transport.unpublish(id);
+            let _ = self.producer.stop(id);
+            return Err(error);
+        }
         let retained = self.session_mut(id)?;
         retained.streams.clone_from(&streams);
         retained.state = ScreenCastState::Streaming;
@@ -220,7 +270,12 @@ impl<B: ScreenCastBackend> ScreenCastManager<B> {
             return Ok(());
         }
         if state == ScreenCastState::Streaming {
-            self.backend.stop(id).map_err(ScreenCastError::Backend)?;
+            let transport_result = self.transport.unpublish(id);
+            let producer_result = self.producer.stop(id);
+            if let Err(error) = transport_result {
+                return Err(ScreenCastError::Backend(error));
+            }
+            producer_result.map_err(ScreenCastError::Backend)?;
         }
         let session = self.session_mut(id)?;
         session.state = ScreenCastState::Closed;
@@ -260,7 +315,7 @@ fn require_state(
 
 fn validate_streams(
     streams: &[ScreenCastStream],
-    sources: &[ScreenCastSource],
+    feeds: &[SafeCaptureFeed],
 ) -> Result<(), ScreenCastError> {
     if streams.is_empty() {
         return Err(ScreenCastError::InvalidStream(
@@ -268,6 +323,7 @@ fn validate_streams(
         ));
     }
     let mut node_ids = std::collections::BTreeSet::new();
+    let mut published_feed_ids = std::collections::BTreeSet::new();
     for stream in streams {
         if stream.node_id == 0 || !node_ids.insert(stream.node_id) {
             return Err(ScreenCastError::InvalidStream(
@@ -279,9 +335,53 @@ fn validate_streams(
                 "stream dimensions must be non-zero",
             ));
         }
-        if !sources.contains(&stream.source) {
+        if !published_feed_ids.insert(stream.feed_id) {
             return Err(ScreenCastError::InvalidStream(
-                "stream source was not selected",
+                "a safe capture feed was published more than once",
+            ));
+        }
+        if !feeds.iter().any(|feed| {
+            feed.feed_id == stream.feed_id
+                && feed.source == stream.source
+                && feed.size == stream.size
+        }) {
+            return Err(ScreenCastError::InvalidStream(
+                "stream does not describe a safe capture feed",
+            ));
+        }
+    }
+    if streams.len() != feeds.len() {
+        return Err(ScreenCastError::InvalidStream(
+            "transport did not publish every safe capture feed exactly once",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_feeds(
+    feeds: &[SafeCaptureFeed],
+    sources: &[ScreenCastSource],
+) -> Result<(), ScreenCastError> {
+    if feeds.is_empty() {
+        return Err(ScreenCastError::InvalidStream(
+            "capture producer returned no safe feeds",
+        ));
+    }
+    let mut feed_ids = std::collections::BTreeSet::new();
+    for feed in feeds {
+        if feed.feed_id == 0 || !feed_ids.insert(feed.feed_id) {
+            return Err(ScreenCastError::InvalidStream(
+                "safe feed IDs must be unique and non-zero",
+            ));
+        }
+        if feed.size.0 == 0 || feed.size.1 == 0 {
+            return Err(ScreenCastError::InvalidStream(
+                "safe feed dimensions must be non-zero",
+            ));
+        }
+        if !sources.contains(&feed.source) {
+            return Err(ScreenCastError::InvalidStream(
+                "safe feed source was not selected",
             ));
         }
     }
@@ -317,23 +417,23 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FixtureBackend {
+    struct FixtureProducer {
         stopped: Vec<ScreenCastSessionId>,
     }
 
-    impl ScreenCastBackend for FixtureBackend {
+    impl CaptureProducer for FixtureProducer {
         fn start(
             &mut self,
             _: ScreenCastSessionId,
             _: &AppId,
             sources: &[ScreenCastSource],
             _: CursorMode,
-        ) -> Result<Vec<ScreenCastStream>, String> {
+        ) -> Result<Vec<SafeCaptureFeed>, String> {
             Ok(sources
                 .iter()
                 .enumerate()
-                .map(|(index, source)| ScreenCastStream {
-                    node_id: index as u32 + 42,
+                .map(|(index, source)| SafeCaptureFeed {
+                    feed_id: index as u64 + 1,
                     source: *source,
                     size: (1920, 1080),
                 })
@@ -341,6 +441,47 @@ mod tests {
         }
         fn stop(&mut self, session: ScreenCastSessionId) -> Result<(), String> {
             self.stopped.push(session);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct FixtureTransport {
+        unpublished: Vec<ScreenCastSessionId>,
+        fail_publish: bool,
+        wrong_feed: bool,
+    }
+
+    impl StreamTransport for FixtureTransport {
+        fn publish(
+            &mut self,
+            _: ScreenCastSessionId,
+            _: &AppId,
+            feeds: &[SafeCaptureFeed],
+        ) -> Result<Vec<ScreenCastStream>, String> {
+            if self.fail_publish {
+                return Err("transport unavailable".to_owned());
+            }
+            let mut streams: Vec<_> = feeds
+                .iter()
+                .enumerate()
+                .map(|(index, feed)| ScreenCastStream {
+                    node_id: index as u32 + 42,
+                    feed_id: feed.feed_id,
+                    source: feed.source,
+                    size: feed.size,
+                })
+                .collect();
+            if self.wrong_feed
+                && let Some(stream) = streams.first_mut()
+            {
+                stream.feed_id = u64::MAX;
+            }
+            Ok(streams)
+        }
+
+        fn unpublish(&mut self, session: ScreenCastSessionId) -> Result<(), String> {
+            self.unpublished.push(session);
             Ok(())
         }
     }
@@ -363,7 +504,8 @@ mod tests {
 
     #[test]
     fn authorized_session_follows_select_start_close_lifecycle() {
-        let mut manager = ScreenCastManager::new(FixtureBackend::default());
+        let mut manager =
+            ScreenCastManager::new(FixtureProducer::default(), FixtureTransport::default());
         let id = manager
             .create(authorization(PortalRequest::ScreenCapture))
             .unwrap();
@@ -382,7 +524,8 @@ mod tests {
 
     #[test]
     fn wrong_authorization_and_invalid_order_are_rejected() {
-        let mut manager = ScreenCastManager::new(FixtureBackend::default());
+        let mut manager =
+            ScreenCastManager::new(FixtureProducer::default(), FixtureTransport::default());
         assert_eq!(
             manager.create(authorization(PortalRequest::OpenDocument {
                 uri: "file:///tmp/report".to_owned(),
@@ -403,6 +546,63 @@ mod tests {
                 CursorMode::Embedded,
             ),
             Err(ScreenCastError::DuplicateSource(ScreenCastSource::Monitor))
+        );
+    }
+
+    #[test]
+    fn a_transport_failure_stops_the_safe_capture_producer() {
+        let mut manager = ScreenCastManager::new(
+            FixtureProducer::default(),
+            FixtureTransport {
+                fail_publish: true,
+                ..FixtureTransport::default()
+            },
+        );
+        let id = manager
+            .create(authorization(PortalRequest::ScreenCapture))
+            .unwrap();
+        manager
+            .select_sources(id, vec![ScreenCastSource::Monitor], CursorMode::Hidden)
+            .unwrap();
+
+        assert_eq!(
+            manager.start(id),
+            Err(ScreenCastError::Backend("transport unavailable".to_owned()))
+        );
+        assert_eq!(manager.producer.stopped, vec![id]);
+        assert_eq!(
+            manager.session(id).unwrap().state,
+            ScreenCastState::SourcesSelected
+        );
+    }
+
+    #[test]
+    fn a_transport_cannot_substitute_an_unverified_feed() {
+        let mut manager = ScreenCastManager::new(
+            FixtureProducer::default(),
+            FixtureTransport {
+                wrong_feed: true,
+                ..FixtureTransport::default()
+            },
+        );
+        let id = manager
+            .create(authorization(PortalRequest::ScreenCapture))
+            .unwrap();
+        manager
+            .select_sources(id, vec![ScreenCastSource::Monitor], CursorMode::Hidden)
+            .unwrap();
+
+        assert_eq!(
+            manager.start(id),
+            Err(ScreenCastError::InvalidStream(
+                "stream does not describe a safe capture feed"
+            ))
+        );
+        assert_eq!(manager.transport.unpublished, vec![id]);
+        assert_eq!(manager.producer.stopped, vec![id]);
+        assert_eq!(
+            manager.session(id).unwrap().state,
+            ScreenCastState::SourcesSelected
         );
     }
 }

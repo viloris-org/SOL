@@ -19,6 +19,8 @@ pub enum Motion {
     Window,
     /// Workspace / overview paging.
     Workspace,
+    /// Authenticated login surface handing the display to a ready desktop.
+    SessionHandoff,
 }
 
 /// Duration + spring tuning emitted to the animation runtime.
@@ -52,6 +54,11 @@ impl Motion {
             Motion::Workspace => MotionSpec {
                 duration_ms: 340,
                 spring: Some((16.0, 0.82)),
+            },
+            Motion::SessionHandoff => MotionSpec {
+                duration_ms: 260,
+                // The handoff is not momentum-driven, so it must not bounce.
+                spring: Some((20.0, 1.0)),
             },
         }
     }

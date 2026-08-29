@@ -29,6 +29,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 pub struct SessionEnvironment {
     pub runtime_dir: PathBuf,
     pub socket: String,
+    /// One-shot channel inherited from the greeter, when login is waiting for
+    /// the shell's first committed surface before releasing the lock.
+    pub ready_socket: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,6 +236,18 @@ impl LaunchPlan {
             (OsString::from("XDG_CURRENT_DESKTOP"), OsString::from("SOL")),
             (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
         ];
+        let mut shell_environment = vec![
+            (OsString::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
+            (OsString::from("SOL_SCP_SOCKET"), socket.clone()),
+            (OsString::from("XDG_CURRENT_DESKTOP"), OsString::from("SOL")),
+            (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
+        ];
+        if let Some(ready_socket) = &environment.ready_socket {
+            shell_environment.push((
+                OsString::from("SOL_SESSION_READY_SOCKET"),
+                ready_socket.as_os_str().to_os_string(),
+            ));
+        }
         Self {
             compositor: ProcessPlan {
                 program: programs.compositor.clone(),
@@ -252,12 +267,7 @@ impl LaunchPlan {
             shell: ProcessPlan {
                 program: programs.shell.clone(),
                 arguments: Vec::new(),
-                environment: vec![
-                    (OsString::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
-                    (OsString::from("SOL_SCP_SOCKET"), socket),
-                    (OsString::from("XDG_CURRENT_DESKTOP"), OsString::from("SOL")),
-                    (OsString::from("XDG_SESSION_DESKTOP"), OsString::from("SOL")),
-                ],
+                environment: shell_environment,
             },
             settingsd: service_plan(&programs.settingsd, &desktop_environment),
             notificationd: service_plan(&programs.notificationd, &desktop_environment),
@@ -356,6 +366,7 @@ pub fn environment(socket_override: Option<String>) -> Result<SessionEnvironment
     Ok(SessionEnvironment {
         runtime_dir,
         socket,
+        ready_socket: env::var_os("SOL_SESSION_READY_SOCKET").map(PathBuf::from),
     })
 }
 
@@ -627,6 +638,7 @@ mod tests {
         let environment = SessionEnvironment {
             runtime_dir: PathBuf::from("/run/user/1000"),
             socket: "sol-compositor-test".to_owned(),
+            ready_socket: Some(PathBuf::from("/run/user/1000/.desktop-ready")),
         };
         let programs = ProgramPaths {
             compositor: PathBuf::from("/usr/bin/sol-compositor"),
@@ -654,6 +666,17 @@ mod tests {
             OsString::from("SOL_SCP_SOCKET"),
             OsString::from("sol-compositor-test")
         )));
+        assert!(plan.shell.environment.contains(&(
+            OsString::from("SOL_SESSION_READY_SOCKET"),
+            OsString::from("/run/user/1000/.desktop-ready")
+        )));
+        assert!(
+            !plan
+                .compositor
+                .environment
+                .iter()
+                .any(|(key, _)| key == "SOL_SESSION_READY_SOCKET")
+        );
         for process in [&plan.compositor, &plan.shell] {
             assert!(
                 process
@@ -677,6 +700,7 @@ mod tests {
         let environment = SessionEnvironment {
             runtime_dir: PathBuf::from("/run/user/42"),
             socket: "sol-compositor-0".to_owned(),
+            ready_socket: None,
         };
         let plan = LaunchPlan::new(
             &environment,

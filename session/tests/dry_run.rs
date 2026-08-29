@@ -87,6 +87,7 @@ fn actual_mode_starts_services_and_restarts_shell_until_compositor_exits() {
     let environment = sol_session::SessionEnvironment {
         runtime_dir: runtime_dir.clone(),
         socket: "sol-compositor-test".to_owned(),
+        ready_socket: None,
     };
     let plan = sol_session::LaunchPlan::new(
         &environment,

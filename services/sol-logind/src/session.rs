@@ -10,25 +10,85 @@ use std::{
     env,
     ffi::{CString, OsString},
     fs, io,
+    net::Shutdown,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
-    process::{Command, ExitStatus},
+    process::{Child, Command, ExitStatus},
+    thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
+use std::os::unix::net::UnixListener;
 
 use crate::users::UserAccount;
 
 const DEFAULT_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+const READY_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
-/// Launch `sol-session` for `user` and block until it exits.
+/// A user session that is starting behind the still-engaged login surface.
+pub struct PendingUserSession {
+    child: Child,
+    ready_listener: UnixListener,
+    ready_path: PathBuf,
+}
+
+impl PendingUserSession {
+    /// Wait until the shell reports that its first SCP surface is committed.
+    pub fn wait_until_ready(&mut self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.ready_listener.accept() {
+                Ok((stream, _)) => {
+                    let _ = stream.shutdown(Shutdown::Both);
+                    return Ok(());
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(error) => return Err(error).context("desktop readiness channel failed"),
+            }
+
+            if let Some(status) = self
+                .child
+                .try_wait()
+                .context("failed to inspect the starting user session")?
+            {
+                anyhow::bail!("user session exited before its desktop was ready: {status}");
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("desktop did not become ready within {}s", timeout.as_secs());
+            }
+            thread::sleep(READY_POLL_INTERVAL);
+        }
+    }
+
+    /// Wait for the active desktop session to end.
+    pub fn wait(mut self) -> Result<ExitStatus> {
+        self.child.wait().context("failed to wait for sol-session")
+    }
+
+    /// Stop a session that failed before the display could be handed to it.
+    pub fn abort(mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+impl Drop for PendingUserSession {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.ready_path);
+    }
+}
+
+/// Start `sol-session` for `user` while the login surface remains engaged.
 ///
 /// In production this drops privileges to `user` before exec (requires
 /// running as root; otherwise the drop is skipped with a warning so the
 /// binary remains runnable in ad-hoc, non-rooted testing). In dev mode the
 /// session runs as the current user, inheriting the current environment, so
 /// the full login→session chain can be exercised locally.
-pub fn launch_user_session(user: &UserAccount, dev_mode: bool) -> Result<ExitStatus> {
+pub fn start_user_session(user: &UserAccount, dev_mode: bool) -> Result<PendingUserSession> {
     let program = session_binary();
     let runtime_dir = resolve_runtime_dir(
         user.uid,
@@ -36,6 +96,7 @@ pub fn launch_user_session(user: &UserAccount, dev_mode: bool) -> Result<ExitSta
         env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).as_deref(),
     );
     ensure_runtime_dir(&runtime_dir, user, dev_mode)?;
+    let (ready_listener, ready_path) = readiness_listener(&runtime_dir)?;
 
     let mut command = Command::new(&program);
 
@@ -49,6 +110,7 @@ pub fn launch_user_session(user: &UserAccount, dev_mode: bool) -> Result<ExitSta
         command.current_dir(&user.home_dir);
         drop_privileges_before_exec(&mut command, user);
     }
+    command.env("SOL_SESSION_READY_SOCKET", &ready_path);
 
     tracing::info!(
         user = %user.username,
@@ -57,15 +119,35 @@ pub fn launch_user_session(user: &UserAccount, dev_mode: bool) -> Result<ExitSta
         "launching user session"
     );
 
-    let mut child = command
+    let child = command
         .spawn()
         .with_context(|| format!("failed to spawn {}", program.display()))?;
-    let status = child
-        .wait()
-        .with_context(|| format!("failed to wait for {}", program.display()))?;
+    Ok(PendingUserSession {
+        child,
+        ready_listener,
+        ready_path,
+    })
+}
 
-    tracing::info!(user = %user.username, %status, "user session exited");
-    Ok(status)
+fn readiness_listener(runtime_dir: &Path) -> Result<(UnixListener, PathBuf)> {
+    for _ in 0..8 {
+        let nonce = rand::random::<u64>();
+        let path = runtime_dir.join(format!(
+            ".sol-session-ready-{}-{nonce:016x}",
+            std::process::id()
+        ));
+        match UnixListener::bind(&path) {
+            Ok(listener) => {
+                listener
+                    .set_nonblocking(true)
+                    .context("could not make desktop readiness channel non-blocking")?;
+                return Ok((listener, path));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => continue,
+            Err(error) => return Err(error).context("could not create desktop readiness channel"),
+        }
+    }
+    anyhow::bail!("could not allocate a unique desktop readiness channel")
 }
 
 fn session_binary() -> PathBuf {
@@ -184,6 +266,7 @@ fn drop_privileges_before_exec(command: &mut Command, user: &UserAccount) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::net::UnixStream;
 
     fn user() -> UserAccount {
         let mut user = UserAccount::new("jdoe".into(), "John Doe".into(), 1000);
@@ -234,5 +317,39 @@ mod tests {
         assert_eq!(get("LOGNAME").as_deref(), Some("jdoe"));
         assert_eq!(get("SHELL").as_deref(), Some("/bin/zsh"));
         assert_eq!(get("XDG_RUNTIME_DIR").as_deref(), Some("/run/user/1000"));
+    }
+
+    #[test]
+    fn pending_session_waits_for_the_shell_ready_connection() {
+        let runtime_dir = std::env::temp_dir().join(format!(
+            "sol-logind-ready-test-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        fs::create_dir(&runtime_dir).expect("create isolated runtime directory");
+        let (ready_listener, ready_path) =
+            readiness_listener(&runtime_dir).expect("create readiness listener");
+        let child = Command::new("sh")
+            .args(["-c", "sleep 5"])
+            .spawn()
+            .expect("start fake session");
+        let connector_path = ready_path.clone();
+        let connector = thread::spawn(move || {
+            UnixStream::connect(connector_path).expect("signal desktop ready");
+        });
+
+        let mut pending = PendingUserSession {
+            child,
+            ready_listener,
+            ready_path: ready_path.clone(),
+        };
+        pending
+            .wait_until_ready(Duration::from_secs(1))
+            .expect("observe desktop readiness");
+        connector.join().expect("join ready signal");
+        pending.abort();
+
+        assert!(!ready_path.exists(), "the one-shot socket must be removed");
+        fs::remove_dir(runtime_dir).expect("remove isolated runtime directory");
     }
 }

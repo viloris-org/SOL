@@ -25,13 +25,18 @@ sol-shell
 
 ## Status
 
-**Phase 1/4 foundations in progress.** The repository contains an SCP layer
-top-bar configure/commit slice plus renderer-neutral Dock/Launcher, top-bar,
-overview, notifications, Quick Settings, consent, and overlay models. Native
-mapping/rendering and the compositor D-Bus service/proxy remain incomplete.
+**Phase 1/4 foundations in progress.** The running `sol-shell` now maps and
+paints its SCP background, top bar, bottom-centered Dock, and keyboard-focused
+Launcher, routes pointer/keyboard events, follows output changes, recreates
+closed persistent surfaces, and refreshes live clock/network/audio/power state.
+Renderer-neutral overview, notifications, Quick Settings, consent, and overlay
+models also exist. The authenticated installed-app catalog, real launch/window
+adapter, global shortcuts, the compositor D-Bus service/proxy, and native GPU /
+display mapping remain incomplete.
 
-- The first SCP layer surface (top bar) is an open **Phase 1** M1
-  deliverable until it is visibly mapped/rendered and survives restart/reconnect.
+- The four-surface SCP desktop is an open **Phase 1** M1 deliverable until the
+  compositor has a native GPU/display backend and restart/reconnect is proven
+  in a real session.
 - The full desktop interaction model (Dock / Launcher / Overview / notifications /
   quick settings / global menu / Live Capsule / touchpad gestures) is **Phase 4**.
 

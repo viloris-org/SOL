@@ -189,6 +189,8 @@ slint::slint! {
         in property <length> spacing-medium;
         in property <length> spacing-large;
         in property <length> spacing-xlarge;
+        in property <float> content-opacity: 1.0;
+        in property <float> material-opacity: 1.0;
 
         callback user-selected(int);
         callback toggle-password-visibility();
@@ -204,14 +206,20 @@ slint::slint! {
             Rectangle {
                 width: 480px;
                 border-radius: root.panel-radius;
-                background: root.panel-background;
-                drop-shadow-blur: 32px;
-                drop-shadow-color: #00000040;
+
+                Rectangle {
+                    border-radius: root.panel-radius;
+                    background: root.panel-background;
+                    drop-shadow-blur: 32px;
+                    drop-shadow-color: #00000040;
+                    opacity: root.material-opacity;
+                }
 
                 VerticalLayout {
                     padding: root.spacing-xlarge;
                     spacing: root.spacing-large;
                     alignment: center;
+                    opacity: root.content-opacity;
 
                     // Avatar grid
                     HorizontalLayout {
@@ -516,6 +524,8 @@ fn apply_frame(screen: &LoginScreen, frame: &LoginFrame) {
     screen.set_spacing_medium(frame.spacing_medium);
     screen.set_spacing_large(frame.spacing_large);
     screen.set_spacing_xlarge(frame.spacing_xlarge);
+    screen.set_content_opacity(frame.content_opacity);
+    screen.set_material_opacity(frame.material_opacity);
 }
 
 fn to_slint_color(rgba: sol_design::color::Rgba) -> slint::Color {
@@ -654,5 +664,39 @@ mod tests {
 
         assert_eq!(selected.get(), 1);
         assert_eq!(toggled.get(), 1);
+    }
+
+    #[test]
+    fn the_final_handoff_frame_keeps_only_the_stationary_background() {
+        let renderer = LoginRenderer::new().expect("build the software renderer");
+        let mut buffer = FrameBuffer::new(320, 240).expect("allocate frame buffer");
+        renderer.resize(320, 240);
+
+        let ui = LoginUi::new(vec![UserAccount::new(
+            "jdoe".into(),
+            "John Doe".into(),
+            1000,
+        )]);
+        let frame = ui.frame_for_handoff(
+            TokenMode::dark(),
+            crate::handoff::HandoffVisual {
+                content_opacity: 0.0,
+                material_opacity: 0.0,
+                finished: true,
+            },
+        );
+        renderer.render(&frame);
+        assert!(renderer.draw_into(&mut buffer));
+
+        let distinct = buffer
+            .pixels()
+            .iter()
+            .map(|pixel| (pixel.red, pixel.green, pixel.blue, pixel.alpha))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            distinct.len(),
+            1,
+            "handoff must not move or replace the page background"
+        );
     }
 }

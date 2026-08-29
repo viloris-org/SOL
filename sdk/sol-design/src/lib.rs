@@ -97,6 +97,7 @@ mod consistency_tests {
             motion::Motion::Panel,
             motion::Motion::Window,
             motion::Motion::Workspace,
+            motion::Motion::SessionHandoff,
         ];
 
         for m in motions {

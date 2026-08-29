@@ -10,6 +10,8 @@ use sol_design::{
 };
 use sol_ui::Button;
 
+use crate::handoff::HandoffVisual;
+
 /// Login screen state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginState {
@@ -175,6 +177,11 @@ impl LoginUi {
 
     /// Resolve the UI into a renderer-neutral frame.
     pub fn frame_for(&self, mode: TokenMode) -> LoginFrame {
+        self.frame_for_handoff(mode, HandoffVisual::default())
+    }
+
+    /// Resolve the UI at one frame of the authenticated session handoff.
+    pub fn frame_for_handoff(&self, mode: TokenMode, handoff: HandoffVisual) -> LoginFrame {
         LoginFrame {
             users: self.users.clone(),
             selected_user_index: self.selected_user_index,
@@ -207,6 +214,8 @@ impl LoginUi {
             spacing_large: Spacing::Lg.px(),
             spacing_xlarge: Spacing::Xl.px(),
             login_button: self.login_button.frame_for(mode),
+            content_opacity: handoff.content_opacity,
+            material_opacity: handoff.material_opacity,
         }
     }
 }
@@ -250,6 +259,10 @@ pub struct LoginFrame {
 
     // Controls
     pub login_button: sol_ui::ButtonFrame,
+
+    // Session handoff
+    pub content_opacity: f32,
+    pub material_opacity: f32,
 }
 
 #[cfg(test)]

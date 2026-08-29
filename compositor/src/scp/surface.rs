@@ -55,6 +55,34 @@ pub struct ScpSurface {
     pub frame_callbacks: Vec<u32>,
     pub pending_frame_callbacks: Vec<u32>,
     pub old_buffers: Vec<SurfaceBuffer>,
+    /// Whether this surface may contribute pixels to screenshots, screen
+    /// sharing, recording, remote desktop, or any other capture consumer.
+    ///
+    /// This is compositor-owned state. There is deliberately no ordinary SCP
+    /// request that lets a client toggle it: a protected-media/privacy broker
+    /// must authenticate the content before the compositor changes it.
+    pub capture_policy: CapturePolicy,
+}
+
+/// How a committed surface participates in non-display composition.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CapturePolicy {
+    /// The surface is painted normally into capture output.
+    #[default]
+    Allowed,
+    /// The surface is replaced by an opaque compositor-owned placeholder.
+    Excluded(ProtectionReason),
+}
+
+/// Broker-verified reason that content must not leave the display path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtectionReason {
+    /// Licensed media rendered through a protected playback path.
+    Drm,
+    /// User or application data covered by an explicit privacy policy.
+    Privacy,
+    /// System authentication content such as a credential prompt.
+    Authentication,
 }
 
 #[derive(Debug)]
@@ -103,7 +131,17 @@ impl ScpSurface {
             frame_callbacks: Vec::new(),
             pending_frame_callbacks: Vec::new(),
             old_buffers: Vec::new(),
+            capture_policy: CapturePolicy::Allowed,
         }
+    }
+
+    /// Change the capture policy after a trusted broker has authorized it.
+    ///
+    /// Kept crate-private so an SCP client cannot turn this into a self-asserted
+    /// flag. The eventual protected-media/privacy broker adapter lives beside
+    /// compositor state and is responsible for authenticating the grant.
+    pub(crate) fn set_capture_policy(&mut self, policy: CapturePolicy) {
+        self.capture_policy = policy;
     }
 
     /// Register a frame callback, ignoring requests past the outstanding limit.
@@ -550,23 +588,33 @@ impl LayerSurface {
         let width = width.clamp(0, output_width.max(0));
         let height = height.clamp(0, output_height.max(0));
 
-        // Calculate position based on anchors
-        let x = if self.anchor.right && !self.anchor.left {
+        // Calculate position based on anchors.
+        //
+        // An axis with exactly one edge anchored is pinned to that edge. An axis
+        // with neither edge anchored is *centered* — that is how the Dock, which
+        // anchors only to the bottom, ends up centered horizontally as the Shell
+        // contract requires, without the Shell having to compute a margin from
+        // an output width it would then have to recompute on every mode change.
+        // An axis with both edges anchored was already stretched above, so
+        // centering it is a no-op.
+        let x = if self.anchor.left && !self.anchor.right {
+            self.margin.left
+        } else if self.anchor.right && !self.anchor.left {
             output_width
                 .saturating_sub(width)
                 .saturating_sub(self.margin.right)
         } else {
-            // Left-anchored, centered, or stretched.
-            self.margin.left
+            output_width.saturating_sub(width) / 2
         };
 
-        let y = if self.anchor.bottom && !self.anchor.top {
+        let y = if self.anchor.top && !self.anchor.bottom {
+            self.margin.top
+        } else if self.anchor.bottom && !self.anchor.top {
             output_height
                 .saturating_sub(height)
                 .saturating_sub(self.margin.bottom)
         } else {
-            // Top-anchored, centered, or stretched.
-            self.margin.top
+            output_height.saturating_sub(height) / 2
         };
 
         Rect {
@@ -804,6 +852,26 @@ impl SurfaceManager {
             .retain(|_, layer| layer.session_id != session_id);
     }
 
+    /// Collect the buffers that commits have replaced, so they can be released.
+    ///
+    /// A client may not reuse a buffer until the compositor says it is done
+    /// reading it, so until a renderer existed these accumulated up to
+    /// [`MAX_RETAINED_BUFFERS`] and were then dropped on the floor. Draining
+    /// them after a frame is presented is what lets a client recycle its
+    /// buffers instead of allocating a new one for every commit.
+    ///
+    /// Each returned descriptor is closed as its [`SurfaceBuffer`] drops here;
+    /// only the id the client knows it by is handed back.
+    pub fn take_released_buffers(&mut self) -> Vec<(SessionId, BufferId)> {
+        let mut released = Vec::new();
+        for ((session_id, _), surface) in &mut self.surfaces {
+            for buffer in surface.take_old_buffers() {
+                released.push((*session_id, buffer.buffer_id));
+            }
+        }
+        released
+    }
+
     /// Collect and clear all pending frame callbacks from all surfaces.
     /// Returns (session_id, surface_id, callback_id) tuples.
     pub fn take_frame_callbacks(&mut self) -> Vec<(SessionId, SurfaceId, u32)> {
@@ -850,6 +918,38 @@ mod tests {
         let geometry = surface.calculate_geometry(1920, 1080);
         assert!(geometry.width <= 1920 && geometry.height <= 1080);
         assert!(geometry.x >= 0 && geometry.y >= 0);
+    }
+
+    #[test]
+    fn an_unanchored_axis_centers_so_the_dock_sits_at_the_bottom_center() {
+        let mut surface = layer_surface();
+        surface.anchor = Anchor {
+            top: false,
+            bottom: true,
+            left: false,
+            right: false,
+        };
+        surface.size = (400, 72);
+        surface.margin = Margin {
+            bottom: 16,
+            ..Margin::default()
+        };
+
+        let geometry = surface.calculate_geometry(1920, 1080);
+        assert_eq!(geometry.width, 400);
+        assert_eq!(geometry.height, 72);
+        assert_eq!(geometry.x, (1920 - 400) / 2);
+        assert_eq!(geometry.y, 1080 - 72 - 16);
+    }
+
+    #[test]
+    fn a_surface_anchored_to_no_edge_at_all_is_centered_on_both_axes() {
+        let mut surface = layer_surface();
+        surface.anchor = Anchor::default();
+        surface.size = (800, 600);
+
+        let geometry = surface.calculate_geometry(1920, 1080);
+        assert_eq!((geometry.x, geometry.y), ((1920 - 800) / 2, (1080 - 600) / 2));
     }
 
     #[test]

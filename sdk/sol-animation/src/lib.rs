@@ -18,6 +18,7 @@
 //! - `Panel`: Menus, popovers, dock
 //! - `Window`: Move, resize, snap
 //! - `Workspace`: Pager, overview transitions
+//! - `SessionHandoff`: Authenticated login surface yielding to a ready desktop
 
 use sol_design::motion::{Motion, MotionSpec};
 
@@ -122,6 +123,11 @@ impl AnimationEffect {
     pub fn workspace() -> Self {
         Self::new(Motion::Workspace)
     }
+
+    /// Create an authenticated login-to-desktop handoff animation.
+    pub fn session_handoff() -> Self {
+        Self::new(Motion::SessionHandoff)
+    }
 }
 
 /// An interruptible animation sequence.
@@ -220,6 +226,10 @@ mod tests {
         assert!(matches!(
             AnimationEffect::workspace().motion,
             Motion::Workspace
+        ));
+        assert!(matches!(
+            AnimationEffect::session_handoff().motion,
+            Motion::SessionHandoff
         ));
     }
 }

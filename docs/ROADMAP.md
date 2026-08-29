@@ -546,6 +546,14 @@ claim that the unavailable SCP display and assistive-technology environment pass
       deterministic explainable ranking, and permission-gated typed launch
       execution. File/document/clipboard/command/calculator providers and the
       `Super+Space` desktop shortcut remain explicit follow-up adapters.
+  - [S2] **Native four-surface desktop loop:** the real `sol-shell` process maps
+        an SCP background, top bar, bottom-centered Dock, and on-demand
+        Launcher; routes compositor pointer/keyboard events; follows output
+        changes; recreates closed persistent surfaces; and refreshes live
+        system status without cadence-driven full-desktop repainting. The
+        authenticated installed-app catalog, production action/window adapter,
+        compositor-owned global shortcuts, reconnect validation, and physical
+        GPU/display presentation remain open.
   - [S2] **Gesture progress core:** interruptible/cancellable progress, velocity
         handoff, semantic workspace settling, and reduced-motion fixtures.
   - [S0] **Real input integration:** libinput gesture adapter, compositor IPC
@@ -563,7 +571,8 @@ claim that the unavailable SCP display and assistive-technology environment pass
 - [S2] **SCP layer-surface popup model validation (ADR-0004 validation point #1):**
       repeatable headless compositor + SolUI fixture validates placement,
       fractional scale, input, focus, and lifecycle contracts. The existing
-      `sol-shell --once` exercises the real SCP top-bar configure/commit path;
+      `sol-shell --once` exercises the real SCP desktop background, Dock, and
+      top-bar configure/commit path (the Launcher maps on demand);
       automated cross-process popup, physical multi-output, GPU, and AT-SPI
       validation remain field work rather than CI claims.
 
@@ -653,14 +662,25 @@ claim that the unavailable SCP display and assistive-technology environment pass
         authorization tokens. An isolated daemon/proxy test proves default
         deny and malformed-request rejection.
 - [S0] **Screen sharing / screen recording:** XDG portal D-Bus, file chooser
-      UI, PipeWire/screencopy adapters, stream lifecycle, and desktop-session
-      validation remain required.
+      UI, protected-content-aware compositor/PipeWire adapters, stream
+      lifecycle, and desktop-session validation remain required. Display
+      scanout and physical audio sink monitors are forbidden capture sources.
   - [S2] **Authorized ScreenCast lifecycle core:** `sol-portal` consumes only a
-        matching private `PortalAuthorization`, enforces create → select
-        sources → start → close ordering, validates backend stream/node data,
-        and owns cleanup through a typed compositor/PipeWire adapter boundary.
-        XDG portal interfaces, picker UI, real streams, and desktop validation
-        remain open.
+      matching private `PortalAuthorization`, enforces create → select
+      sources → start → close ordering, accepts only compositor-produced safe
+      feeds, validates their one-to-one transport stream mapping, and owns both
+      stages' cleanup. XDG portal interfaces, picker UI, real streams, and
+      desktop validation remain open.
+  - [S2] **Protected capture composition foundation:** SCP separates local
+      display and exportable capture passes. Broker-marked DRM/privacy/auth
+      surfaces become opaque compositor-owned placeholders before their buffer
+      is read, preserving unrelated regions without revealing obscured windows.
+      Authenticated broker IPC, native protected GPU buffers, KMS/HDCP loss
+      handling, capture effects, and real PipeWire publication remain open.
+  - [S2] **Capture-safe audio policy foundation:** `sol-audiod` plans a separate
+      recording mix from allowed per-playback nodes and excludes protected
+      nodes fail-closed. The native PipeWire graph adapter and live-session
+      validation remain open; a physical sink monitor may not substitute.
 - [S0] SOL toolkit adapter matrix (GTK / Qt / SDL / Flutter / Electron)
   - [S0] Each supported toolkit needs a bundled SOL adapter that targets SCP
         explicitly. The retired compatibility probes are removed; no toolkit

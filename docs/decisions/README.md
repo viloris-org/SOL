@@ -58,6 +58,7 @@ decisions in their own right.
 | 33 | Smithay-to-SCP complete migration | Accepted | Phases 1–2 | [0032](0032-smithay-to-scp-migration.md) |
 | 34 | Compositor-rendered window decorations and IME popups | Accepted | Phase 1 | [0033](0033-compositor-rendered-decorations.md) |
 | 35 | Capability-based permission model | Proposed | Phase 8 | [0034](0034-capability-based-permissions.md) |
+| 36 | Protected media and privacy-safe capture | Accepted (foundation implemented) | Phase 5 | [0035](0035-protected-media-capture.md) |
 
 ## Decision register (PRD §41)
 
@@ -93,6 +94,7 @@ accepted decision remain open implementation or product work.
 | 26 | Toolkit adapter/protocol matrix | Phase 9 | ADR-0028 removes generic compatibility; explicit adapter coverage and SCP material schema remain open |
 | 27 | Live Activity/menu/status IPC | Phase 4/9 | Placement, attribution, leasing, privacy priority, and trusted rendering fixed by ADR-0025 |
 | 28 | Device control plane and hotplug lifecycle | **Proposed (Phase 5)** | [ADR-0031](0031-device-control-plane-and-hotplug.md): normalized device graph, stable identity, subsystem authority, reconciliation, safe removal, and attachment-fenced leases |
+| 29 | Protected media capture boundary | **Accepted (Phase 5 foundation)** | [ADR-0035](0035-protected-media-capture.md): compositor-owned capture redaction, capture-only audio mix, and transport-after-policy ordering; native protected GPU/KMS and PipeWire adapters remain open |
 
 ## Related reading
 

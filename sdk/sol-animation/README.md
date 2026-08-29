@@ -24,6 +24,7 @@ Motion::Control
 Motion::Panel
 Motion::Window
 Motion::Workspace
+Motion::SessionHandoff
 ```
 
 Apps must not name a millisecond duration; they name an **animation

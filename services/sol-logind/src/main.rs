@@ -4,11 +4,18 @@
 //! the session lock, and draws the login UI into a shared buffer. It never opens
 //! a display of its own.
 
-use std::{cell::RefCell, env, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    env,
+    rc::Rc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use sol_logind::{
     FrameBuffer, KeyInput, LoginAction, LoginRenderer, LoginService, Modifiers, ScpClient,
+    SessionHandoff,
     scp::{
         keys,
         lock::{BTN_LEFT, LockEvent},
@@ -22,6 +29,8 @@ use tracing::{info, warn};
 /// not on a clock — so a long sleep here costs nothing and keeps a greeter from
 /// spinning on an otherwise empty machine.
 const IDLE_POLL: Duration = Duration::from_millis(250);
+const HANDOFF_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const DESKTOP_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// What the user is told when authentication fails.
 ///
@@ -29,6 +38,7 @@ const IDLE_POLL: Duration = Duration::from_millis(250);
 /// PAM refused for its own reasons: a login screen that distinguishes them is a
 /// user-enumeration oracle.
 const AUTH_FAILED: &str = "Incorrect user name or password.";
+const SESSION_FAILED: &str = "Your desktop could not be started. Please try again.";
 
 fn main() -> Result<()> {
     if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env() {
@@ -100,7 +110,9 @@ fn run(
     buffer: &mut FrameBuffer,
     dev_mode: bool,
 ) -> Result<()> {
-    let mode = sol_design::accessibility::TokenMode::light();
+    // Until settingsd owns the pre-login appearance, use the same default as
+    // the desktop shell so the handoff cannot flash between light and dark.
+    let mode = sol_design::accessibility::TokenMode::dark();
     let mut modifiers = Modifiers::default();
 
     loop {
@@ -165,7 +177,7 @@ fn run(
         // A click on the login button lands in the renderer, Enter lands in
         // `apply_key`; either way it is the same request.
         if let Some(LoginAction::Authenticate) = requested.or_else(|| renderer.take_action()) {
-            authenticate(client, renderer, service, buffer, dev_mode)?;
+            authenticate(client, renderer, service, buffer, mode, dev_mode)?;
         }
     }
 }
@@ -205,6 +217,7 @@ fn authenticate(
     renderer: &LoginRenderer,
     service: &Rc<RefCell<LoginService>>,
     buffer: &mut FrameBuffer,
+    mode: sol_design::accessibility::TokenMode,
     dev_mode: bool,
 ) -> Result<()> {
     let outcome = service.borrow_mut().authenticate();
@@ -244,12 +257,52 @@ fn authenticate(
         return Ok(());
     };
 
-    // Release the lock only once there is a session to hand it to.
-    client.unlock()?;
+    {
+        let mut service = service.borrow_mut();
+        service.ui.clear_password();
+        service.ui.set_status("Preparing your desktop…");
+    }
 
-    match sol_logind::launch_user_session(&user, dev_mode) {
+    // The desktop starts behind the still-engaged lock surface. Releasing the
+    // lock before the shell has committed a frame would turn process startup
+    // time into a visible blank screen.
+    let mut pending = match sol_logind::start_user_session(&user, dev_mode) {
+        Ok(pending) => pending,
+        Err(error) => {
+            warn!(%error, "could not start the user session");
+            if let Some(session) = outcome.session {
+                session.close();
+            }
+            session_failed(service);
+            return Ok(());
+        }
+    };
+
+    if let Err(error) = pending.wait_until_ready(DESKTOP_READY_TIMEOUT) {
+        warn!(%error, "desktop did not become ready; keeping the screen locked");
+        pending.abort();
+        if let Some(session) = outcome.session {
+            session.close();
+        }
+        session_failed(service);
+        return Ok(());
+    }
+
+    play_handoff(client, renderer, service, buffer, mode)?;
+
+    // Unlock is the commit point: there is now a ready desktop underneath and
+    // the greeter has presented the final transparent-content handoff frame.
+    if let Err(error) = client.unlock() {
+        pending.abort();
+        if let Some(session) = outcome.session {
+            session.close();
+        }
+        return Err(error.into());
+    }
+
+    match pending.wait() {
         Ok(status) => info!(%status, "user session exited"),
-        Err(error) => warn!(%error, "could not launch the user session"),
+        Err(error) => warn!(%error, "could not wait for the user session"),
     }
 
     // The PAM session had to stay open for the whole desktop session above;
@@ -271,4 +324,38 @@ fn authenticate(
     renderer.resize(width, height);
     renderer.invalidate();
     Ok(())
+}
+
+fn play_handoff(
+    client: &mut ScpClient,
+    renderer: &LoginRenderer,
+    service: &Rc<RefCell<LoginService>>,
+    buffer: &mut FrameBuffer,
+    mode: sol_design::accessibility::TokenMode,
+) -> Result<()> {
+    let handoff = SessionHandoff::new(mode);
+    let started = Instant::now();
+    renderer.invalidate();
+
+    loop {
+        let visual = handoff.visual_at(started.elapsed());
+        let frame = service.borrow().ui.frame_for_handoff(mode, visual);
+        renderer.render(&frame);
+        renderer.tick();
+        if renderer.draw_into(buffer) {
+            client.present(buffer)?;
+        }
+        if visual.finished {
+            return Ok(());
+        }
+
+        let remaining = handoff.duration().saturating_sub(started.elapsed());
+        thread::sleep(HANDOFF_FRAME_INTERVAL.min(remaining));
+    }
+}
+
+fn session_failed(service: &Rc<RefCell<LoginService>>) {
+    let mut service = service.borrow_mut();
+    service.ui.reset();
+    service.ui.set_status(SESSION_FAILED);
 }

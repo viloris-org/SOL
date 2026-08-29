@@ -18,7 +18,7 @@
 //!         ↓
 //! user authenticates (PAM)
 //!         ↓
-//! UnlockSession → sol-session starts the user's desktop
+//! sol-session starts behind the lock → shell commits → animated UnlockSession
 //!         ↓
 //! session ends → LockSession again
 //! ```
@@ -45,6 +45,7 @@
 //! [`Capability::SessionLock`]: sol_compositor::scp::capability::Capability::SessionLock
 
 pub mod auth;
+pub mod handoff;
 pub mod render;
 pub mod scp;
 pub mod session;
@@ -52,11 +53,12 @@ pub mod ui;
 pub mod users;
 
 pub use auth::{AuthMode, AuthOutcome, AuthResult, AuthService, AuthToken, PamSession};
+pub use handoff::{HandoffVisual, SessionHandoff};
 pub use render::{LoginAction, LoginRenderer};
 pub use scp::{
     FrameBuffer, KeyInput, LockDriver, LockError, LockEvent, LockPhase, Modifiers, ScpClient,
 };
-pub use session::launch_user_session;
+pub use session::{PendingUserSession, start_user_session};
 pub use ui::{LoginFrame, LoginState, LoginUi, PasswordVisibility};
 pub use users::{UserAccount, UserMode, UserService};
 

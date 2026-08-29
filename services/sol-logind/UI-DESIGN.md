@@ -160,9 +160,16 @@ Duration: 100ms
 
 ### Login Success
 ```
-Panel fade out + scale up
-Duration: 400ms
-Then spawn session
+Keep the session lock engaged while sol-session starts
+Wait for the shell's first committed SCP surface
+Content opacity: 1 → 0 (0–160ms)
+Panel material opacity: 1 → 0 (80–260ms)
+Easing: cubic-bezier(0.23, 1, 0.32, 1)
+Release the lock only after the final frame is presented
+
+Reduced motion:
+Content + material opacity: 1 → 0
+Duration: 160ms; no spatial transform or spring
 ```
 
 ## Accessibility

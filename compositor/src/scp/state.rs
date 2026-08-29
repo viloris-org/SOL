@@ -2,6 +2,7 @@
 
 use crate::scp::{
     buffer::BufferManager,
+    compose::{self, BufferSource, Framebuffer, Rgba8},
     capability::{
         Capability, CapabilityGrant, CapabilityToken, Decision, blocked_while_locked,
         requires_foreground, requires_recent_interaction,
@@ -41,6 +42,13 @@ const DECORATION_HEIGHT: i32 = 32;
 
 /// Guards popup parent-chain walks against a malformed nesting cycle.
 const MAX_POPUP_NESTING: usize = 16;
+
+/// What an output shows where no surface covers it.
+///
+/// Not a wallpaper: the desktop background is a Shell-owned background-layer
+/// surface like any other. This is only what remains visible before the Shell
+/// has mapped one, or in the gap left by an output no surface reaches.
+const DESKTOP_CLEAR: Rgba8 = Rgba8::BLACK;
 
 /// Escape, in the XKB keycode space this compositor speaks (evdev + 8).
 ///
@@ -2208,6 +2216,98 @@ impl ScpState {
         count
     }
 
+    // ===== Presentation =====
+
+    /// Compose one output's current image without mutating protocol state.
+    ///
+    /// Read-only on purpose: a screenshot, a test assertion, or a diagnostic
+    /// dump must be able to look at the desktop without telling clients a frame
+    /// was presented. [`Self::present_frame`] is the pass that has that effect.
+    pub fn compose_output(&self, output_id: OutputId) -> Option<Framebuffer> {
+        let output = self.output_manager.get_output(output_id)?;
+        compose::compose(
+            output.geometry,
+            DESKTOP_CLEAR,
+            &self.build_stack(),
+            self,
+        )
+    }
+
+    /// Compose the primary output, or `None` when no output is configured.
+    pub fn compose_primary_output(&self) -> Option<Framebuffer> {
+        let output_id = self.output_manager.primary_output()?.id;
+        self.compose_output(output_id)
+    }
+
+    /// Compose the only framebuffer that may be exported outside the
+    /// compositor. Protected surfaces are replaced before their buffers are
+    /// read, while unrelated regions remain intact.
+    pub fn compose_capture_output(&self, output_id: OutputId) -> Option<Framebuffer> {
+        let output = self.output_manager.get_output(output_id)?;
+        compose::compose_for(
+            compose::RenderPurpose::Capture,
+            output.geometry,
+            DESKTOP_CLEAR,
+            &self.build_stack(),
+            self,
+        )
+    }
+
+    /// Capture-safe composition of the primary output.
+    pub fn compose_capture_primary_output(&self) -> Option<Framebuffer> {
+        let output_id = self.output_manager.primary_output()?.id;
+        self.compose_capture_output(output_id)
+    }
+
+    /// Apply a capture policy issued by a trusted in-process broker adapter.
+    ///
+    /// This is intentionally an API on compositor state rather than an SCP
+    /// client message. The caller must authenticate a protected-media,
+    /// privacy, or authentication grant before reaching this method; ordinary
+    /// applications cannot self-assert capture immunity over the wire.
+    pub fn set_broker_capture_policy(
+        &mut self,
+        session_id: SessionId,
+        surface_id: SurfaceId,
+        policy: crate::scp::surface::CapturePolicy,
+    ) -> Result<(), String> {
+        let surface = self
+            .surface_manager
+            .get_surface_mut(session_id, surface_id)
+            .ok_or("Surface not found")?;
+        surface.set_capture_policy(policy);
+        Ok(())
+    }
+
+    /// Compose one output and complete the frame for its clients.
+    ///
+    /// The order matters: buffers are released and callbacks fire only *after*
+    /// composition has finished reading, because a client is entitled to draw
+    /// into a buffer the moment it is released. A frame that fails to compose
+    /// releases nothing and fires nothing, so the client's next commit still
+    /// finds its previous buffer intact.
+    pub fn present_frame(
+        &mut self,
+        output_id: OutputId,
+        timestamp_ms: u64,
+    ) -> Option<Framebuffer> {
+        let framebuffer = self.compose_output(output_id)?;
+        self.release_presented_buffers();
+        self.send_frame_callbacks(timestamp_ms);
+        Some(framebuffer)
+    }
+
+    /// Hand back every buffer a later commit replaced. Returns how many.
+    pub fn release_presented_buffers(&mut self) -> usize {
+        let released = self.surface_manager.take_released_buffers();
+        let count = released.len();
+        for (session_id, buffer_id) in released {
+            self.events
+                .send_logged(session_id, CompositorMessage::BufferRelease { buffer_id });
+        }
+        count
+    }
+
     pub const fn get_focused_surface(&self) -> Option<(SessionId, SurfaceId)> {
         self.focused_surface
     }
@@ -2933,6 +3033,34 @@ impl ScpState {
 impl Default for ScpState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Composition reads surface content through this narrow view rather than
+/// through the whole of [`ScpState`], so a rendering pass cannot reach protocol
+/// state it has no business touching.
+impl BufferSource for ScpState {
+    fn committed_buffer(
+        &self,
+        session_id: SessionId,
+        surface_id: SurfaceId,
+    ) -> Option<&crate::scp::surface::SurfaceBuffer> {
+        self.surface_manager
+            .get_surface(session_id, surface_id)?
+            .buffer
+            .as_ref()
+    }
+
+    fn capture_policy(
+        &self,
+        session_id: SessionId,
+        surface_id: SurfaceId,
+    ) -> crate::scp::surface::CapturePolicy {
+        self.surface_manager
+            .get_surface(session_id, surface_id)
+            .map_or(crate::scp::surface::CapturePolicy::Allowed, |surface| {
+                surface.capture_policy
+            })
     }
 }
 

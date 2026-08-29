@@ -184,9 +184,17 @@ impl TokenMode {
     /// Resolve a semantic motion tier under the selected motion preference.
     pub fn motion_spec(self, motion: Motion) -> MotionSpec {
         if matches!(self.motion, MotionPreference::Reduced) {
-            MotionSpec {
-                duration_ms: 0,
-                spring: None,
+            match motion {
+                // This opacity-only bridge prevents a full-screen flash. It is
+                // functional feedback rather than spatial motion.
+                Motion::SessionHandoff => MotionSpec {
+                    duration_ms: 160,
+                    spring: None,
+                },
+                _ => MotionSpec {
+                    duration_ms: 0,
+                    spring: None,
+                },
             }
         } else {
             motion.spec()
@@ -280,6 +288,15 @@ mod tests {
             .reduced_motion()
             .motion_spec(Motion::Workspace);
         assert_eq!(spec.duration_ms, 0);
+        assert!(spec.spring.is_none());
+    }
+
+    #[test]
+    fn reduced_motion_keeps_the_non_spatial_session_bridge() {
+        let spec = TokenMode::light()
+            .reduced_motion()
+            .motion_spec(Motion::SessionHandoff);
+        assert_eq!(spec.duration_ms, 160);
         assert!(spec.spring.is_none());
     }
 

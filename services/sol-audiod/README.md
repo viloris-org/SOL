@@ -8,6 +8,8 @@ SOL's unified audio service daemon - handles device routing, Bluetooth audio, an
 - **Bluetooth integration** - Automatic device classification and seamless switching
 - **Context-aware switching** - Respects calls, screen mirroring, and multi-user scenarios
 - **Low-latency path** - Real-time scheduling for audio threads (integrates with ADR-0029)
+- **Capture-safe mix policy** - Builds recording inputs only from independently
+  classified playback nodes and excludes DRM/privacy/authentication audio
 - **Battery awareness** - Adjusts routing based on device battery levels
 - **User preferences** - Trusted devices, priority boosts, per-device auto-switch settings
 
@@ -22,6 +24,12 @@ PipeWire/ALSA
      ↓
 Hardware (ALSA kernel drivers)
 ```
+
+Recording never consumes a physical-output monitor. `sol-audiod` plans a
+separate capture mix from broker-classified playback nodes, so protected audio
+continues to reach the selected hardware output while unrelated audio remains
+recordable. The native PipeWire graph adapter that materializes this plan is
+still pending.
 
 ## Configuration
 
@@ -117,6 +125,7 @@ scripts/validate-audiod-dbus.sh
 - Real default-output switching, including migration of existing sink inputs
 - Hotplug reconciliation, automatic headphone switching, and disconnect fallback
 - D-Bus signals for device connection, disconnection, and active-route changes
+- Capture-mix policy and fail-closed protected-node filtering
 
 ### Next
 - Native PipeWire registry/event API (replace the current Pulse compatibility adapter)

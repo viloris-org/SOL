@@ -70,6 +70,8 @@ operation rewinds user data.
 | App → global chrome | Menus, tray/status, badges, and live activities are authenticated declarative records; Shell owns rendering/input and brokers own privacy truth | ADR-0025 |
 | Compositor ↔ backend | `ScpState` owns client protocol state; native renderer/input/output backends only drive it | ADR-0028, ADR-0032 |
 | Compositor ↔ Shell | Separate processes over typed IPC; a shell crash never kills the compositor | PRD §11, ADR-0006 |
+| Display → capture | Capture uses a separate compositor pass that replaces broker-verified protected surfaces before reading their buffers; display scanout is never a recording source | ADR-0035 |
+| Audio → capture | `sol-audiod` builds a capture-only mix from allowed playback nodes; protected nodes and physical sink monitors are never recording inputs | ADR-0035 |
 | App → SolKit → renderer | Apps and Shell never touch a renderer/Slint directly; `sol-ui` owns semantic components and `sol-design` owns visual parameters | PRD §19.1 |
 | Monorepo crates | Each crate can eventually split out; no hidden coupling across public/private boundaries | ADR-0001, ADR-0017 |
 

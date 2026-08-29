@@ -54,6 +54,33 @@ pub fn add_seals(fd: RawFd, seals: i32) -> io::Result<()> {
     Ok(())
 }
 
+/// Create an anonymous memory file as an owned [`std::fs::File`].
+///
+/// The raw [`create`] is the right entry point inside this crate, which is
+/// allowed to hold descriptors directly. Every other SOL crate forbids `unsafe`,
+/// so without this they could obtain a descriptor but never safely write to it —
+/// which is exactly what a client needs to do to fill a buffer before attaching
+/// it. Returning a `File` moves the one unsafe step behind this boundary.
+///
+/// The file is created with sealing allowed, so a caller that has finished
+/// writing may follow up with [`seal_readonly`].
+pub fn create_file(name: &str) -> io::Result<std::fs::File> {
+    let fd = create(name, true)?;
+    // SAFETY: `create` just returned this descriptor and nothing else holds it,
+    // so the `File` becomes its sole owner.
+    Ok(unsafe { <std::fs::File as std::os::unix::io::FromRawFd>::from_raw_fd(fd) })
+}
+
+/// Release a file's descriptor without closing it.
+///
+/// The counterpart to [`create_file`]: a client fills the file, then hands the
+/// bare descriptor to `SCM_RIGHTS`, which needs it to stay open past the point
+/// the `File` goes out of scope. The caller owns the descriptor from here and
+/// must close it.
+pub fn into_raw_fd(file: std::fs::File) -> RawFd {
+    std::os::unix::io::IntoRawFd::into_raw_fd(file)
+}
+
 /// Seal a memfd to prevent shrinking, growing, and writing.
 ///
 /// This makes the fd effectively read-only and immutable.

@@ -44,6 +44,7 @@ fn motion_has_progressive_duration() {
     assert!(d(Motion::Fast) < d(Motion::Panel));
     assert!(d(Motion::Panel) < d(Motion::Window));
     assert!(d(Motion::Window) < d(Motion::Workspace));
+    assert!(d(Motion::Window) <= d(Motion::SessionHandoff));
 }
 
 #[test]
