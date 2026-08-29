@@ -5,7 +5,6 @@ use crate::scp::random;
 use std::{
     collections::HashMap,
     fmt,
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -170,12 +169,12 @@ type TokenRegistry = HashMap<Vec<u8>, TokenRecord>;
 impl SecurityCoordinator for StubSecurityCoordinator {
     /// Derive an identity from the peer's process, refusing to invent privilege.
     ///
-    /// Two things are checked that a name cannot establish on its own:
-    ///
-    /// 1. The peer runs as the user this compositor serves. Another user's
-    ///    process is not an application of this session, whatever it is called.
-    /// 2. A [reserved](RESERVED_APP_IDS) name is only honored when the peer's
+    /// A [reserved](RESERVED_APP_IDS) name is only honored when the peer's
     ///    executable is the installed one, because `comm` is self-assigned.
+    ///
+    /// UID admission is enforced by the transport against the compositor's
+    /// active session UID before this identity verifier runs. Keeping the two
+    /// checks separate lets one system compositor safely outlive many users.
     ///
     /// Two gaps remain, both of which belong to real identity verification in
     /// sol-securityd rather than to this stub:
@@ -188,20 +187,6 @@ impl SecurityCoordinator for StubSecurityCoordinator {
     ///   it needs a kernel-side attestation, or `yama.ptrace_scope` raised.
     fn verify_app_identity(&self, pid: u32) -> Option<AppId> {
         let proc_dir = PathBuf::from(format!("/proc/{pid}"));
-
-        // /proc/<pid> is owned by the process's real UID, so this asks the kernel
-        // rather than the peer.
-        let peer_uid = std::fs::metadata(&proc_dir).ok()?.uid();
-        let own_uid = std::fs::metadata("/proc/self").ok()?.uid();
-        if peer_uid != own_uid {
-            tracing::warn!(
-                pid,
-                peer_uid,
-                own_uid,
-                "refused an SCP peer from another user"
-            );
-            return None;
-        }
 
         let name = std::fs::read_to_string(proc_dir.join("comm"))
             .ok()?

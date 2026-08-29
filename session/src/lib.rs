@@ -1,8 +1,9 @@
 //! Session-launch contract for an installed SOL desktop.
 //!
-//! This crate deliberately owns process ordering and environment propagation,
-//! not seat/login management. The compositor remains responsible for opening a
-//! native display/input backend once it is available.
+//! This crate owns per-user process ordering and environment propagation, not
+//! seat/login management. Production login uses [`run_attached`] so the system
+//! compositor keeps its display/input backend across authentication. [`run`]
+//! retains the standalone compositor lifecycle for development fixtures.
 
 use sol_scheduler::{ProcessClass, SchedulingManager};
 use std::{
@@ -10,6 +11,7 @@ use std::{
     ffi::OsString,
     fs::{self, OpenOptions},
     io,
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus},
     sync::{
@@ -272,7 +274,7 @@ impl LaunchPlan {
             settingsd: service_plan(&programs.settingsd, &desktop_environment),
             notificationd: service_plan(&programs.notificationd, &desktop_environment),
             portal: service_plan(&programs.portal, &desktop_environment),
-            socket_path: environment.runtime_dir.join(&environment.socket),
+            socket_path: resolved_socket_path(&environment.runtime_dir, &environment.socket),
         }
     }
 
@@ -312,6 +314,15 @@ impl LaunchPlan {
     }
 }
 
+fn resolved_socket_path(runtime_dir: &Path, socket: &str) -> PathBuf {
+    let socket = PathBuf::from(socket);
+    if socket.is_absolute() {
+        socket
+    } else {
+        runtime_dir.join(socket)
+    }
+}
+
 fn service_plan(program: &Path, environment: &[(OsString, OsString)]) -> ProcessPlan {
     ProcessPlan {
         program: program.to_path_buf(),
@@ -323,16 +334,20 @@ fn service_plan(program: &Path, environment: &[(OsString, OsString)]) -> Process
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cli {
     pub dry_run: bool,
+    /// Attach the user session to a compositor that is already running.
+    pub attach: bool,
     pub socket_override: Option<String>,
 }
 
 pub fn parse_cli(arguments: impl IntoIterator<Item = String>) -> Result<Cli, String> {
     let mut dry_run = false;
+    let mut attach = false;
     let mut socket_override = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--dry-run" => dry_run = true,
+            "--attach" => attach = true,
             "--socket" => {
                 let socket = arguments
                     .next()
@@ -345,13 +360,14 @@ pub fn parse_cli(arguments: impl IntoIterator<Item = String>) -> Result<Cli, Str
     }
     Ok(Cli {
         dry_run,
+        attach,
         socket_override,
     })
 }
 
 #[must_use]
 pub fn usage() -> String {
-    "Usage: sol-session [--dry-run] [--socket NAME]".to_owned()
+    "Usage: sol-session [--attach] [--dry-run] [--socket NAME-OR-ABSOLUTE-PATH]".to_owned()
 }
 
 pub fn environment(socket_override: Option<String>) -> Result<SessionEnvironment, String> {
@@ -362,7 +378,7 @@ pub fn environment(socket_override: Option<String>) -> Result<SessionEnvironment
     let socket = socket_override
         .or_else(|| env::var("SOL_SCP_SOCKET").ok())
         .unwrap_or_else(|| DEFAULT_SOCKET.to_owned());
-    validate_socket_name(&socket)?;
+    validate_socket(&socket)?;
     Ok(SessionEnvironment {
         runtime_dir,
         socket,
@@ -370,9 +386,13 @@ pub fn environment(socket_override: Option<String>) -> Result<SessionEnvironment
     })
 }
 
-pub fn validate_socket_name(socket: &str) -> Result<(), String> {
-    if socket.is_empty() || socket == "." || socket == ".." || socket.contains('/') {
-        return Err("socket name must be a non-empty filename, not a path".to_owned());
+pub fn validate_socket(socket: &str) -> Result<(), String> {
+    if socket.is_empty() || socket == "." || socket == ".." {
+        return Err("socket must be a non-empty filename or absolute path".to_owned());
+    }
+    let path = Path::new(socket);
+    if !path.is_absolute() && socket.contains('/') {
+        return Err("relative socket must be a filename, not a path".to_owned());
     }
     Ok(())
 }
@@ -440,7 +460,7 @@ pub fn run(plan: &LaunchPlan) -> Result<(), String> {
             }
         }
     }
-    if let Err(error) = wait_for_services(&mut compositor, &mut companions, &running) {
+    if let Err(error) = wait_for_services(Some(&mut compositor), &mut companions, &running) {
         stop(&mut compositor);
         stop_all(&mut companions);
         return Err(error);
@@ -460,13 +480,81 @@ pub fn run(plan: &LaunchPlan) -> Result<(), String> {
     }
 
     let result = supervise(
-        &mut compositor,
+        Some(&mut compositor),
         &mut companions,
         &running,
         &mut scheduling,
         build_containment_enabled,
     );
     stop(&mut compositor);
+    stop_all(&mut companions);
+    result
+}
+
+/// Run a user session against the compositor that already owns the seat.
+///
+/// This is the production login path. Keeping the compositor alive across the
+/// greeter-to-desktop boundary preserves the DRM mode, output state, and lock
+/// surfaces; only the per-user services and Shell belong to this supervisor.
+pub fn run_attached(plan: &LaunchPlan) -> Result<(), String> {
+    let running = Arc::new(AtomicBool::new(true));
+    let interrupted = Arc::clone(&running);
+    ctrlc::set_handler(move || interrupted.store(false, Ordering::SeqCst))
+        .map_err(|error| format!("cannot install shutdown handler: {error}"))?;
+
+    wait_for_existing_socket(&plan.socket_path, &running)?;
+
+    let cgroup_root = env::var_os("SOL_CGROUP_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/sys/fs/cgroup/sol"));
+    let mut scheduling = SchedulingManager::new(cgroup_root);
+    let build_containment_enabled = scheduling
+        .provision()
+        .map_err(|error| {
+            eprintln!("sol-session: cgroup hierarchy unavailable: {error}");
+            error
+        })
+        .is_ok();
+
+    let mut companions = Vec::new();
+    for (name, child_plan, class) in plan.services() {
+        match spawn(child_plan, &scheduling, class) {
+            Ok(child) => companions.push(ManagedChild {
+                name,
+                plan: child_plan,
+                class,
+                child,
+            }),
+            Err(error) => {
+                stop_all(&mut companions);
+                return Err(error);
+            }
+        }
+    }
+    if let Err(error) = wait_for_services(None, &mut companions, &running) {
+        stop_all(&mut companions);
+        return Err(error);
+    }
+    match spawn(&plan.shell, &scheduling, ProcessClass::Shell) {
+        Ok(child) => companions.push(ManagedChild {
+            name: "shell",
+            plan: &plan.shell,
+            class: ProcessClass::Shell,
+            child,
+        }),
+        Err(error) => {
+            stop_all(&mut companions);
+            return Err(error);
+        }
+    }
+
+    let result = supervise(
+        None,
+        &mut companions,
+        &running,
+        &mut scheduling,
+        build_containment_enabled,
+    );
     stop_all(&mut companions);
     result
 }
@@ -501,7 +589,7 @@ fn spawn(
 }
 
 fn wait_for_services(
-    compositor: &mut Child,
+    mut compositor: Option<&mut Child>,
     services: &mut [ManagedChild<'_>],
     running: &AtomicBool,
 ) -> Result<(), String> {
@@ -510,7 +598,9 @@ fn wait_for_services(
         if !running.load(Ordering::SeqCst) {
             return Err("session launch interrupted while services started".to_owned());
         }
-        if let Some(status) = compositor.try_wait().map_err(child_error("compositor"))? {
+        if let Some(compositor) = compositor.as_deref_mut()
+            && let Some(status) = compositor.try_wait().map_err(child_error("compositor"))?
+        {
             return Err(format!(
                 "compositor exited while services started: {status}"
             ));
@@ -530,6 +620,39 @@ fn wait_for_services(
         thread::sleep(POLL_INTERVAL);
     }
     Ok(())
+}
+
+fn wait_for_existing_socket(socket: &Path, running: &AtomicBool) -> Result<(), String> {
+    let deadline = Instant::now() + READY_TIMEOUT;
+    while Instant::now() < deadline {
+        if !running.load(Ordering::SeqCst) {
+            return Err("session launch interrupted before compositor became ready".to_owned());
+        }
+        match UnixStream::connect(socket) {
+            Ok(stream) => {
+                drop(stream);
+                return Ok(());
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::ConnectionRefused
+                        | io::ErrorKind::PermissionDenied
+                ) => {}
+            Err(error) => {
+                return Err(format!(
+                    "could not connect to compositor socket {}: {error}",
+                    socket.display()
+                ));
+            }
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    Err(format!(
+        "timed out waiting for existing compositor socket {}",
+        socket.display()
+    ))
 }
 
 fn wait_for_socket(
@@ -560,7 +683,7 @@ fn wait_for_socket(
 }
 
 fn supervise(
-    compositor: &mut Child,
+    mut compositor: Option<&mut Child>,
     companions: &mut [ManagedChild<'_>],
     running: &AtomicBool,
     scheduling: &mut SchedulingManager,
@@ -568,7 +691,9 @@ fn supervise(
 ) -> Result<(), String> {
     let mut next_build_scan = Instant::now();
     while running.load(Ordering::SeqCst) {
-        if let Some(status) = compositor.try_wait().map_err(child_error("compositor"))? {
+        if let Some(compositor) = compositor.as_deref_mut()
+            && let Some(status) = compositor.try_wait().map_err(child_error("compositor"))?
+        {
             return Err(format!(
                 "compositor exited while shell was running: {status}"
             ));
@@ -729,18 +854,32 @@ mod tests {
             ]),
             Ok(Cli {
                 dry_run: true,
+                attach: false,
                 socket_override: Some("test".to_owned())
+            })
+        );
+        assert_eq!(
+            parse_cli(["--attach".to_owned()]),
+            Ok(Cli {
+                dry_run: false,
+                attach: true,
+                socket_override: None,
             })
         );
         assert!(parse_cli(["--socket".to_owned()]).is_err());
     }
 
     #[test]
-    fn socket_must_not_escape_the_runtime_directory() {
+    fn socket_is_a_name_or_absolute_path() {
         for invalid in ["", ".", "..", "nested/socket"] {
-            assert!(validate_socket_name(invalid).is_err(), "{invalid:?}");
+            assert!(validate_socket(invalid).is_err(), "{invalid:?}");
         }
-        assert!(validate_socket_name("sol-compositor-1").is_ok());
+        assert!(validate_socket("sol-compositor-1").is_ok());
+        assert!(validate_socket("/run/sol/compositor.sock").is_ok());
+        assert_eq!(
+            resolved_socket_path(Path::new("/run/user/1000"), "/run/sol/compositor.sock"),
+            PathBuf::from("/run/sol/compositor.sock")
+        );
     }
 
     #[test]

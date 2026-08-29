@@ -25,7 +25,12 @@ fn main() -> ExitCode {
         print!("{}", plan.dry_run_output());
         return ExitCode::SUCCESS;
     }
-    match sol_session::run(&plan) {
+    let result = if cli.attach {
+        sol_session::run_attached(&plan)
+    } else {
+        sol_session::run(&plan)
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("sol-session: {error}");

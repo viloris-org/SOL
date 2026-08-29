@@ -11,6 +11,9 @@ pub struct HandoffVisual {
     pub content_opacity: f32,
     /// Opacity of the panel material and its shadow.
     pub material_opacity: f32,
+    /// Opacity of the full-output login background. This leaves last so the
+    /// prepared desktop is revealed without a blank or hard-cut frame.
+    pub background_opacity: f32,
     /// Whether the last handoff frame has been reached.
     pub finished: bool,
 }
@@ -20,6 +23,7 @@ impl Default for HandoffVisual {
         Self {
             content_opacity: 1.0,
             material_opacity: 1.0,
+            background_opacity: 1.0,
             finished: false,
         }
     }
@@ -56,6 +60,7 @@ impl SessionHandoff {
             return HandoffVisual {
                 content_opacity: 0.0,
                 material_opacity: 0.0,
+                background_opacity: 0.0,
                 finished: true,
             };
         }
@@ -69,6 +74,7 @@ impl SessionHandoff {
             return HandoffVisual {
                 content_opacity: 1.0 - progress,
                 material_opacity: 1.0 - progress,
+                background_opacity: 1.0 - progress,
                 finished,
             };
         }
@@ -85,6 +91,7 @@ impl SessionHandoff {
         HandoffVisual {
             content_opacity: 1.0 - content_progress,
             material_opacity: 1.0 - material_progress,
+            background_opacity: 1.0 - material_progress,
             finished,
         }
     }
@@ -140,6 +147,7 @@ mod tests {
         let final_frame = handoff.visual_at(handoff.duration());
         assert_eq!(final_frame.content_opacity, 0.0);
         assert_eq!(final_frame.material_opacity, 0.0);
+        assert_eq!(final_frame.background_opacity, 0.0);
         assert!(final_frame.finished);
     }
 

@@ -61,6 +61,7 @@ pub struct ClientSession {
     pub session_id: SessionId,
     pub app_id: AppId,
     pub pid: u32,
+    pub uid: u32,
     pub granted_capabilities: HashMap<Capability, CapabilityGrant>,
     pub connection_time: Instant,
     pub last_user_interaction: Option<Instant>,
@@ -68,11 +69,12 @@ pub struct ClientSession {
 }
 
 impl ClientSession {
-    pub fn new(session_id: SessionId, app_id: AppId, pid: u32) -> Self {
+    pub fn new(session_id: SessionId, app_id: AppId, pid: u32, uid: u32) -> Self {
         Self {
             session_id,
             app_id,
             pid,
+            uid,
             granted_capabilities: HashMap::new(),
             connection_time: Instant::now(),
             last_user_interaction: None,
@@ -156,6 +158,13 @@ pub struct ScpState {
     /// Session lock. While engaged it takes over input and stacking entirely.
     session_lock: SessionLockManager,
 
+    /// UID admitted by the greeter after successful authentication.
+    ///
+    /// The compositor is a system process and outlives user sessions, so its
+    /// own UID cannot be used as the desktop-session boundary. Transport peers
+    /// may connect only as the compositor itself or as this active UID.
+    active_session_uid: Option<u32>,
+
     /// Delivers compositor-initiated events to client connections.
     events: EventRouter,
 }
@@ -187,6 +196,7 @@ impl ScpState {
             modifier_state: ModifierState::new(),
             data_device: DataDevice::new(),
             session_lock: SessionLockManager::new(),
+            active_session_uid: None,
             events: EventRouter::new(),
         }
     }
@@ -230,6 +240,19 @@ impl ScpState {
     /// Whether the session is locked and ordinary clients are cut off.
     pub const fn is_locked(&self) -> bool {
         self.session_lock.is_locked()
+    }
+
+    /// Whether a transport peer UID belongs to the system compositor or to the
+    /// user authenticated by the current greeter.
+    pub fn peer_uid_is_admitted(&self, uid: u32) -> bool {
+        // SAFETY: geteuid has no preconditions and does not mutate memory.
+        uid == unsafe { libc::geteuid() } || self.active_session_uid == Some(uid)
+    }
+
+    /// UID currently admitted for the desktop session, if any.
+    #[must_use]
+    pub const fn active_session_uid(&self) -> Option<u32> {
+        self.active_session_uid
     }
 
     /// Event router used to push compositor-initiated messages to clients.
@@ -345,17 +368,16 @@ impl ScpState {
 
     /// Flatten all windows into a topmost-first stack for input and rendering.
     ///
-    /// While the session is locked the stack contains *only* lock surfaces. That
-    /// single rule is what enforces the lock across every consumer at once:
-    /// hit-testing cannot reach an application window, so pointer and touch
-    /// input have nowhere else to go and nothing else can be composited.
+    /// Before authentication, a locked stack contains only lock surfaces. Once
+    /// the greeter admits an authenticated UID, its prepared desktop may be
+    /// composed underneath those full-output surfaces so an alpha handoff can
+    /// reveal it. Input and capture remain locked until `UnlockSession`.
     pub fn build_stack(&self) -> WindowStack {
         let mut stack = WindowStack::new();
 
         if self.session_lock.is_locked() {
-            // Only lock surfaces, and nothing else. Popups are not admitted at
-            // all: they cannot be parented to a lock surface, and a popup left
-            // over from before the lock must not stay reachable.
+            // Lock surfaces stay first (topmost) and cover the full outputs, so
+            // hit-testing still cannot reach anything underneath them.
             for lock_surface in self.session_lock.iter_surfaces() {
                 let rect = self.output_rect_or_primary(lock_surface.output);
                 stack.push(StackEntry {
@@ -366,25 +388,36 @@ impl ScpState {
                     accepts_keyboard: true,
                 });
             }
+            if self.active_session_uid.is_some() {
+                self.push_desktop_entries(&mut stack);
+            }
             return stack;
         }
 
+        self.push_desktop_entries(&mut stack);
+        stack
+    }
+
+    fn push_desktop_entries(&self, stack: &mut WindowStack) {
         let popup_order = self.popup_order();
 
-        self.push_layer_entries(&mut stack, Layer::Overlay, &popup_order);
-        self.push_layer_entries(&mut stack, Layer::Top, &popup_order);
+        self.push_layer_entries(stack, Layer::Overlay, &popup_order);
+        self.push_layer_entries(stack, Layer::Top, &popup_order);
 
         for &toplevel_id in &self.toplevel_stack {
             let Some(toplevel) = self.surface_manager.get_toplevel(toplevel_id) else {
                 continue;
             };
+            if !self.desktop_session_is_visible(toplevel.session_id) {
+                continue;
+            }
             // A minimized window is off-screen: it must not swallow input, and
             // neither may the menus hanging off it.
             if toplevel.states.minimized {
                 continue;
             }
             let owner = (toplevel.session_id, toplevel.surface_id);
-            self.push_popups_for(&mut stack, &popup_order, owner);
+            self.push_popups_for(stack, &popup_order, owner);
             stack.push(StackEntry {
                 session_id: toplevel.session_id,
                 surface_id: toplevel.surface_id,
@@ -399,10 +432,20 @@ impl ScpState {
             });
         }
 
-        self.push_layer_entries(&mut stack, Layer::Bottom, &popup_order);
-        self.push_layer_entries(&mut stack, Layer::Background, &popup_order);
+        self.push_layer_entries(stack, Layer::Bottom, &popup_order);
+        self.push_layer_entries(stack, Layer::Background, &popup_order);
+    }
 
-        stack
+    fn desktop_session_is_visible(&self, session_id: SessionId) -> bool {
+        let Some(active_uid) = self
+            .active_session_uid
+            .filter(|_| self.session_lock.is_locked())
+        else {
+            return true;
+        };
+        self.sessions
+            .get(&session_id)
+            .is_some_and(|session| session.uid == active_uid)
     }
 
     /// Every popup, innermost first.
@@ -454,6 +497,9 @@ impl ScpState {
             let Some(popup) = self.popups.get(popup_id) else {
                 continue;
             };
+            if !self.desktop_session_is_visible(popup.session_id) {
+                continue;
+            }
             if self.popup_root(popup_id) != Some(owner) {
                 continue;
             }
@@ -478,6 +524,9 @@ impl ScpState {
     fn push_layer_entries(&self, stack: &mut WindowStack, layer: Layer, popup_order: &[PopupId]) {
         for layer_surface in self.surface_manager.iter_layer_surfaces() {
             if layer_surface.layer != layer {
+                continue;
+            }
+            if !self.desktop_session_is_visible(layer_surface.session_id) {
                 continue;
             }
             let Some(rect) =
@@ -522,8 +571,20 @@ impl ScpState {
         session_id: Option<SessionId>,
         message: ClientMessage,
     ) -> Result<Vec<CompositorMessage>, String> {
+        // Direct callers are in-process fixtures. The real transport supplies
+        // the kernel-authenticated peer UID through `handle_transport_message`.
+        let uid = unsafe { libc::geteuid() };
+        self.handle_message_from_uid(session_id, message, uid)
+    }
+
+    fn handle_message_from_uid(
+        &mut self,
+        session_id: Option<SessionId>,
+        message: ClientMessage,
+        uid: u32,
+    ) -> Result<Vec<CompositorMessage>, String> {
         match (session_id, message) {
-            (None, ClientMessage::Connect { app_id, pid }) => self.handle_connect(app_id, pid),
+            (None, ClientMessage::Connect { app_id, pid }) => self.handle_connect(app_id, pid, uid),
             (Some(_), ClientMessage::Connect { .. }) => Err("Already connected".to_string()),
             (None, _) => Err("Not connected".to_string()),
             (Some(session_id), message) => self.handle_authenticated_message(session_id, message),
@@ -537,6 +598,7 @@ impl ScpState {
         session_id: Option<SessionId>,
         mut message: ClientMessage,
         received_fd: Option<i32>,
+        peer_uid: u32,
     ) -> Result<Vec<CompositorMessage>, String> {
         match &mut message {
             ClientMessage::AttachBuffer { buffer_fd, .. } => {
@@ -567,7 +629,7 @@ impl ScpState {
             ClientMessage::AttachBuffer { buffer_fd, .. } => Some(*buffer_fd),
             _ => None,
         };
-        let result = self.handle_message(session_id, message);
+        let result = self.handle_message_from_uid(session_id, message, peer_uid);
         if result.is_err()
             && let Some(fd) = attached_fd
         {
@@ -580,6 +642,7 @@ impl ScpState {
         &mut self,
         app_id: String,
         pid: u32,
+        uid: u32,
     ) -> Result<Vec<CompositorMessage>, String> {
         let verified_app_id = self
             .security
@@ -600,7 +663,7 @@ impl ScpState {
             .next_session_id
             .checked_add(1)
             .ok_or("Session ID space exhausted")?;
-        let mut session = ClientSession::new(session_id, verified_app_id.clone(), pid);
+        let mut session = ClientSession::new(session_id, verified_app_id.clone(), pid, uid);
 
         for capability in crate::scp::capability::default_app_capabilities() {
             if let Decision::Granted { token, expires_at } = self
@@ -1481,6 +1544,26 @@ impl ScpState {
                 Ok(vec![CompositorMessage::SessionLocked { lock_id }])
             }
 
+            ClientMessage::AuthorizeSessionUser { lock_id, uid } => {
+                let lock = self.session_lock.lock().ok_or("Session is not locked")?;
+                if lock.id != lock_id {
+                    return Err("Lock ID does not match the active session lock".to_string());
+                }
+                if lock.owner() != Some(session_id) {
+                    return Err("Session does not own the session lock".to_string());
+                }
+                if !lock.is_confirmed() {
+                    return Err("Session lock has not engaged on every output yet".to_string());
+                }
+                if self.active_session_uid.is_some_and(|active| active != uid) {
+                    return Err("Another user session is already authorized".to_string());
+                }
+
+                self.active_session_uid = Some(uid);
+                tracing::info!(uid, ?session_id, "desktop session UID authorized");
+                Ok(vec![CompositorMessage::SessionUserAuthorized { uid }])
+            }
+
             ClientMessage::UnlockSession { lock_id } => {
                 let previous_focus = self.session_lock.release(session_id, lock_id)?;
 
@@ -1499,6 +1582,24 @@ impl ScpState {
 
                 tracing::info!(?session_id, ?lock_id, "session lock released");
                 Ok(vec![])
+            }
+
+            ClientMessage::RevokeSessionUser {
+                uid,
+                capability_token,
+            } => {
+                self.verify_capability_token(
+                    session_id,
+                    &Capability::SessionLock,
+                    &capability_token,
+                )?;
+                if self.active_session_uid != Some(uid) {
+                    return Err("User session UID is not currently authorized".to_string());
+                }
+                self.disconnect_uid_sessions(uid, Some(session_id));
+                self.active_session_uid = None;
+                tracing::info!(uid, ?session_id, "desktop session UID revoked");
+                Ok(vec![CompositorMessage::SessionUserRevoked { uid }])
             }
 
             // ===== Data Transfer (Clipboard/DnD) =====
@@ -1993,6 +2094,19 @@ impl ScpState {
 
     // ===== Session lifetime =====
 
+    fn disconnect_uid_sessions(&mut self, uid: u32, except: Option<SessionId>) {
+        let user_sessions: Vec<SessionId> = self
+            .sessions
+            .iter()
+            .filter_map(|(&id, session)| {
+                (Some(id) != except && session.uid == uid).then_some(id)
+            })
+            .collect();
+        for user_session in user_sessions {
+            self.disconnect(user_session);
+        }
+    }
+
     pub fn disconnect(&mut self, session_id: SessionId) {
         self.events.unregister(session_id);
 
@@ -2013,6 +2127,9 @@ impl ScpState {
             self.focused_surface = None;
             self.input_state.set_keyboard_focus(None);
             self.input_state.set_pointer_focus(None);
+            if let Some(uid) = self.active_session_uid.take() {
+                self.disconnect_uid_sessions(uid, None);
+            }
         }
 
         // A disconnecting client's popups are gone, but no one is left to
@@ -3273,6 +3390,30 @@ mod tests {
     }
 
     #[test]
+    fn an_authorized_desktop_is_composed_below_the_input_owning_lock() {
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        let (desktop, _) = app_with_focused_window(&mut state, 305);
+        let (locker, lock_id) = confirmed_lock(&mut state, 306);
+        let uid = unsafe { libc::geteuid() };
+        state
+            .handle_message(
+                Some(locker),
+                ClientMessage::AuthorizeSessionUser { lock_id, uid },
+            )
+            .expect("authenticated desktop admitted");
+
+        let stack = state.build_stack();
+        assert_eq!(stack.len(), 2);
+        assert!(matches!(stack.entries()[0].kind, StackKind::LockSurface(_)));
+        assert_eq!(stack.entries()[1].session_id, desktop);
+        assert!(matches!(stack.entries()[1].kind, StackKind::Toplevel(_)));
+        assert!(matches!(
+            state.hit_test(10.0, 10.0).map(|entry| entry.kind),
+            Some(StackKind::LockSurface(_))
+        ));
+    }
+
+    #[test]
     fn pointer_input_cannot_reach_a_window_behind_the_lock() {
         let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
         app_with_focused_window(&mut state, 305);
@@ -3420,6 +3561,102 @@ mod tests {
 
         assert!(!state.is_locked());
         assert_eq!(state.get_focused_surface(), Some((app, surface)));
+    }
+
+    #[test]
+    fn greeter_authorizes_and_revokes_one_cross_uid_session() {
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        let (greeter, lock_id) = confirmed_lock(&mut state, 410);
+        // Different from the test process while remaining a valid uid_t value.
+        let session_uid = (unsafe { libc::geteuid() }) ^ 1;
+
+        let responses = state
+            .handle_message(
+                Some(greeter),
+                ClientMessage::AuthorizeSessionUser {
+                    lock_id,
+                    uid: session_uid,
+                },
+            )
+            .expect("confirmed lock owner authorizes the user");
+        assert!(matches!(
+            responses.as_slice(),
+            [CompositorMessage::SessionUserAuthorized { uid }] if *uid == session_uid
+        ));
+        assert_eq!(state.active_session_uid(), Some(session_uid));
+        assert!(state.peer_uid_is_admitted(session_uid));
+
+        let connected = state
+            .handle_message_from_uid(
+                None,
+                ClientMessage::Connect {
+                    app_id: "app-411".to_string(),
+                    pid: 411,
+                },
+                session_uid,
+            )
+            .expect("authorized UID connects");
+        let user_session = match connected[0] {
+            CompositorMessage::Connected { session_id, .. } => session_id,
+            ref response => panic!("unexpected response: {response:?}"),
+        };
+
+        let token = state.sessions[&greeter].granted_capabilities[&Capability::SessionLock]
+            .token
+            .data
+            .clone();
+        let responses = state
+            .handle_message(
+                Some(greeter),
+                ClientMessage::RevokeSessionUser {
+                    uid: session_uid,
+                    capability_token: token,
+                },
+            )
+            .expect("lock-capable greeter revokes the completed user");
+        assert!(matches!(
+            responses.as_slice(),
+            [CompositorMessage::SessionUserRevoked { uid }] if *uid == session_uid
+        ));
+        assert_eq!(state.active_session_uid(), None);
+        assert!(!state.peer_uid_is_admitted(session_uid));
+        assert!(
+            !state.sessions.contains_key(&user_session),
+            "revocation disconnects any surviving process from the completed session"
+        );
+    }
+
+    #[test]
+    fn greeter_crash_during_handoff_revokes_the_prepared_user() {
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        let (greeter, lock_id) = confirmed_lock(&mut state, 420);
+        let uid = (unsafe { libc::geteuid() }) ^ 1;
+        state
+            .handle_message(
+                Some(greeter),
+                ClientMessage::AuthorizeSessionUser { lock_id, uid },
+            )
+            .expect("user authorized");
+        let connected = state
+            .handle_message_from_uid(
+                None,
+                ClientMessage::Connect {
+                    app_id: "app-421".to_string(),
+                    pid: 421,
+                },
+                uid,
+            )
+            .expect("prepared user connects");
+        let user_session = match connected[0] {
+            CompositorMessage::Connected { session_id, .. } => session_id,
+            ref response => panic!("unexpected response: {response:?}"),
+        };
+
+        state.disconnect(greeter);
+
+        assert!(state.is_locked(), "greeter crash remains fail-closed");
+        assert_eq!(state.active_session_uid(), None);
+        assert!(!state.sessions.contains_key(&user_session));
     }
 
     #[test]

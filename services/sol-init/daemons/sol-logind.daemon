@@ -1,0 +1,20 @@
+[Daemon]
+name = "sol-logind"
+exec = "/usr/lib/sol/sol-logind"
+type = "core"
+start_mode = "boot"
+restart_policy = "always"
+
+after = ["sol-compositor"]
+requires = ["sol-compositor"]
+
+capabilities = [
+    "compositor.session_lock",
+    "accounts.authenticate",
+    "session.launch"
+]
+
+[Environment]
+SOL_SCP_SOCKET = "/run/sol/compositor.sock"
+SOL_SESSION_BIN = "/usr/bin/sol-session"
+SOL_SHELL_BIN = "/usr/lib/sol/sol-shell"

@@ -158,6 +158,7 @@ fn run(
                     renderer.pointer_button(pressed);
                 }
                 LockEvent::PointerButton { .. } | LockEvent::Frame => {}
+                LockEvent::SessionUserAuthorized { .. } | LockEvent::SessionUserRevoked { .. } => {}
                 LockEvent::Finished { reason } => {
                     // The compositor took the lock away. Nothing this process
                     // draws is on screen any more, so do not keep pretending to
@@ -263,6 +264,18 @@ fn authenticate(
         service.ui.set_status("Preparing your desktop…");
     }
 
+    // Admit exactly the PAM-authenticated UID while the lock still covers all
+    // outputs. The system compositor otherwise refuses cross-UID clients, so a
+    // user Shell cannot race authentication or attach to somebody else's seat.
+    if let Err(error) = client.authorize_session_user(user.uid) {
+        warn!(%error, uid = user.uid, "could not authorize the desktop session");
+        if let Some(session) = outcome.session {
+            session.close();
+        }
+        session_failed(service);
+        return Ok(());
+    }
+
     // The desktop starts behind the still-engaged lock surface. Releasing the
     // lock before the shell has committed a frame would turn process startup
     // time into a visible blank screen.
@@ -270,6 +283,7 @@ fn authenticate(
         Ok(pending) => pending,
         Err(error) => {
             warn!(%error, "could not start the user session");
+            revoke_session_user(client, user.uid);
             if let Some(session) = outcome.session {
                 session.close();
             }
@@ -281,6 +295,7 @@ fn authenticate(
     if let Err(error) = pending.wait_until_ready(DESKTOP_READY_TIMEOUT) {
         warn!(%error, "desktop did not become ready; keeping the screen locked");
         pending.abort();
+        revoke_session_user(client, user.uid);
         if let Some(session) = outcome.session {
             session.close();
         }
@@ -294,6 +309,7 @@ fn authenticate(
     // the greeter has presented the final transparent-content handoff frame.
     if let Err(error) = client.unlock() {
         pending.abort();
+        revoke_session_user(client, user.uid);
         if let Some(session) = outcome.session {
             session.close();
         }
@@ -305,17 +321,19 @@ fn authenticate(
         Err(error) => warn!(%error, "could not wait for the user session"),
     }
 
+    // The desktop is gone, so cover the seat before removing the user's
+    // compositor admission or tearing down its PAM accounting.
+    service.borrow_mut().ui.reset();
+    service.borrow_mut().ui.clear_password();
+    client.relock()?;
+    client.revoke_session_user(user.uid)?;
+
     // The PAM session had to stay open for the whole desktop session above;
-    // close it now that it has ended.
+    // close it now that the seat is protected again.
     if let Some(session) = outcome.session {
         info!(user = %user.username, "closing PAM session");
         session.close();
     }
-
-    // The desktop is gone, so take the screen back.
-    service.borrow_mut().ui.reset();
-    service.borrow_mut().ui.clear_password();
-    client.relock()?;
 
     let (width, height) = client.size();
     buffer
@@ -324,6 +342,12 @@ fn authenticate(
     renderer.resize(width, height);
     renderer.invalidate();
     Ok(())
+}
+
+fn revoke_session_user(client: &mut ScpClient, uid: u32) {
+    if let Err(error) = client.revoke_session_user(uid) {
+        warn!(%error, uid, "could not revoke failed desktop session admission");
+    }
 }
 
 fn play_handoff(

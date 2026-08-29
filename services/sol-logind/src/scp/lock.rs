@@ -88,6 +88,14 @@ pub enum LockEvent {
     },
     /// The compositor is ready for the next frame.
     Frame,
+    /// The compositor admitted the authenticated user's processes.
+    SessionUserAuthorized {
+        uid: u32,
+    },
+    /// The completed user's compositor admission was removed.
+    SessionUserRevoked {
+        uid: u32,
+    },
     /// The lock is gone and cannot be assumed to hold.
     Finished {
         reason: String,
@@ -310,6 +318,14 @@ impl LockDriver {
                 Ok(LockStep::event(LockEvent::Locked))
             }
 
+            CompositorMessage::SessionUserAuthorized { uid } => {
+                Ok(LockStep::event(LockEvent::SessionUserAuthorized { uid }))
+            }
+
+            CompositorMessage::SessionUserRevoked { uid } => {
+                Ok(LockStep::event(LockEvent::SessionUserRevoked { uid }))
+            }
+
             CompositorMessage::SessionLockFinished { reason } => {
                 self.phase = LockPhase::Finished(reason.clone());
                 self.lock_id = None;
@@ -446,6 +462,25 @@ impl LockDriver {
                 }),
         );
         Ok(messages)
+    }
+
+    /// Ask the compositor to admit the authenticated UID while the lock still
+    /// protects every output.
+    pub fn authorize_session_user(&self, uid: u32) -> Result<ClientMessage, LockError> {
+        let lock_id = self.lock_id.ok_or(LockError::NotEngaged)?;
+        if !self.is_locked() {
+            return Err(LockError::NotEngaged);
+        }
+        Ok(ClientMessage::AuthorizeSessionUser { lock_id, uid })
+    }
+
+    /// Remove the admission after the user's process tree has ended.
+    pub fn revoke_session_user(&self, uid: u32) -> Result<ClientMessage, LockError> {
+        let capability_token = self.capability_token.clone().ok_or(LockError::NotEngaged)?;
+        Ok(ClientMessage::RevokeSessionUser {
+            uid,
+            capability_token,
+        })
     }
 
     /// Lock the screen again, once the user's session has ended.

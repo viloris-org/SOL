@@ -636,10 +636,12 @@ claim that the unavailable SCP display and assistive-technology environment pass
 **Desktop core capabilities**
 
 - [S2] **SCP session-launch foundation:** installed `sol-session` validates an
-      XDG runtime directory and deterministic `SOL_SCP_SOCKET`, starts the
-      native compositor, waits for its SCP socket, then starts session services
-      and `sol-shell` with the same environment. `sol-logind` now launches this
-      plan after authentication while retaining the PAM session. Native
+      XDG runtime directory and deterministic `SOL_SCP_SOCKET`. Standalone mode
+      can start a compositor for development; production login attaches user
+      services and `sol-shell` to the boot compositor after `sol-logind`
+      authorizes the PAM-authenticated UID. The lock remains engaged until the
+      Shell commits a complete desktop and the transparent handoff finishes.
+      Native
       rendering, libseat/DRM, VT, and field desktop-session validation remain
       required.
 - [S0] Clipboard, drag & drop fully polished

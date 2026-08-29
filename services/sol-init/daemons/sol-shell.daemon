@@ -2,7 +2,7 @@
 name = "sol-shell"
 exec = "/usr/bin/sol-shell"
 type = "core"
-start_mode = "boot"
+start_mode = "socket"
 restart_policy = "always"
 
 after = ["sol-compositor"]

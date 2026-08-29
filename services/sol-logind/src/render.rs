@@ -667,7 +667,7 @@ mod tests {
     }
 
     #[test]
-    fn the_final_handoff_frame_keeps_only_the_stationary_background() {
+    fn the_final_handoff_frame_is_fully_transparent() {
         let renderer = LoginRenderer::new().expect("build the software renderer");
         let mut buffer = FrameBuffer::new(320, 240).expect("allocate frame buffer");
         renderer.resize(320, 240);
@@ -682,6 +682,7 @@ mod tests {
             crate::handoff::HandoffVisual {
                 content_opacity: 0.0,
                 material_opacity: 0.0,
+                background_opacity: 0.0,
                 finished: true,
             },
         );
@@ -693,10 +694,6 @@ mod tests {
             .iter()
             .map(|pixel| (pixel.red, pixel.green, pixel.blue, pixel.alpha))
             .collect::<std::collections::HashSet<_>>();
-        assert_eq!(
-            distinct.len(),
-            1,
-            "handoff must not move or replace the page background"
-        );
+        assert_eq!(distinct, [(0, 0, 0, 0)].into_iter().collect());
     }
 }

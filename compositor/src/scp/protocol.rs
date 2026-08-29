@@ -245,6 +245,19 @@ pub enum ClientMessage {
     /// every output.
     UnlockSession { lock_id: LockId },
 
+    /// Admit processes belonging to the authenticated user to this compositor.
+    ///
+    /// Only the owner of a fully engaged session lock may do this. The
+    /// authorization is installed before the user's Shell starts, so the
+    /// desktop can prepare underneath the still-protected lock surface.
+    AuthorizeSessionUser { lock_id: LockId, uid: u32 },
+
+    /// Remove the cross-UID admission installed for a completed user session.
+    ///
+    /// The session-lock capability is required because this is valid while the
+    /// greeter is between its unlocked and re-locked states.
+    RevokeSessionUser { uid: u32, capability_token: Vec<u8> },
+
     // ===== Data Transfer (Clipboard/DnD) =====
     /// Offer data to clipboard (requires ClipboardWrite capability + recent interaction)
     SetSelection {
@@ -472,6 +485,12 @@ pub enum CompositorMessage {
     /// The session's lock state changed, broadcast to every other client so it
     /// can drop sensitive on-screen content while it is not visible.
     SessionLockStateChanged { locked: bool },
+
+    /// The authenticated UID may now connect clients to this compositor.
+    SessionUserAuthorized { uid: u32 },
+
+    /// The completed user session's compositor admission has been removed.
+    SessionUserRevoked { uid: u32 },
 
     // ===== Data Transfer (Clipboard/DnD) =====
     /// Selection offered (clipboard content available)

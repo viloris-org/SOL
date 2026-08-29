@@ -52,8 +52,18 @@ install_if_present() {
 # Core session
 install_if_present sol-compositor
 install_if_present sol-shell
+install_if_present sol-session
+install_if_present sol-logind
 install_if_present sol-init
 install_if_present lyra
+
+# Reserved SCP identities are verified against the immutable trusted binary
+# directory, not against a process-chosen name. Keep their executed copies here.
+for trusted in sol-shell sol-logind; do
+    if [ -f "target/release/${trusted}" ]; then
+        install -Dm755 "target/release/${trusted}" "${STAGING}/usr/lib/sol/${trusted}"
+    fi
+done
 
 # Services (every service in services/ with a binary is shipped and supervised
 # by sol-init). sol-ime is library-only today (fcitx5 bridge deferred) and
@@ -83,7 +93,7 @@ echo "==> Installing sol-init daemon definitions..."
 install -Dm644 services/sol-init/daemons/org.freedesktop.DBus.daemon \
     "${STAGING}/usr/share/sol/daemons/org.freedesktop.DBus.daemon"
 for daemon in \
-    sol-compositor.daemon sol-shell.daemon sol-portal.daemon sol-networkd.daemon \
+    sol-compositor.daemon sol-logind.daemon sol-shell.daemon sol-portal.daemon sol-networkd.daemon \
     sol-settingsd.daemon sol-notificationd.daemon \
     sol-audiod.daemon sol-ntpd.daemon sol-diagnostics.daemon sol-deviced.daemon; do
     if [ -f "services/sol-init/daemons/${daemon}" ]; then
@@ -170,9 +180,10 @@ mount -t tmpfs tmpfs /tmp 2>/dev/null || true
 
 # The runtime directory for the desktop session
 export XDG_RUNTIME_DIR="/run/user/$(id -u 2>/dev/null || echo 0)"
-mkdir -p "${XDG_RUNTIME_DIR}" /run/dbus
+mkdir -p "${XDG_RUNTIME_DIR}" /run/dbus /run/sol
 chmod 0700 "${XDG_RUNTIME_DIR}"
 chmod 0755 /run/dbus
+chmod 0755 /run/sol
 
 # Session D-Bus address shared with every sol-init daemon through the
 # environment; the actual daemon is started by sol-init (org.freedesktop.DBus

@@ -19,8 +19,10 @@ sol-logind connects → LockSession     (the desktop stops receiving input at on
 login UI on the lock surface
   ↓
 user authenticates (PAM)
-  ↓
-UnlockSession → sol-session starts the user's desktop
+  ↓ authorize UID while lock remains visible
+sol-session --attach starts the desktop on the existing compositor
+  ↓ shell commits every desktop surface
+login surface crossfades to transparent → UnlockSession
   ↓
 session ends → LockSession again
 ```
@@ -98,10 +100,9 @@ cargo run -p sol-logind -- --dev
 Expect `session lock engaged` from the compositor and `session locked` from the
 greeter. Nothing appears on screen, for the reason under **Status**.
 
-In `--dev`, `launch_user_session` reuses the developer's own
-`XDG_RUNTIME_DIR`, so the session it starts would try to bind the socket the
-greeter's compositor already owns. Give the greeter's compositor a separate one
-(`SOL_SCP_SOCKET=sol-greeter-0`) before exercising a full login.
+In `--dev`, the launched session reuses the developer's `XDG_RUNTIME_DIR` and
+attaches to the same compositor socket as the greeter. It never starts a second
+compositor.
 
 ## Tests
 

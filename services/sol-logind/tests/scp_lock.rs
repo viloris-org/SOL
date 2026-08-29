@@ -205,6 +205,39 @@ fn the_greeter_locks_the_session_end_to_end() {
 }
 
 #[test]
+fn the_greeter_controls_cross_uid_desktop_admission() {
+    let mut state = compositor();
+    let mut greeter = Greeter::connect(&mut state).expect("the handshake completes");
+    greeter.take_events();
+
+    let authorize = greeter
+        .driver
+        .authorize_session_user(1000)
+        .expect("locked greeter may authorize");
+    greeter
+        .exchange(&mut state, authorize)
+        .expect("authorization exchange succeeds");
+    assert_eq!(state.active_session_uid(), Some(1000));
+    assert_eq!(
+        greeter.take_events(),
+        vec![LockEvent::SessionUserAuthorized { uid: 1000 }]
+    );
+
+    let revoke = greeter
+        .driver
+        .revoke_session_user(1000)
+        .expect("greeter retains its capability");
+    greeter
+        .exchange(&mut state, revoke)
+        .expect("revocation exchange succeeds");
+    assert_eq!(state.active_session_uid(), None);
+    assert_eq!(
+        greeter.take_events(),
+        vec![LockEvent::SessionUserRevoked { uid: 1000 }]
+    );
+}
+
+#[test]
 fn locking_hands_the_greeter_exclusive_keyboard_focus() {
     let mut state = compositor();
     let mut greeter = Greeter::connect(&mut state).expect("the handshake completes");

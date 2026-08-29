@@ -132,6 +132,52 @@ impl ScpClient {
         Ok(())
     }
 
+    /// Admit the authenticated user's processes before starting the desktop.
+    pub fn authorize_session_user(&mut self, uid: u32) -> Result<(), Error> {
+        let message = self
+            .driver
+            .authorize_session_user(uid)
+            .map_err(Error::Lock)?;
+        self.send(&message)?;
+        self.wait_for_session_user(uid, true)
+    }
+
+    /// Remove a completed user's compositor admission before returning to the
+    /// login screen.
+    pub fn revoke_session_user(&mut self, uid: u32) -> Result<(), Error> {
+        let message = self.driver.revoke_session_user(uid).map_err(Error::Lock)?;
+        self.send(&message)?;
+        self.wait_for_session_user(uid, false)
+    }
+
+    fn wait_for_session_user(&mut self, uid: u32, authorizing: bool) -> Result<(), Error> {
+        let deadline = std::time::Instant::now() + HANDSHAKE_TIMEOUT;
+        let mut deferred = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                self.events.extend(deferred);
+                return Err(Error::SessionUserTimeout { uid, authorizing });
+            }
+            for event in self.poll(remaining)? {
+                let matched = matches!(
+                    event,
+                    LockEvent::SessionUserAuthorized { uid: event_uid }
+                        if authorizing && event_uid == uid
+                ) || matches!(
+                    event,
+                    LockEvent::SessionUserRevoked { uid: event_uid }
+                        if !authorizing && event_uid == uid
+                );
+                if matched {
+                    self.events.extend(deferred);
+                    return Ok(());
+                }
+                deferred.push(event);
+            }
+        }
+    }
+
     /// Release the lock so the authenticated user's session can take the screen.
     pub fn unlock(&mut self) -> Result<(), Error> {
         for message in self.driver.unlock().map_err(Error::Lock)? {
@@ -267,6 +313,10 @@ pub enum Error {
     Decode(String),
     Lock(LockError),
     HandshakeTimeout(LockPhase),
+    SessionUserTimeout {
+        uid: u32,
+        authorizing: bool,
+    },
     Disconnected,
 }
 
@@ -287,6 +337,15 @@ impl std::fmt::Display for Error {
             Self::HandshakeTimeout(phase) => {
                 write!(f, "the session lock did not engage; stalled at {phase:?}")
             }
+            Self::SessionUserTimeout { uid, authorizing } => write!(
+                f,
+                "timed out while {} compositor access for UID {uid}",
+                if *authorizing {
+                    "authorizing"
+                } else {
+                    "revoking"
+                }
+            ),
             Self::Disconnected => write!(f, "the compositor closed the connection"),
         }
     }

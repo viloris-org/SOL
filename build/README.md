@@ -26,8 +26,11 @@ OVMF (UEFI)
              └─ initramfs mounts /live/filesystem.squashfs (overlay root)
                  └─ /sbin/init → sol-init (SOL daemon supervisor)
                      ├─ dbus          (session D-Bus)
-                     ├─ sol-compositor
-                     ├─ sol-shell
+                     ├─ sol-compositor (owns the seat for the whole boot)
+                     ├─ sol-logind     (locks the seat and authenticates)
+                     │    └─ sol-session --attach
+                     │         ├─ user services
+                     │         └─ sol-shell
                      ├─ sol-networkd / sol-audiod / sol-ntpd / sol-deviced
                      └─ sol-settingsd / sol-notificationd / sol-portal
                         (D-Bus activated on demand)

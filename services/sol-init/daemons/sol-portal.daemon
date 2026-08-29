@@ -2,7 +2,7 @@
 name = "sol-portal"
 exec = "/usr/bin/sol-portal"
 type = "system"
-start_mode = "boot"
+start_mode = "dbus"
 restart_policy = "on-failure"
 
 after = ["sol-compositor"]

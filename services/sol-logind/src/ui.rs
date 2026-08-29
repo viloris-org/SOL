@@ -195,7 +195,11 @@ impl LoginUi {
             can_login: self.can_login(),
             status: self.status.clone(),
             // Visual tokens
-            page_background: mode.color(Color::Surface),
+            page_background: {
+                let mut background = mode.color(Color::Surface);
+                background.3 *= handoff.background_opacity;
+                background
+            },
             panel_background: mode.color(Color::Elevated),
             text_primary: mode.color(Color::TextPrimary),
             text_secondary: mode.color(Color::TextSecondary),

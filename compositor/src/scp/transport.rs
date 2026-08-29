@@ -28,6 +28,7 @@ use std::{
 
 pub const DEFAULT_SOCKET_NAME: &str = "sol-compositor-0";
 pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
+const SHARED_SOCKET_ENV: &str = "SOL_SCP_SHARED_SOCKET";
 
 /// How long a client thread waits before rechecking its socket and event queue.
 ///
@@ -52,7 +53,16 @@ pub struct ScpServer {
 
 impl ScpServer {
     pub fn bind_from_env() -> io::Result<Self> {
-        Self::bind(resolve_socket_path()?)
+        let mode = if std::env::var_os(SHARED_SOCKET_ENV).as_deref() == Some("1".as_ref()) {
+            0o666
+        } else {
+            0o600
+        };
+        Self::bind_with_state_and_mode(
+            resolve_socket_path()?,
+            Arc::new(Mutex::new(ScpState::new())),
+            mode,
+        )
     }
 
     pub fn bind(socket_path: PathBuf) -> io::Result<Self> {
@@ -60,7 +70,15 @@ impl ScpServer {
     }
 
     pub fn bind_with_state(socket_path: PathBuf, state: Arc<Mutex<ScpState>>) -> io::Result<Self> {
-        let listener = bind_listener(&socket_path)?;
+        Self::bind_with_state_and_mode(socket_path, state, 0o600)
+    }
+
+    fn bind_with_state_and_mode(
+        socket_path: PathBuf,
+        state: Arc<Mutex<ScpState>>,
+        mode: u32,
+    ) -> io::Result<Self> {
+        let listener = bind_listener(&socket_path, mode)?;
         listener.set_nonblocking(true)?;
 
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -89,18 +107,18 @@ impl ScpServer {
     }
 }
 
-/// Bind the SCP socket, and publish it only once it is private.
+/// Bind the SCP socket, and publish it only once it has its final mode.
 ///
 /// `bind` creates the socket with the process umask, so setting the mode
-/// afterwards leaves a window in which the path already exists and anyone who
-/// can reach the directory may connect. Binding under a temporary name, setting
-/// the mode there, and renaming into place closes that window: the socket
-/// appears at its published path already at 0600, and `rename` is atomic.
+/// afterwards leaves a window in which the path already exists with the wrong
+/// access. Binding under a temporary name, setting the mode there, and renaming
+/// into place closes that window; `rename` publishes it atomically.
 ///
-/// It matters because [`resolve_socket_path`] honors an absolute
-/// `SOL_SCP_SOCKET`, which can put the socket outside the 0700 runtime
-/// directory that would otherwise be covering for this.
-fn bind_listener(socket_path: &Path) -> io::Result<UnixListener> {
+/// Production uses a shared system socket so the authenticated user's UID can
+/// attach to the compositor that owns the seat. That mode does not grant SCP
+/// authority by itself: transport peer credentials are still checked against
+/// the UID explicitly admitted by the greeter.
+fn bind_listener(socket_path: &Path, mode: u32) -> io::Result<UnixListener> {
     let parent = socket_path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -123,7 +141,7 @@ fn bind_listener(socket_path: &Path) -> io::Result<UnixListener> {
     let _ = std::fs::remove_file(&staging);
 
     let listener = UnixListener::bind(&staging)?;
-    if let Err(error) = std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600))
+    if let Err(error) = std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(mode))
         .and_then(|()| std::fs::rename(&staging, socket_path))
     {
         drop(listener);
@@ -281,7 +299,7 @@ fn serve_client_inner(
     bytes: &mut ReceiveBuffer,
     pending_fds: &mut Vec<i32>,
 ) -> io::Result<()> {
-    let (peer_pid, _, _) = unix_socket::get_peer_credentials(stream.as_raw_fd())?;
+    let (peer_pid, peer_uid, _) = unix_socket::get_peer_credentials(stream.as_raw_fd())?;
 
     loop {
         // Two things can need this thread: the client sending a request, or
@@ -351,6 +369,21 @@ fn serve_client_inner(
                 return Ok(());
             }
 
+            if matches!(message, ClientMessage::Connect { .. })
+                && !lock_state(state).peer_uid_is_admitted(peer_uid)
+            {
+                close_all(pending_fds);
+                write_frame(
+                    stream,
+                    &CompositorMessage::Rejected {
+                        reason: format!(
+                            "UID {peer_uid} is not authorized for the active desktop session"
+                        ),
+                    },
+                )?;
+                return Ok(());
+            }
+
             let received_fd = match &message {
                 message if carries_descriptor(message) && pending_fds.len() == 1 => {
                     pending_fds.pop()
@@ -382,7 +415,8 @@ fn serve_client_inner(
 
             let responses = {
                 let mut guard = lock_state(state);
-                let responses = guard.handle_transport_message(*session_id, message, received_fd);
+                let responses =
+                    guard.handle_transport_message(*session_id, message, received_fd, peer_uid);
 
                 // Register this connection's outbound queue while still holding
                 // the lock that created the session. Releasing it first would

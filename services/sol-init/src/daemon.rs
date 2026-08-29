@@ -213,11 +213,33 @@ mod tests {
                 include_str!("../daemons/sol-networkd.daemon"),
             ),
             ("sol-portal", include_str!("../daemons/sol-portal.daemon")),
+            ("sol-logind", include_str!("../daemons/sol-logind.daemon")),
         ] {
             assert!(
                 toml::from_str::<DaemonDefinition>(definition).is_ok(),
                 "invalid daemon definition: {name}"
             );
         }
+    }
+
+    #[test]
+    fn boot_starts_the_greeter_instead_of_the_user_shell() {
+        let compositor: DaemonDefinition =
+            toml::from_str(include_str!("../daemons/sol-compositor.daemon")).unwrap();
+        let logind: DaemonDefinition =
+            toml::from_str(include_str!("../daemons/sol-logind.daemon")).unwrap();
+        let shell: DaemonDefinition =
+            toml::from_str(include_str!("../daemons/sol-shell.daemon")).unwrap();
+
+        assert_eq!(compositor.daemon.start_mode, StartMode::Boot);
+        assert_eq!(logind.daemon.start_mode, StartMode::Boot);
+        assert_ne!(shell.daemon.start_mode, StartMode::Boot);
+        assert!(
+            logind
+                .daemon
+                .requires
+                .iter()
+                .any(|name| name == "sol-compositor")
+        );
     }
 }

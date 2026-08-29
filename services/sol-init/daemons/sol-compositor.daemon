@@ -16,4 +16,7 @@ capabilities = [
 ]
 
 [Environment]
-SOL_SCP_SOCKET = "sol-compositor-0"
+SOL_SCP_SOCKET = "/run/sol/compositor.sock"
+# The path is reachable by the authenticated user's processes; SCP still
+# admits peers only after sol-logind authorizes their UID.
+SOL_SCP_SHARED_SOCKET = "1"

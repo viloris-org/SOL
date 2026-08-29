@@ -90,6 +90,8 @@ impl Drop for PendingUserSession {
 /// the full login→session chain can be exercised locally.
 pub fn start_user_session(user: &UserAccount, dev_mode: bool) -> Result<PendingUserSession> {
     let program = session_binary();
+    let compositor_socket = sol_compositor::scp::resolve_socket_path()
+        .context("could not resolve the compositor used by the login screen")?;
     let runtime_dir = resolve_runtime_dir(
         user.uid,
         dev_mode,
@@ -99,6 +101,14 @@ pub fn start_user_session(user: &UserAccount, dev_mode: bool) -> Result<PendingU
     let (ready_listener, ready_path) = readiness_listener(&runtime_dir)?;
 
     let mut command = Command::new(&program);
+    // The compositor owns the physical seat for the entire boot. A login starts
+    // only the per-user half of the session and attaches it to that compositor;
+    // starting a second compositor here would necessarily introduce a display
+    // mode/input handoff and make a frame-perfect transition impossible.
+    command
+        .arg("--attach")
+        .arg("--socket")
+        .arg(&compositor_socket);
 
     if dev_mode {
         // Inherit the developer's real environment; only fill in what's
@@ -110,7 +120,17 @@ pub fn start_user_session(user: &UserAccount, dev_mode: bool) -> Result<PendingU
         command.current_dir(&user.home_dir);
         drop_privileges_before_exec(&mut command, user);
     }
+    command.env("SOL_SCP_SOCKET", &compositor_socket);
     command.env("SOL_SESSION_READY_SOCKET", &ready_path);
+    // The installed Shell lives in the compositor's trusted binary directory;
+    // forward only this explicit launcher override across the cleared login
+    // environment rather than inheriting arbitrary root process variables.
+    if let Some(shell) = env::var_os("SOL_SHELL_BIN") {
+        command.env("SOL_SHELL_BIN", shell);
+    }
+    if let Some(bus) = env::var_os("DBUS_SESSION_BUS_ADDRESS") {
+        command.env("DBUS_SESSION_BUS_ADDRESS", bus);
+    }
 
     tracing::info!(
         user = %user.username,
