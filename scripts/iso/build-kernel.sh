@@ -38,7 +38,39 @@ cd "linux-${KERNEL_VERSION}"
 echo "==> Configuring kernel..."
 if [ -f "${BUILD_DIR}/kernel/sol.config" ]; then
     cp "${BUILD_DIR}/kernel/sol.config" .config
+
+    # The upstream EFI system-framebuffer driver is version-dependent. Older
+    # kernels bind EFI scanout through simpledrm + sysfb-simplefb; newer trees
+    # provide a dedicated efidrm driver which conflicts with SYSFB_SIMPLEFB.
+    # Select exactly one built-in owner so the firmware's pixels remain live
+    # from ExitBootServices until the native DRM driver is ready.
+    if grep -Rqs '^config DRM_EFIDRM$' drivers/gpu/drm; then
+        scripts/config --disable SYSFB_SIMPLEFB
+        scripts/config --enable DRM_EFIDRM
+    else
+        scripts/config --enable SYSFB_SIMPLEFB
+        scripts/config --enable DRM_SIMPLEDRM
+    fi
+    scripts/config --enable SYSFB
+    scripts/config --enable FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER
     make olddefconfig
+
+    if grep -Rqs '^config DRM_EFIDRM$' drivers/gpu/drm; then
+        grep -q '^CONFIG_DRM_EFIDRM=y$' .config || {
+            echo "ERROR: built-in EFI DRM framebuffer handoff is unavailable"
+            exit 1
+        }
+    else
+        grep -q '^CONFIG_DRM_SIMPLEDRM=y$' .config && \
+            grep -q '^CONFIG_SYSFB_SIMPLEFB=y$' .config || {
+                echo "ERROR: built-in simpledrm EFI framebuffer handoff is unavailable"
+                exit 1
+            }
+    fi
+    grep -q '^CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y$' .config || {
+        echo "ERROR: deferred framebuffer-console takeover is unavailable"
+        exit 1
+    }
 else
     echo "WARNING: No sol.config found, using defconfig"
     make defconfig

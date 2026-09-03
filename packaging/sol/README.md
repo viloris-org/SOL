@@ -9,7 +9,7 @@ Ownership:
 packaging/sol/
 ├── bundle/         implemented .app content manifest, signing, lineage, verification CLI
 ├── client/         sol-pkg CLI and unprivileged API client
-├── daemon/         sol-packaged privileged transaction authority
+├── daemon/         sol-packaged privileged transaction staging authority
 ├── repository/     signed metadata, channels, revocation, transparency
 ├── runtime/        signed runtime descriptors and compatibility resolver
 └── tests/          interruption, rollback, compatibility, conflict, trust fixtures
@@ -23,8 +23,10 @@ Boundary rules:
   its minimum contract revision and required feature set.
 - Install scripts and root hooks are forbidden; registration is declarative.
 - CLI and Software UI never mutate stores directly; `sol-packaged` commits.
-- Boot/recovery copies and system deployments use the same transaction authority
-  as apps, with their own trial-boot and A/B activation rules.
+- The same privileged service may stage manager, recovery, deployment, and app
+  transactions, but it cannot activate them by writing trust state. Stage-0 and
+  `sol-boot` independently validate their layers; manager, recovery, and
+  deployment trials use distinct records and promotion gates.
 - App transactions atomically change a preferred version; launch resolves one
   effective compatible version for the booted system, while app data remains
   independently durable.

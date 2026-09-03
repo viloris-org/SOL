@@ -1,10 +1,11 @@
 # sol-image
 
-`sol-image` creates the deterministic deployment manifest consumed by the
-`sol-boot` verifier and A/B slot state machine. A manifest binds one
-physical slot and generation to the exact SHA-256 digest and byte length of its
-kernel, initrd, and immutable root image, plus the runtime major/revision/
-feature contracts exposed by that deployment.
+`sol-image` currently creates the deterministic development manifest consumed
+by the `sol-boot` verifier and A/B selector. Formats 1 and 2 bind one physical
+slot and generation to artifact digests. The production schema defined by
+ADR-0019/0026 will instead give the signed deployment a content identity
+independent of physical A/B placement and add key epoch, security version, and
+compatibility constraints; that future schema must use a new format version.
 
 ```bash
 cargo run -p sol-image -- manifest \
@@ -24,8 +25,8 @@ cargo run -p sol-image -- verify \
   --root-image build/root.img
 ```
 
-Format 2 adds the complete UKI and dm-verity boot identity without changing
-format 1:
+Format 2 adds a complete-UKI digest and dm-verity boot identity without
+changing format 1:
 
 ```bash
 cargo run -p sol-image -- manifest \
@@ -68,4 +69,6 @@ manifest/UKI binding (`boot-descriptor`), initializes redundant state
 (`init-boot-state`), stages an inactive-slot trial (`stage-boot-trial`), emits
 the exact health report (`success-report`), and derives the build-time public
 key (`release-public-key`). See the [sol-boot deployment
-guide](../sol-boot/README.md) for the complete ESP workflow.
+guide](../sol-boot/README.md) for the current ESP workflow. This does not yet
+implement Stage-0, independent recovery, authenticated/replay-resistant state,
+or a promotion-gated security rollback index.

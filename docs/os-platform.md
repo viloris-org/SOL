@@ -32,9 +32,11 @@ the public product boundary.
 
 ```text
 UEFI firmware
-    ↓
-sol-boot ───────────────→ Recovery
-    ↓ verify + select
+    ├──→ independently addressable platform recovery
+    └──→ stable Stage-0 anchor
+              ├──→ sol-boot manager A/B
+              └──→ automatic platform recovery
+                         ↓ verify + select
 SOL system image A/B
     ↓
 Linux kernel + initrd + system services
@@ -46,25 +48,29 @@ SOL Runtime + native SCP compositor + shell
 signed .app bundles in per-application sandboxes
 ```
 
-The booted system is split into three update domains coordinated by one signed
-deployment record:
+The booted system is split into four update domains joined by signed
+compatibility and commit rules, not one overloaded A/B record:
 
-1. **Boot authority and recovery** — redundant signed `sol-boot` and recovery
-   copies, updated by trial activation with an independently retained fallback.
-2. **System deployment** — a slot-bound kernel, initrd, system manifest, and
+1. **Platform anchor and recovery** — a minimal Stage-0 and an independently
+   firmware-addressable or external recovery route.
+2. **Boot-policy manager** — retained/trial signed `sol-boot` copies selected by
+   Stage-0, without responsibility for their own ultimate recovery.
+3. **System deployment** — a content-identified UKI, system manifest, and
    versioned read-only root image selected through A/B slots.
-3. **Applications** — independently installed, content-addressed `.app`
+4. **Applications** — independently installed, content-addressed `.app`
    bundles activated atomically.
 
-User data and mutable machine state live outside all three domains. Updating or
+User data and mutable machine state live outside all four domains. Updating or
 rolling back executable code must not roll user documents backward.
 
 ### Normative terms
 
 | Term | Definition |
 |---|---|
-| **System deployment** | One signed slot generation binding kernel, initrd, root-image digest, runtime descriptors, and boot metadata; it is the indivisible A/B selection unit. |
+| **System deployment** | One signed content identity binding a UKI, root/dm-verity identity, runtime descriptors, security version, and boot metadata. A/B is physical placement and selection state, not release identity. |
 | **Known-good** | A signed boot/recovery copy or system deployment that completed its required trial and authenticated health gate and has not been revoked. “Verified” alone is not “known-good.” |
+| **Functional rollback** | Returning from a failed, unpromoted trial to the retained successful deployment. |
+| **Security rollback** | Attempting to boot a revoked or security-old deployment below the trusted rollback index; it is rejected even when the artifact remains correctly signed. |
 | **Runtime descriptor** | Signed runtime major, monotonic contract revision, and stable feature set exposed by the booted deployment. |
 | **Preferred app version** | The signed bundle hash selected by the latest app install/update/manual rollback transaction, plus an ordered retained fallback chain recorded by `sol-packaged`; OS rollback does not rewrite it. |
 | **Effective app version** | The first non-revoked compatible bundle in the preferred version's ordered fallback chain for the currently booted runtime descriptor. Version display strings are not used for ordering. |
@@ -75,44 +81,52 @@ rolling back executable code must not roll user documents backward.
 
 ## 3. Boot and recovery
 
-`sol-boot` is a SOL-owned, signed UEFI bootloader and policy boundary. The EFI
-System Partition retains independently addressable current and fallback
-`sol-boot` copies. Recovery is likewise redundant. Replacing either authority
-is a two-phase trial, never an in-place overwrite of the only bootable copy.
+The platform boot boundary has three layers. A stable signed Stage-0 anchor is
+the firmware entry and selects retained/trial boot-policy managers. `sol-boot`
+is the SOL deployment-policy manager. Platform recovery is independently
+firmware-addressable, is also reachable automatically from Stage-0, and can
+repair the manager and deployment state without first executing the manager it
+repairs. Signed external recovery is the final route for an unusable ESP or
+storage device.
 
 Its minimum contract is:
 
 - load only artifacts accepted by the active trust policy;
-- select a complete deployment slot using boot-success and retry metadata;
+- select a complete deployment using explicit priority, bootable, successful,
+  and tries-remaining state;
 - fall back automatically after a bounded number of failed boots;
-- expose a recovery path that can verify, repair, or reinstall a system slot;
+- expose recovery paths that can verify, repair, or reinstall Stage-0, a
+  manager, or a deployment at the authority appropriate to that path;
 - pass an authenticated system version and slot identity into early userspace;
 - never require the graphical shell for recovery.
 
-Each A/B deployment manifest binds the kernel, initrd, root-image digest,
-required runtime descriptors, and slot generation. Kernel and initrd are not
-updated as free-standing global files: staging a new system release writes the
-complete inactive deployment and commits its manifest last.
+Each production deployment manifest binds a complete UKI (including kernel,
+initrd, and immutable command line), root/dm-verity identity, required runtime
+descriptors, generation, key epoch, and security version. The content identity
+is independent of physical slot A/B. Staging writes the complete inactive
+deployment and commits its placement/selection record last.
 
-A `sol-boot` or recovery update follows:
+A boot-manager or recovery update follows its own trial:
 
 ```text
-write inactive copy → verify → register one-shot trial → reboot/health gate
-                    → promote, or firmware-visible fallback to retained copy
+write inactive copy → verify → register one-shot trial → reboot/type-specific gate
+                    → promote, or Stage-0 retains the previous copy
 ```
 
-The old EFI and recovery copies remain addressable until the new copy has
-booted a known-good system and passed the early userspace health gate. Failure
-to write firmware variables, loss of power, signature failure, or failure of
-the trial copy leaves the previous boot path selected. Garbage collection may
-remove a fallback copy only after a newer independent fallback is proven.
+The old manager and recovery copies remain addressable until the new copy has
+passed its corresponding gate. Recovery is not selected solely by the manager
+it may need to repair. Multiple records on one ESP provide tested torn-write
+tolerance only; they are not an independent ESP or disk failure domain.
+Garbage collection may remove a retained copy only after its replacement is
+proven and an external or firmware recovery route remains.
 
 The intended chain is:
 
 ```text
 Platform Secure Boot keys
-    → signed sol-boot EFI executable
-    → signed deployment manifest binding kernel/initrd/root/runtime/generation
+    → signed Stage-0 anchor
+    → signed sol-boot policy manager
+    → signed deployment manifest binding UKI/root/runtime/security epoch
     → measured system identity
     → userspace trust services
 ```
@@ -122,15 +136,20 @@ but the boot UI, verification policy, slot state machine, rollback behavior, and
 recovery contract belong to SOL. “Custom bootloader” does not mean custom
 firmware, filesystem drivers, or cryptography.
 
-The x86-64 boot execution path uses a signed SOL UEFI application to verify and
-select a slot-specific signed UKI. `sol-boot` selects an EDID-preferred physical
-resolution only when firmware exposes that exact GOP mode, renders one bounded
-static SOL frame, and leaves the framebuffer intact for Linux. Early userspace
-and `sol-compositor` preserve that mode and visual content through a
-mode-preserving DRM handoff when the native driver supports it. Graphics
-failure never changes verification, fallback, or recovery policy, and generic
-hardware is not promised a flicker-free native-driver takeover. The complete
-contract and qualification requirements are fixed by ADR-0026.
+The x86-64 manager invokes a signed UKI through UEFI. Stage-0 is display-absent.
+`sol-boot` may draw a static centered mark in the current GOP mode, but never
+reads EDID, selects a mode, or calls `SetMode()`; any graphics error is ignored.
+The UKI owns native DRM, scaling, multi-display, unlock, and recovery UI. SOL
+makes no native-resolution or seamless-boot promise and maintains no certified
+boot-graphics hardware matrix. Graphics failure never changes verification,
+A/B fallback, or recovery policy. ADR-0026 defines the complete contract.
+
+Slot success and security rollback are separate. The exact trial reaches
+verified-root, repairability, and shared-data compatibility checkpoints before
+promotion. Only then may a replay-resistant hardware-backed rollback index
+advance. Authentication proves report origin, not that the candidate is free of
+bugs. Irreversible shared-data migrations occur after the rollback barrier or
+retain a snapshot/version that the fallback deployment can use.
 
 ## 4. Package manager
 
@@ -142,14 +161,16 @@ The manager owns three related transaction types:
 
 | Transaction | Unit | Activation | Rollback |
 |---|---|---|---|
-| Boot/recovery update | inactive signed EFI/recovery copy + trial record | one-shot trial boot | firmware-visible retained copy |
-| System update | slot-bound kernel + initrd + signed manifest + root image | next boot into inactive deployment slot | boot previous known-good deployment |
+| Boot-manager/recovery update | inactive signed copy + type-specific trial record | Stage-0 one-shot trial | retained manager or independent recovery route |
+| System update | content-identified UKI + signed manifest + root image | next boot from inactive deployment slot | boot previous known-good deployment before the security rollback barrier |
 | App update | signed `.app` bundle | atomic preferred-version switch; effective version resolved at launch | restore a retained preferred version |
 
 Every transaction follows `resolve → fetch → verify → stage → validate →
 commit`. Download or validation failure leaves the active system unchanged.
-Only one authority may stage mutations to boot/recovery copies, system
-deployments, and the machine-wide application store.
+Only one transaction service may stage mutations to manager/recovery copies,
+system deployments, and the machine-wide application store. Stage-0 and
+`sol-boot` independently validate and activate the artifacts appropriate to
+their layer; the staging service cannot create boot trust by writing state.
 
 Repositories provide signed metadata, hashes, sizes, channels, rollout policy,
 revocation state, and transparency information. Trust is rooted in repository
@@ -487,14 +508,14 @@ across all three levels. Non-SolKit code never receives more authority.
 
 ## 12. Required acceptance tests
 
-The OS platform cannot be called production-ready until automated and
-hardware-backed tests prove:
+The OS platform cannot be called production-ready until automated fault-
+injection and integration tests prove:
 
 1. a corrupted or non-booting update falls back to a known-good deployment;
-2. an interrupted `sol-boot`, recovery, system, or app update leaves an
-   independently bootable/usable retained version selected;
-3. a failed EFI/recovery trial, firmware-variable write, or power loss cannot
-   remove the last known-good boot and recovery paths;
+2. an interrupted manager, recovery, system, or app update leaves a usable
+   retained version or independent recovery route;
+3. a failed manager/recovery trial, firmware-variable write, or power loss
+   cannot make both platform recovery and the retained manager unreachable;
 4. signature, hash, publisher, and revocation failures block activation;
 5. two apps can carry incompatible versions of the same library without
    interaction;
@@ -517,7 +538,8 @@ hardware-backed tests prove:
    account-scoped grant, and receives no durable refresh credential afterward;
 14. account removal fences outstanding leases before credential deletion;
 15. app rollback changes executable content without rolling back user data;
-16. recovery can repair or reinstall a slot without requiring the desktop;
+16. recovery can repair Stage-0, managers, or deployments at its defined
+    authority without requiring the desktop or the manager being repaired;
 17. permission decisions are attributable, inspectable, and revocable;
 18. fluid materials meet contrast and frame-budget gates and become solid under
     reduced-transparency/high-contrast modes without changing hierarchy;
@@ -531,13 +553,20 @@ hardware-backed tests prove:
     focus changes replace menu snapshots atomically;
 23. broker-authoritative microphone/camera/capture indicators cannot be hidden,
     and their Stop/Revoke actions terminate the underlying session.
+24. copied, stale, or unauthenticated boot state and health observations cannot
+    authorize a deployment or lower the accepted security epoch;
+25. a rollback index advances only after promotion, while a failed unpromoted
+    trial can still reach the retained successful deployment;
+26. a failed trial leaves shared mutable data readable by the retained
+    deployment through compatibility, snapshot, or a deferred migration.
 
 ## 13. Naming and component map
 
 | Component | Responsibility |
 |---|---|
-| `sol-boot` | Redundant UEFI entries, verification, deployment selection, recovery handoff |
-| `sol-image` | Reproducible slot-bound kernel/initrd/root-image composition and manifests |
+| Stage-0 boot anchor | Stable firmware entry, boot-manager selection, automatic platform-recovery entry |
+| `sol-boot` | Verified deployment selection, bounded trials, UKI transfer, best-effort current-mode static frame |
+| `sol-image` | Reproducible content-identified UKI/root composition and signed manifests |
 | `sol-pkg` | User/admin CLI and inspection tools |
 | `sol-packaged` | Privileged boot/recovery/system/app transaction engine |
 | `sol-bundle` | `.app` build, lint, sign, verify, and inspect tooling |

@@ -1,17 +1,18 @@
 //! Native SCP compositor service.
 //!
-//! The process deliberately exposes only the SOL Compositor Protocol.  The
-//! retired compositor implementation remains in repository history and
-//! migration notes, but is no longer present in the active source tree.
+//! The compositor exposes only the SOL Compositor Protocol. It supports two
+//! backend modes:
 //!
-//! This binary is the compositor's **headless backend**: it owns the output
-//! topology and the presentation cadence, and drives
-//! [`ScpState::present_frame`] to compose what clients have committed. It has no
-//! display of its own — a DRM/KMS backend that scans the composed image out to
-//! real hardware is separate, still-pending work — so the composed desktop is
-//! observed through `SOL_SCP_FRAME_DUMP` or by composing directly from a test.
+//! - **DRM/KMS** (default): Scans out to real hardware displays via the Direct
+//!   Rendering Manager kernel subsystem.
+//! - **Headless** (`--headless`): Software-only composition for testing and CI,
+//!   with optional frame dumps to PNG files.
 
-use sol_compositor::scp::{ScpServer, ScpState, protocol::OutputId};
+use sol_compositor::{
+    drm_backend::DrmBackend,
+    native_input::NativeInputBackend,
+    scp::{ScpServer, ScpState, protocol::OutputId},
+};
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -43,49 +44,139 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let server = ScpServer::bind_from_env()?;
     let state = server.state();
-    let output_id = register_output(&state)?;
-    spawn_client(spawn_argument(), server.socket_path());
 
     let running = Arc::new(AtomicBool::new(true));
     let signal_flag = Arc::clone(&running);
     ctrlc::set_handler(move || signal_flag.store(false, Ordering::Release))?;
 
-    tracing::info!(socket = %server.socket_path().display(), "native SCP compositor ready");
-    present_loop(&state, output_id, frame_dump_path(), &running);
+    // Determine backend mode from command-line arguments.
+    let use_headless = std::env::args().any(|arg| arg == "--headless");
+
+    if use_headless {
+        tracing::info!("starting in headless mode");
+        let output_id = register_headless_output(&state)?;
+        spawn_client(spawn_argument(), server.socket_path());
+        tracing::info!(socket = %server.socket_path().display(), "headless SCP compositor ready");
+        headless_present_loop(&state, output_id, frame_dump_path(), &running);
+    } else {
+        tracing::info!("starting with DRM/KMS backend");
+        drm_main(&state, &running)?;
+    }
+
     tracing::info!("native SCP compositor exiting");
     Ok(())
 }
 
-/// Register the backend's output.
+/// Main loop for the DRM/KMS backend.
+fn drm_main(
+    state: &Arc<Mutex<ScpState>>,
+    running: &Arc<AtomicBool>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Open the primary DRM device. Try card0 first; fall back to card1.
+    let mut backend = DrmBackend::open("/dev/dri/card0")
+        .or_else(|_| DrmBackend::open("/dev/dri/card1"))
+        .map_err(|e| format!("Failed to open DRM device: {e}"))?;
+
+    // Enumerate connected displays and register them with the compositor.
+    let output_ids = backend.enumerate_outputs(state)?;
+    tracing::info!(outputs = output_ids.len(), "DRM outputs registered");
+
+    let extent = backend
+        .desktop_extent()
+        .ok_or("DRM backend registered no usable input extent")?;
+    let input = NativeInputBackend::discover(extent);
+    tracing::info!(
+        devices = input.device_count(),
+        width = extent.0,
+        height = extent.1,
+        "native evdev input backend ready"
+    );
+    let input_state = Arc::clone(state);
+    let input_running = Arc::clone(running);
+    let input_thread = thread::Builder::new()
+        .name("sol-native-input".to_string())
+        .spawn(move || input.run(input_state, input_running))?;
+
+    // Present frames driven by vblank events from the display hardware.
+    while running.load(Ordering::Acquire) {
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        for &output_id in &output_ids {
+            let framebuffer = match state.lock() {
+                Ok(guard) => guard.compose_output(output_id),
+                Err(_) => {
+                    tracing::error!("compositor state lock is poisoned; stopping");
+                    running.store(false, Ordering::Release);
+                    break;
+                }
+            };
+
+            let Some(ref framebuffer) = framebuffer else {
+                continue;
+            };
+            if let Err(e) = backend.present_frame(output_id, framebuffer) {
+                tracing::error!(error = %e, output_id, "failed to queue frame for presentation");
+                continue;
+            }
+            if let Err(e) = backend.wait_for_vblank() {
+                tracing::warn!(error = %e, output_id, "page flip completion failed; retaining client buffers");
+                continue;
+            }
+            match state.lock() {
+                Ok(mut guard) => guard.finish_presented_frame(timestamp_ms),
+                Err(_) => {
+                    tracing::error!("compositor state lock is poisoned; stopping");
+                    running.store(false, Ordering::Release);
+                    break;
+                }
+            }
+        }
+    }
+
+    running.store(false, Ordering::Release);
+    if input_thread.join().is_err() {
+        tracing::error!("native input thread panicked during shutdown");
+    }
+
+    Ok(())
+}
+
+/// Register the headless backend's virtual output.
 ///
-/// Outputs describe hardware, so [`ScpState`] does not invent one: it is the
-/// backend that knows what displays exist. The headless backend has exactly one
-/// virtual display, sized from `SOL_SCP_OUTPUT` (`WIDTHxHEIGHT`) so a test or a
-/// developer can compose a desktop at a size other than 1080p.
-fn register_output(state: &Arc<Mutex<ScpState>>) -> Result<OutputId, Box<dyn std::error::Error>> {
+/// The headless backend has exactly one virtual display, sized from
+/// `SOL_SCP_OUTPUT` (`WIDTHxHEIGHT`) so a test or developer can compose a
+/// desktop at a size other than 1080p.
+fn register_headless_output(
+    state: &Arc<Mutex<ScpState>>,
+) -> Result<OutputId, Box<dyn std::error::Error>> {
     let (width, height, refresh) = configured_output();
     let mut guard = state
         .lock()
         .map_err(|_| "compositor state lock was poisoned before the first frame")?;
-    let output_id = guard.output_manager_mut().add_output(
-        "HEADLESS-1".to_string(),
-        "SOL headless output".to_string(),
-        width,
-        height,
-        refresh,
-    );
+    let output_id = guard
+        .add_output(
+            "HEADLESS-1".to_string(),
+            "SOL headless output".to_string(),
+            width,
+            height,
+            refresh,
+        )
+        .map_err(std::io::Error::other)?;
     tracing::info!(output_id, width, height, "headless output registered");
     Ok(output_id)
 }
 
-/// Compose and present until the process is asked to stop.
+/// Headless presentation loop: compose and present at a fixed 60 Hz cadence.
 ///
 /// A frame is composed on every tick rather than only when a client commits.
 /// That is more work than a damage-tracking compositor needs to do, and it is
 /// deliberate for now: presentation correctness — buffers released and frame
 /// callbacks fired in the right order — is what this loop is here to establish,
 /// and a fixed cadence makes that behavior the same on every run.
-fn present_loop(
+fn headless_present_loop(
     state: &Arc<Mutex<ScpState>>,
     output_id: OutputId,
     dump_path: Option<PathBuf>,

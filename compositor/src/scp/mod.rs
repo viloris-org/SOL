@@ -30,8 +30,10 @@
 pub mod audit;
 pub mod buffer;
 pub mod capability;
+pub mod capture;
 pub mod compose;
 pub mod data_device;
+pub mod dmabuf;
 pub mod event_queue;
 pub mod input;
 pub mod keymap;
@@ -46,12 +48,14 @@ pub mod random;
 pub mod revocation;
 pub mod security;
 pub mod session_lock;
+pub mod shortcuts;
 pub mod stack;
 pub mod state;
 pub mod surface;
 pub mod toml_parser;
 pub mod transport;
 pub mod unix_socket;
+pub mod wire;
 
 pub use compose::{CAPTURE_REDACTION, Framebuffer, RenderPurpose, Rgba8};
 pub use event_queue::{EventRouter, OutboundEvent, SessionSink};

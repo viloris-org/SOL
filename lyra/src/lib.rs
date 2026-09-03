@@ -1,18 +1,28 @@
 pub mod builtins;
+pub mod completion;
+pub mod highlighter;
+pub mod history;
 pub mod lexer;
 pub mod parser;
 pub mod prompt;
 pub mod runtime;
 
 use anyhow::Result;
+use completion::LyraCompleter;
+use highlighter::LyraHighlighter;
+use history::HistoryManager;
 use parser::Parser;
 use prompt::PromptRenderer;
-use reedline::{DefaultPrompt, Reedline, Signal};
+use reedline::{
+    ColumnarMenu, DefaultPrompt, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
+    ReedlineEvent, ReedlineMenu, Signal,
+};
 use runtime::Evaluator;
 
 pub struct Lyra {
     evaluator: Evaluator,
     prompt: PromptRenderer,
+    history: HistoryManager,
 }
 
 impl Lyra {
@@ -20,11 +30,49 @@ impl Lyra {
         Self {
             evaluator: Evaluator::new(),
             prompt: PromptRenderer::new(),
+            history: HistoryManager::new().expect("Failed to initialize history"),
         }
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        let mut line_editor = Reedline::create();
+        // Set up history backend
+        let history_file = directories::ProjectDirs::from("org", "viloris", "lyra")
+            .map(|dirs| dirs.data_dir().join("history.txt"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".lyra_history"));
+
+        if let Some(parent) = history_file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let history = Box::new(
+            FileBackedHistory::with_file(1000, history_file)
+                .expect("Failed to create history backend"),
+        );
+
+        // Create a columnar menu for completions
+        let completion_menu = Box::new(
+            ColumnarMenu::default()
+                .with_name("completion_menu")
+                .with_columns(4)
+                .with_column_width(None)
+                .with_column_padding(2),
+        );
+
+        // Configure keybindings for tab completion
+        // Start with default Emacs keybindings, then add Tab
+        let mut keybindings = reedline::default_emacs_keybindings();
+        keybindings.add_binding(
+            KeyModifiers::NONE,
+            KeyCode::Tab,
+            ReedlineEvent::Menu("completion_menu".to_string()),
+        );
+
+        let mut line_editor = Reedline::create()
+            .with_completer(Box::new(LyraCompleter::new()))
+            .with_highlighter(Box::new(LyraHighlighter::new()))
+            .with_history(history)
+            .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
+            .with_edit_mode(Box::new(reedline::Emacs::new(keybindings)));
 
         loop {
             let prompt_text = self.prompt.render();
@@ -43,7 +91,13 @@ impl Lyra {
                         continue;
                     }
 
-                    match self.execute(line).await {
+                    let result = self.execute(line).await;
+                    let exit_status = if result.is_ok() { Some(0) } else { Some(1) };
+
+                    // Add to our internal history manager
+                    let _ = self.history.add(line.to_string(), exit_status);
+
+                    match result {
                         Ok(_) => {}
                         Err(e) => {
                             eprintln!("Error: {}", e);

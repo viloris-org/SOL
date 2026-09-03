@@ -416,10 +416,9 @@ impl TopBarSurface {
         ));
 
         let (clock_text, clock_color) = match &self.snapshot.clock {
-            ProviderState::Available { value, stale } => (
-                mark_stale(value.time.clone(), *stale),
-                Color::TextPrimary,
-            ),
+            ProviderState::Available { value, stale } => {
+                (mark_stale(value.time.clone(), *stale), Color::TextPrimary)
+            }
             ProviderState::Unavailable => (UNAVAILABLE_VALUE.to_owned(), Color::TextSecondary),
             ProviderState::Error(_) => (ERROR_VALUE.to_owned(), Color::Error),
         };
@@ -436,7 +435,11 @@ impl TopBarSurface {
 }
 
 fn mark_stale(text: String, stale: bool) -> String {
-    if stale { format!("{text}{STALE_MARK}") } else { text }
+    if stale {
+        format!("{text}{STALE_MARK}")
+    } else {
+        text
+    }
 }
 
 fn network_text(status: &NetworkStatus) -> String {
@@ -499,8 +502,8 @@ fn accessibility_tree(items: &[TopBarItem]) -> AccessibilityNode {
 /// Paint one bar frame.
 fn rasterize(contract: &TopBarSurfaceContract) -> Result<Vec<u8>, TopBarSurfaceError> {
     let (width, height) = contract.physical_size;
-    let mut canvas = Canvas::new(width, height)
-        .ok_or(TopBarSurfaceError::UnpaintableExtent((width, height)))?;
+    let mut canvas =
+        Canvas::new(width, height).ok_or(TopBarSurfaceError::UnpaintableExtent((width, height)))?;
     let mode = contract.token_mode;
     let scale = contract.output.scale;
 
@@ -568,7 +571,11 @@ mod tests {
     }
 
     fn surface() -> TopBarSurface {
-        TopBarSurface::new(HostOutput::new(1920, 1080, 1.0), TokenMode::dark(), snapshot())
+        TopBarSurface::new(
+            HostOutput::new(1920, 1080, 1.0),
+            TokenMode::dark(),
+            snapshot(),
+        )
     }
 
     fn item<'a>(contract: &'a TopBarSurfaceContract, id: &str) -> &'a TopBarItem {
@@ -705,8 +712,11 @@ mod tests {
     #[test]
     fn a_presented_frame_matches_its_placement_and_carries_ink() {
         let mut host = RecordingDesktopHost::default();
-        let mut surface =
-            TopBarSurface::new(HostOutput::new(640, 480, 1.0), TokenMode::dark(), snapshot());
+        let mut surface = TopBarSurface::new(
+            HostOutput::new(640, 480, 1.0),
+            TokenMode::dark(),
+            snapshot(),
+        );
         surface.present(&mut host).expect("present");
 
         let (placement, pixels) = host.last_frame(TOPBAR_NAMESPACE).expect("frame");
@@ -727,8 +737,11 @@ mod tests {
 
     #[test]
     fn a_scaled_output_paints_a_taller_physical_bar_for_the_same_logical_height() {
-        let surface =
-            TopBarSurface::new(HostOutput::new(3840, 2160, 2.0), TokenMode::dark(), snapshot());
+        let surface = TopBarSurface::new(
+            HostOutput::new(3840, 2160, 2.0),
+            TokenMode::dark(),
+            snapshot(),
+        );
         let contract = surface.contract().expect("contract");
 
         assert_eq!(contract.logical_size.height, 40.0);
@@ -738,8 +751,11 @@ mod tests {
 
     #[test]
     fn a_narrow_output_never_pushes_the_right_zone_past_the_left_one() {
-        let surface =
-            TopBarSurface::new(HostOutput::new(200, 100, 1.0), TokenMode::dark(), snapshot());
+        let surface = TopBarSurface::new(
+            HostOutput::new(200, 100, 1.0),
+            TokenMode::dark(),
+            snapshot(),
+        );
         let contract = surface.contract().expect("contract");
 
         for item in &contract.items {
@@ -749,8 +765,7 @@ mod tests {
 
     #[test]
     fn an_unconfigured_output_refuses_to_produce_a_frame() {
-        let surface =
-            TopBarSurface::new(HostOutput::new(0, 0, 1.0), TokenMode::dark(), snapshot());
+        let surface = TopBarSurface::new(HostOutput::new(0, 0, 1.0), TokenMode::dark(), snapshot());
         assert!(matches!(
             surface.contract(),
             Err(TopBarSurfaceError::OutputNotConfigured)

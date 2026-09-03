@@ -1,6 +1,6 @@
 # ADR-0030: ISO Build System Architecture
 
-**Status:** Accepted (revised 2026-08-27 for sol-boot / sol-init boot path)  
+**Status:** Accepted (revised 2026-09-02; development ISO scope)
 **Date:** 2024-01-27  
 **Context:** Phase 0 - Foundation
 
@@ -10,6 +10,12 @@
 > components from the platform (ADR-0028). The ISO build now uses sol-boot for
 > the bootloader, a busybox initramfs instead of dracut, and sol-init instead
 > of systemd units; the boot target is UEFI-only (no legacy BIOS/GRUB).
+>
+> **2026-09-02 scope correction:** the ISO directly runs the current
+> `sol-boot` development manager and loads an external initrd. Production boot
+> instead requires the ADR-0019/0026 Stage-0, independently addressable
+> recovery, indivisible UKI, authenticated health, and anti-rollback topology.
+> Passing the ISO smoke test proves none of those absent layers.
 
 ## Context
 
@@ -20,7 +26,7 @@ SOL needs a reproducible, automated ISO build pipeline for:
 - Developer onboarding
 
 The ISO must be:
-- Bootable on real hardware (UEFI)
+- Bootable on conforming x86-64 UEFI implementations on a best-effort basis
 - Testable in QEMU/VMs (OVMF)
 - Built from the latest stable kernel
 - Include all SOL platform components
@@ -72,9 +78,10 @@ We implement a **staged build pipeline** with five distinct phases:
 - Reasoning: Best compression ratio, read-only root safety
 - Alternative: erofs (faster but less mature tooling)
 
-**Bootloader:** sol-boot (UEFI, signed slots)
-- Reasoning: SOL owns its boot policy (ADR-0026); GRUB cannot verify the
-  SOL deployment envelope or drive A/B trials
+**Development boot entry:** sol-boot (UEFI, signed slots)
+- Reasoning: the current smoke image exercises the SOL deployment envelope and
+  A/B selector. Production inserts a stable Stage-0 and independent recovery;
+  owning the product contract does not require a SOL-authored first stage.
 - Alternative considered: GRUB 2 (rejected: third-party runtime component,
   BIOS legacy mode, no slot awareness)
 
@@ -129,17 +136,20 @@ Build times:
 ### Neutral
 - Uses Debian base (not a from-scratch rootfs)
   - Acceptable for Phase 0, may build custom base later
-- The kernel carries CONFIG_CMDLINE with the initrd path
-  - sol-boot transfers control without a loaded-image command line
+- The development kernel carries CONFIG_CMDLINE with an external initrd path
+  - production uses an indivisible UKI with embedded initrd and command line
 - x86_64 only initially
   - aarch64 can be added later with matrix builds
 
 ## Future Considerations
 
-### Phase 1+
+### Production follow-up
 - Custom minimal rootfs (replace Debian base)
 - Image-based updates (OSTree/A-B partitions)
-- Signed images and secure boot
+- Stable Stage-0, independent platform/external recovery, and manager trials
+- Authenticated/replay-resistant boot state, health reports, and rollback index
+- Complete UKI with embedded initrd and immutable command line
+- Signed images and Secure Boot enrollment
 - Multi-architecture (ARM64)
 - Custom initramfs (replace dracut)
 

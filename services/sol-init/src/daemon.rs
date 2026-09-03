@@ -234,12 +234,10 @@ mod tests {
         assert_eq!(compositor.daemon.start_mode, StartMode::Boot);
         assert_eq!(logind.daemon.start_mode, StartMode::Boot);
         assert_ne!(shell.daemon.start_mode, StartMode::Boot);
-        assert!(
-            logind
-                .daemon
-                .requires
-                .iter()
-                .any(|name| name == "sol-compositor")
-        );
+        assert!(logind
+            .daemon
+            .requires
+            .iter()
+            .any(|name| name == "sol-compositor"));
     }
 }

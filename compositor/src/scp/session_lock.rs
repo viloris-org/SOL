@@ -237,6 +237,18 @@ impl SessionLockManager {
             .is_some_and(|lock| lock.owner == Some(session_id))
     }
 
+    /// Re-evaluate coverage after output hotplug. A newly added output must
+    /// immediately make a formerly confirmed lock incomplete; otherwise the
+    /// owner could unlock while that display was never covered.
+    pub fn outputs_changed(&mut self, outputs: &[OutputId]) -> bool {
+        let Some(lock) = self.lock.as_mut() else {
+            return false;
+        };
+        let was_confirmed = lock.confirmed;
+        lock.confirmed = lock.covers_all_outputs(outputs);
+        was_confirmed != lock.confirmed
+    }
+
     /// Engage the lock, or adopt one whose client died.
     ///
     /// `previous_focus` is remembered only for a fresh lock: adopting an
@@ -655,6 +667,14 @@ mod tests {
             !manager.is_confirmed(),
             "an uncovered output must re-confirm before unlock"
         );
+    }
+
+    #[test]
+    fn hotplugged_output_immediately_invalidates_lock_confirmation() {
+        let mut manager = confirmed_single_output();
+        assert!(manager.outputs_changed(&[0, 1]));
+        assert!(manager.is_locked());
+        assert!(!manager.is_confirmed());
     }
 
     #[test]

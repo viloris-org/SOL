@@ -35,7 +35,8 @@ See [IMPROVEMENTS-SYSTEMD.md](./IMPROVEMENTS-SYSTEMD.md) for detailed comparison
 - Manager-level VPN activation is explicitly rejected until profile secrets, interface creation, routes, and rollback are wired end to end. The lower-level WireGuard structures are not yet a complete connection flow.
 - DHCP renewal/release primitives exist, but lease scheduling and persistence are not implemented.
 - `NtsClient` currently delegates to system time services; it is not an in-process RFC 8915 NTS implementation.
-- Per-device and per-profile D-Bus objects and state-change signal emission remain incomplete.
+- D-Bus signals for device and profile state changes are not yet emitted (polling sync is used instead).
+- Immediate device/profile object registration on change is not implemented (currently polls every 5 seconds).
 
 ## Architecture
 
@@ -59,9 +60,15 @@ See [IMPROVEMENTS-SYSTEMD.md](./IMPROVEMENTS-SYSTEMD.md) for detailed comparison
 
 ### ✅ Completed (Latest Updates)
 
+**D-Bus Infrastructure**
+- D-Bus service on `org.sol.Network1` with Manager/Device/Profile/WiFi/VPN interfaces
+- **Dynamic device object registration** - Devices automatically get D-Bus objects at `/org/sol/Network1/Device/{id}`
+- **Dynamic profile object registration** - Profiles automatically get D-Bus objects at `/org/sol/Network1/Profile/{id}`
+- **Background synchronization** - Periodic sync ensures D-Bus objects match NetworkManager state
+- **Profile lifecycle methods** - Connect/Disconnect/Delete operations fully wired to NetworkManager
+
 **Core Infrastructure**
 - NetworkManager with device/profile/connectivity state management
-- D-Bus service on `org.sol.Network1` with Manager/Device/Profile/WiFi/VPN interfaces
 - Netlink integration via rtnetlink for device monitoring
 - Device abstraction (WiFi/Ethernet/VPN types with per-type handlers)
 - **Profile persistence** - Profiles saved to `/var/lib/sol-networkd/profiles/*.json`

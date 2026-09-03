@@ -2,12 +2,23 @@
 
 use crate::scp::capability::{Capability, CapabilityToken, Decision};
 use crate::scp::random;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt,
+    io::{self, Read, Write},
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+/// Default private IPC endpoint owned by `sol-securityd`.
+pub const DEFAULT_SECURITYD_SOCKET: &str = "/run/sol/securityd.sock";
+/// Override used by development sessions and integration tests.
+pub const SECURITYD_SOCKET_ENV: &str = "SOL_SECURITYD_SOCKET";
+const SECURITYD_MAX_FRAME: usize = 256 * 1024;
+const SECURITYD_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Authenticated application identity.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -68,11 +79,318 @@ pub trait SecurityCoordinator: Send + Sync {
     fn release_tokens(&self, _tokens: &[CapabilityToken]) {}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuditOutcome {
     Granted,
     Denied,
     Used,
+}
+
+/// Typed request protocol shared with `sol-securityd`.
+///
+/// The framing is a four-byte big-endian length followed by one JSON document.
+/// Keeping these types in the compositor crate makes the security boundary a
+/// single, reviewed contract rather than two similar ad-hoc encodings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "method", rename_all = "kebab-case")]
+pub enum SecurityRequest {
+    VerifyIdentity {
+        pid: u32,
+    },
+    Evaluate {
+        app_id: String,
+        capability: String,
+    },
+    IssueToken {
+        app_id: String,
+        capability: String,
+    },
+    VerifyToken {
+        token: Vec<u8>,
+    },
+    Audit {
+        app_id: String,
+        capability: String,
+        outcome: AuditOutcome,
+    },
+    ReleaseTokens {
+        tokens: Vec<Vec<u8>>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "kebab-case")]
+pub enum SecurityResponse {
+    Identity {
+        app_id: Option<String>,
+    },
+    Decision {
+        decision: WireDecision,
+    },
+    Token {
+        token: Vec<u8>,
+        expires_at_unix_ms: Option<u64>,
+        one_time: bool,
+    },
+    Verified {
+        app_id: Option<String>,
+        capability: Option<String>,
+    },
+    Ack,
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum WireDecision {
+    Granted {
+        token: Vec<u8>,
+        expires_at_unix_ms: Option<u64>,
+        one_time: bool,
+    },
+    Denied {
+        reason: String,
+    },
+    NeedsUserConsent {
+        dialog_id: u64,
+    },
+}
+
+/// Production coordinator backed by the independently supervised security
+/// daemon. Every method opens a fresh bounded connection, so a daemon restart
+/// is recovered without restarting the compositor. IPC failures fail closed.
+#[derive(Debug, Clone)]
+pub struct DaemonSecurityCoordinator {
+    socket_path: PathBuf,
+}
+
+impl DaemonSecurityCoordinator {
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self {
+            socket_path: std::env::var_os(SECURITYD_SOCKET_ENV)
+                .map_or_else(|| PathBuf::from(DEFAULT_SECURITYD_SOCKET), PathBuf::from),
+        }
+    }
+
+    #[must_use]
+    pub fn new(socket_path: PathBuf) -> Self {
+        Self { socket_path }
+    }
+
+    fn call(&self, request: &SecurityRequest) -> io::Result<SecurityResponse> {
+        let mut stream = UnixStream::connect(&self.socket_path)?;
+        stream.set_read_timeout(Some(SECURITYD_TIMEOUT))?;
+        stream.set_write_timeout(Some(SECURITYD_TIMEOUT))?;
+        write_security_frame(&mut stream, request)?;
+        read_security_frame(&mut stream)
+    }
+
+    fn call_or_log(&self, request: &SecurityRequest) -> Option<SecurityResponse> {
+        match self.call(request) {
+            Ok(response) => Some(response),
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    socket = %self.socket_path.display(),
+                    "sol-securityd request failed; denying authority"
+                );
+                None
+            }
+        }
+    }
+}
+
+impl Default for DaemonSecurityCoordinator {
+    fn default() -> Self {
+        Self::from_env()
+    }
+}
+
+impl SecurityCoordinator for DaemonSecurityCoordinator {
+    fn verify_app_identity(&self, pid: u32) -> Option<AppId> {
+        match self.call_or_log(&SecurityRequest::VerifyIdentity { pid })? {
+            SecurityResponse::Identity {
+                app_id: Some(app_id),
+            } => Some(AppId(app_id)),
+            SecurityResponse::Identity { app_id: None } => None,
+            SecurityResponse::Error { message } => {
+                tracing::warn!(%message, pid, "sol-securityd refused process identity");
+                None
+            }
+            response => {
+                tracing::error!(?response, "unexpected sol-securityd identity response");
+                None
+            }
+        }
+    }
+
+    fn evaluate_capability(&self, app_id: &AppId, cap: &Capability) -> Decision {
+        let request = SecurityRequest::Evaluate {
+            app_id: app_id.0.clone(),
+            capability: cap.wire_name().to_owned(),
+        };
+        match self.call_or_log(&request) {
+            Some(SecurityResponse::Decision { decision }) => wire_decision(decision),
+            Some(SecurityResponse::Error { message }) => Decision::Denied { reason: message },
+            Some(response) => {
+                tracing::error!(?response, "unexpected sol-securityd policy response");
+                Decision::Denied {
+                    reason: "invalid response from sol-securityd".to_owned(),
+                }
+            }
+            None => Decision::Denied {
+                reason: "sol-securityd is unavailable".to_owned(),
+            },
+        }
+    }
+
+    fn issue_token(&self, app_id: &AppId, cap: &Capability) -> CapabilityToken {
+        let request = SecurityRequest::IssueToken {
+            app_id: app_id.0.clone(),
+            capability: cap.wire_name().to_owned(),
+        };
+        match self.call_or_log(&request) {
+            Some(SecurityResponse::Token {
+                token,
+                expires_at_unix_ms,
+                one_time,
+            }) => CapabilityToken {
+                data: token,
+                expires_at: expiry_to_instant(expires_at_unix_ms),
+                one_time,
+            },
+            Some(SecurityResponse::Error { message }) => {
+                tracing::warn!(%message, %app_id, capability = cap.wire_name(), "token issuance denied");
+                unusable_token()
+            }
+            Some(response) => {
+                tracing::error!(?response, "unexpected sol-securityd token response");
+                unusable_token()
+            }
+            None => unusable_token(),
+        }
+    }
+
+    fn verify_token(&self, token: &CapabilityToken) -> Option<(AppId, Capability)> {
+        if token.data.is_empty() || token.is_expired() {
+            return None;
+        }
+        match self.call_or_log(&SecurityRequest::VerifyToken {
+            token: token.data.clone(),
+        })? {
+            SecurityResponse::Verified {
+                app_id: Some(app_id),
+                capability: Some(capability),
+            } => Some((AppId(app_id), Capability::from_wire_name(&capability)?)),
+            SecurityResponse::Verified { .. } | SecurityResponse::Error { .. } => None,
+            response => {
+                tracing::error!(?response, "unexpected sol-securityd verification response");
+                None
+            }
+        }
+    }
+
+    fn audit_capability_use(&self, app_id: &AppId, cap: &Capability, outcome: AuditOutcome) {
+        let request = SecurityRequest::Audit {
+            app_id: app_id.0.clone(),
+            capability: cap.wire_name().to_owned(),
+            outcome,
+        };
+        if !matches!(self.call_or_log(&request), Some(SecurityResponse::Ack)) {
+            tracing::error!(%app_id, capability = cap.wire_name(), "security audit was not committed");
+        }
+    }
+
+    fn release_tokens(&self, tokens: &[CapabilityToken]) {
+        if tokens.is_empty() {
+            return;
+        }
+        let request = SecurityRequest::ReleaseTokens {
+            tokens: tokens.iter().map(|token| token.data.clone()).collect(),
+        };
+        if !matches!(self.call_or_log(&request), Some(SecurityResponse::Ack)) {
+            tracing::warn!(
+                count = tokens.len(),
+                "sol-securityd did not acknowledge token release"
+            );
+        }
+    }
+}
+
+fn wire_decision(decision: WireDecision) -> Decision {
+    match decision {
+        WireDecision::Granted {
+            token,
+            expires_at_unix_ms,
+            one_time,
+        } => {
+            let expires_at = expiry_to_instant(expires_at_unix_ms);
+            Decision::Granted {
+                token: CapabilityToken {
+                    data: token,
+                    expires_at,
+                    one_time,
+                },
+                expires_at,
+            }
+        }
+        WireDecision::Denied { reason } => Decision::Denied { reason },
+        WireDecision::NeedsUserConsent { dialog_id } => Decision::NeedsUserConsent { dialog_id },
+    }
+}
+
+fn expiry_to_instant(expires_at_unix_ms: Option<u64>) -> Option<Instant> {
+    let expires = expires_at_unix_ms?;
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    let remaining = u64::try_from(u128::from(expires).saturating_sub(now_ms)).ok()?;
+    Some(Instant::now() + Duration::from_millis(remaining))
+}
+
+fn unusable_token() -> CapabilityToken {
+    CapabilityToken {
+        data: Vec::new(),
+        expires_at: Some(Instant::now()),
+        one_time: false,
+    }
+}
+
+pub fn write_security_frame<T: Serialize>(writer: &mut impl Write, value: &T) -> io::Result<()> {
+    let payload = serde_json::to_vec(value).map_err(io::Error::other)?;
+    if payload.len() > SECURITYD_MAX_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "security IPC frame is too large",
+        ));
+    }
+    let length = u32::try_from(payload.len()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "security IPC frame is too large",
+        )
+    })?;
+    writer.write_all(&length.to_be_bytes())?;
+    writer.write_all(&payload)
+}
+
+pub fn read_security_frame<T: for<'de> Deserialize<'de>>(reader: &mut impl Read) -> io::Result<T> {
+    let mut length = [0_u8; 4];
+    reader.read_exact(&mut length)?;
+    let length = u32::from_be_bytes(length) as usize;
+    if length == 0 || length > SECURITYD_MAX_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid security IPC frame length",
+        ));
+    }
+    let mut payload = vec![0_u8; length];
+    reader.read_exact(&mut payload)?;
+    serde_json::from_slice(&payload).map_err(io::Error::other)
 }
 
 /// Verified identity permitted to engage the session lock.

@@ -26,13 +26,8 @@
 
 use sol_app::AppId;
 use sol_design::{
-    accessibility::TokenMode,
-    color::Color,
-    material::Material,
-    metrics::ControlMetric,
-    radius::Radius,
-    spacing::Spacing,
-    typography::FontStyle,
+    accessibility::TokenMode, color::Color, material::Material, metrics::ControlMetric,
+    radius::Radius, spacing::Spacing, typography::FontStyle,
 };
 use sol_ui::{AccessibilityNode, AccessibilityState, LogicalSize, SemanticId, SemanticRole};
 
@@ -487,12 +482,23 @@ mod tests {
 
     #[test]
     fn the_dock_reserves_no_work_area_so_windows_run_under_it() {
-        assert_eq!(surface().contract().expect("contract").placement.exclusive_zone, 0);
+        assert_eq!(
+            surface()
+                .contract()
+                .expect("contract")
+                .placement
+                .exclusive_zone,
+            0
+        );
     }
 
     #[test]
     fn the_launcher_entry_is_always_first_and_always_present() {
-        let empty = DockSurface::new(HostOutput::new(1920, 1080, 1.0), TokenMode::dark(), Vec::new());
+        let empty = DockSurface::new(
+            HostOutput::new(1920, 1080, 1.0),
+            TokenMode::dark(),
+            Vec::new(),
+        );
         let contract = empty.contract().expect("contract");
 
         assert_eq!(contract.tiles.len(), 1);
@@ -514,11 +520,15 @@ mod tests {
 
     #[test]
     fn the_dock_grows_with_its_entries() {
-        let narrow = DockSurface::new(HostOutput::new(1920, 1080, 1.0), TokenMode::dark(), Vec::new())
-            .contract()
-            .expect("contract")
-            .logical_size
-            .width;
+        let narrow = DockSurface::new(
+            HostOutput::new(1920, 1080, 1.0),
+            TokenMode::dark(),
+            Vec::new(),
+        )
+        .contract()
+        .expect("contract")
+        .logical_size
+        .width;
         let wide = surface().contract().expect("contract").logical_size.width;
 
         assert!(wide > narrow);
@@ -560,11 +570,7 @@ mod tests {
         let expected = (placement.size.0 * placement.size.1 * 4) as usize;
         assert_eq!(pixels.len(), expected);
         assert!(
-            pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .any(|pixel| pixel[3] > 0),
+            pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0),
             "the Dock must paint something"
         );
         // A rounded panel leaves its outermost corner uncovered.

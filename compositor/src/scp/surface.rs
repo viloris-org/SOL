@@ -26,9 +26,9 @@ pub const MAX_LAYER_SURFACES_PER_SESSION: usize = 32;
 
 /// Buffers a surface may retain awaiting release before the oldest is dropped.
 ///
-/// Each one pins a descriptor. The renderer releases them after a frame; until
-/// there is a renderer nothing does, so this is what keeps an attach/commit loop
-/// from exhausting the compositor's descriptors.
+/// Each one pins a descriptor until the backend finishes a frame. The cap is a
+/// final defense if presentation repeatedly fails; it keeps one client from
+/// exhausting the compositor's descriptors.
 pub const MAX_RETAINED_BUFFERS: usize = 8;
 
 /// Damage rectangles a surface accumulates before they are coalesced.
@@ -47,6 +47,9 @@ pub struct ScpSurface {
     pub app_id: AppId,
     pub buffer: Option<SurfaceBuffer>,
     pub pending_buffer: Option<SurfaceBuffer>,
+    /// `Some(true)` distinguishes a requested detach from no pending buffer
+    /// change. The next commit applies it atomically with damage and regions.
+    pending_detach: bool,
     pub role: SurfaceRole,
     pub damage: Vec<Rect>,
     pub pending_damage: Vec<Rect>,
@@ -88,11 +91,25 @@ pub enum ProtectionReason {
 #[derive(Debug)]
 pub struct SurfaceBuffer {
     pub buffer_id: BufferId,
+    /// Byte offset of this image in the backing descriptor.
+    pub offset: usize,
+    /// Whether `buffer_id` names an object in `BufferManager`. Legacy
+    /// descriptor-per-frame buffers have compositor-private ids and are simply
+    /// closed when retired; managed buffers additionally receive a release.
+    pub managed: bool,
+    /// Determines descriptor validation and CPU cache synchronization.
+    pub kind: SurfaceBufferKind,
     pub fd: i32,
     pub width: i32,
     pub height: i32,
     pub stride: i32,
     pub format: BufferFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceBufferKind {
+    Shm,
+    Dmabuf,
 }
 
 impl Drop for SurfaceBuffer {
@@ -123,6 +140,7 @@ impl ScpSurface {
             app_id,
             buffer: None,
             pending_buffer: None,
+            pending_detach: false,
             role: SurfaceRole::None,
             damage: Vec::new(),
             pending_damage: Vec::new(),
@@ -155,8 +173,17 @@ impl ScpSurface {
         self.pending_frame_callbacks.push(callback_id);
     }
 
-    pub fn attach_buffer(&mut self, buffer: SurfaceBuffer) {
-        self.pending_buffer = Some(buffer);
+    /// Stage a buffer for the next commit, returning a staged buffer it
+    /// superseded before the compositor ever read it.
+    pub fn attach_buffer(&mut self, buffer: SurfaceBuffer) -> Option<SurfaceBuffer> {
+        self.pending_detach = false;
+        self.pending_buffer.replace(buffer)
+    }
+
+    /// Stage an unmap for the next commit.
+    pub fn detach_buffer(&mut self) -> Option<SurfaceBuffer> {
+        self.pending_detach = true;
+        self.pending_buffer.take()
     }
 
     /// Record a damaged region, coalescing once the list is full.
@@ -182,19 +209,25 @@ impl ScpSurface {
         self.opaque_region = Some(rects);
     }
 
-    pub fn commit(&mut self) {
-        if let Some(buffer) = self.pending_buffer.take() {
+    /// Apply pending state and return retired buffers evicted by the emergency
+    /// retention cap. The caller must release managed buffer objects; legacy
+    /// buffers are closed when the returned values drop.
+    pub fn commit(&mut self) -> Vec<SurfaceBuffer> {
+        if self.pending_detach {
+            self.pending_detach = false;
+            if let Some(old) = self.buffer.take() {
+                self.old_buffers.push(old);
+            }
+        } else if let Some(buffer) = self.pending_buffer.take() {
             // Keep old buffer for release after render
             if let Some(old) = self.buffer.replace(buffer) {
                 self.old_buffers.push(old);
-                // Nothing has drained these yet — the renderer that will do so
-                // does not exist. Dropping the oldest closes its descriptor,
-                // which is what an attach/commit loop would otherwise exhaust.
-                while self.old_buffers.len() > MAX_RETAINED_BUFFERS {
-                    self.old_buffers.remove(0);
-                }
+                // A healthy backend drains these after presentation. Keep a
+                // hard cap as protection while an output is failing.
             }
         }
+        let excess = self.old_buffers.len().saturating_sub(MAX_RETAINED_BUFFERS);
+        let evicted: Vec<_> = self.old_buffers.drain(..excess).collect();
         self.damage = std::mem::take(&mut self.pending_damage);
 
         // Move pending frame callbacks to active
@@ -204,6 +237,7 @@ impl ScpSurface {
             let excess = self.frame_callbacks.len() - MAX_FRAME_CALLBACKS;
             self.frame_callbacks.drain(..excess);
         }
+        evicted
     }
 
     /// Take frame callbacks that should fire after this frame renders.
@@ -214,6 +248,16 @@ impl ScpSurface {
     /// Take old buffers that can now be released back to the client.
     pub fn take_old_buffers(&mut self) -> Vec<SurfaceBuffer> {
         std::mem::take(&mut self.old_buffers)
+    }
+
+    /// Managed buffers retained by every stage of this surface.
+    pub fn managed_buffer_ids(&self) -> Vec<BufferId> {
+        self.buffer
+            .iter()
+            .chain(self.pending_buffer.iter())
+            .chain(self.old_buffers.iter())
+            .filter_map(|buffer| buffer.managed.then_some(buffer.buffer_id))
+            .collect()
     }
 
     pub fn assign_role(&mut self, role: SurfaceRole) -> Result<(), String> {
@@ -866,7 +910,9 @@ impl SurfaceManager {
         let mut released = Vec::new();
         for ((session_id, _), surface) in &mut self.surfaces {
             for buffer in surface.take_old_buffers() {
-                released.push((*session_id, buffer.buffer_id));
+                if buffer.managed {
+                    released.push((*session_id, buffer.buffer_id));
+                }
             }
         }
         released
@@ -949,7 +995,10 @@ mod tests {
         surface.size = (800, 600);
 
         let geometry = surface.calculate_geometry(1920, 1080);
-        assert_eq!((geometry.x, geometry.y), ((1920 - 800) / 2, (1080 - 600) / 2));
+        assert_eq!(
+            (geometry.x, geometry.y),
+            ((1920 - 800) / 2, (1080 - 600) / 2)
+        );
     }
 
     #[test]
@@ -1033,6 +1082,9 @@ mod tests {
         for id in 0..(MAX_RETAINED_BUFFERS as u32 * 4) {
             surface.attach_buffer(SurfaceBuffer {
                 buffer_id: id,
+                offset: 0,
+                managed: false,
+                kind: SurfaceBufferKind::Shm,
                 // -1 so dropping these closes nothing real.
                 fd: -1,
                 width: 16,
@@ -1040,7 +1092,7 @@ mod tests {
                 stride: 64,
                 format: BufferFormat::Argb8888,
             });
-            surface.commit();
+            drop(surface.commit());
         }
 
         assert!(

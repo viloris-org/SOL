@@ -8,6 +8,7 @@
 use crate::scp::{
     memfd,
     protocol::{BufferId, PoolId, SessionId, ShmFormat},
+    surface::{SurfaceBuffer, SurfaceBufferKind},
     unix_socket,
 };
 use std::collections::HashMap;
@@ -292,8 +293,71 @@ impl BufferManager {
             .buffers
             .get_mut(&(session_id, id))
             .ok_or("Buffer not found")?;
+        if buffer.in_use {
+            return Err("Buffer is still in use by the compositor".to_string());
+        }
         buffer.in_use = true;
         Ok(())
+    }
+
+    /// Acquire a stable buffer object for a surface commit.
+    ///
+    /// The surface owns a duplicate descriptor so destroying an unrelated
+    /// pool cannot invalidate memory currently being composed. `F_DUPFD_CLOEXEC`
+    /// also prevents this client-supplied memory from leaking into child
+    /// processes the compositor may launch.
+    pub fn acquire_surface_buffer(
+        &mut self,
+        session_id: SessionId,
+        id: BufferId,
+    ) -> Result<SurfaceBuffer, String> {
+        let buffer = self
+            .buffers
+            .get(&(session_id, id))
+            .ok_or("Buffer not found")?;
+        if buffer.in_use {
+            return Err("Buffer is still in use by the compositor".to_string());
+        }
+        let pool = self
+            .pools
+            .get(&(session_id, buffer.pool_id))
+            .ok_or("Buffer pool not found")?;
+        let fd = unsafe { libc::fcntl(pool.fd, libc::F_DUPFD_CLOEXEC, 0) };
+        if fd < 0 {
+            return Err(format!(
+                "Could not duplicate shared-memory pool: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        let (buffer_id, offset, width, height, stride, format) = (
+            buffer.id,
+            buffer.offset,
+            buffer.width,
+            buffer.height,
+            buffer.stride,
+            buffer.format,
+        );
+        // Mark only after every fallible operation succeeds.
+        let Some(buffer) = self.buffers.get_mut(&(session_id, id)) else {
+            // This cannot normally change while `&mut self` is held, but keep
+            // the error path leak-free rather than relying on that invariant
+            // with a compositor-wide panic.
+            unix_socket::close_fd(fd);
+            return Err("Buffer disappeared while being acquired".to_string());
+        };
+        buffer.in_use = true;
+        Ok(SurfaceBuffer {
+            buffer_id,
+            offset,
+            managed: true,
+            kind: SurfaceBufferKind::Shm,
+            fd,
+            width,
+            height,
+            stride,
+            format: format.into(),
+        })
     }
 
     pub fn mark_buffer_released(

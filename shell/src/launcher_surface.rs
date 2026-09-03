@@ -617,7 +617,11 @@ mod tests {
     }
 
     fn surface() -> LauncherSurface {
-        LauncherSurface::new(HostOutput::new(1920, 1080, 1.0), TokenMode::dark(), catalog())
+        LauncherSurface::new(
+            HostOutput::new(1920, 1080, 1.0),
+            TokenMode::dark(),
+            catalog(),
+        )
     }
 
     fn opened() -> (LauncherSurface, RecordingDesktopHost) {
@@ -675,7 +679,10 @@ mod tests {
     #[test]
     fn typing_filters_by_the_catalogs_own_ranking() {
         let (mut surface, _) = opened();
-        assert_eq!(surface.handle_key(Key::Character('t')), LauncherOutcome::Changed);
+        assert_eq!(
+            surface.handle_key(Key::Character('t')),
+            LauncherOutcome::Changed
+        );
         let contract = surface.contract().expect("contract");
 
         assert_eq!(contract.query, "t");
@@ -830,13 +837,7 @@ mod tests {
             pixels.len(),
             (placement.size.0 * placement.size.1 * 4) as usize
         );
-        assert!(
-            pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .any(|pixel| pixel[3] > 0)
-        );
+        assert!(pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0));
     }
 
     #[test]
@@ -854,7 +855,8 @@ mod tests {
 
     #[test]
     fn an_output_too_small_for_the_launcher_reports_that_instead_of_overflowing_it() {
-        let small = LauncherSurface::new(HostOutput::new(120, 90, 1.0), TokenMode::dark(), catalog());
+        let small =
+            LauncherSurface::new(HostOutput::new(120, 90, 1.0), TokenMode::dark(), catalog());
         assert!(matches!(
             small.contract(),
             Err(LauncherSurfaceError::OutputTooSmall(_))
@@ -863,7 +865,8 @@ mod tests {
 
     #[test]
     fn an_unconfigured_output_refuses_to_produce_a_frame() {
-        let surface = LauncherSurface::new(HostOutput::new(0, 0, 1.0), TokenMode::dark(), catalog());
+        let surface =
+            LauncherSurface::new(HostOutput::new(0, 0, 1.0), TokenMode::dark(), catalog());
         assert!(matches!(
             surface.contract(),
             Err(LauncherSurfaceError::OutputNotConfigured)

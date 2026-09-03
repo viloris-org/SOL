@@ -1,0 +1,18 @@
+[Daemon]
+name = "sol-securityd"
+exec = "/usr/bin/sol-securityd"
+type = "core"
+start_mode = "boot"
+restart_policy = "always"
+
+after = []
+requires = []
+
+capabilities = [
+    "security.identity",
+    "security.authorize",
+    "security.audit"
+]
+
+[Environment]
+SOL_SECURITYD_SOCKET = "/run/sol/securityd.sock"

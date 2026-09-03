@@ -1,15 +1,16 @@
 //! Unix-domain transport for SCP.
 //!
-//! Messages are JSON payloads prefixed by a four-byte big-endian length.
+//! Messages are Protobuf payloads prefixed by a four-byte big-endian length.
 //! Client buffer descriptors are delivered out-of-band with SCM_RIGHTS.
 
 use crate::scp::{
     event_queue::{OutboundEvent, SessionSink},
     protocol::{ClientMessage, CompositorMessage, SessionId},
+    security::{DaemonSecurityCoordinator, SecurityCoordinator, StubSecurityCoordinator},
     state::ScpState,
     unix_socket,
+    wire::WireMessage,
 };
-use serde::{Serialize, de::DeserializeOwned};
 use std::{
     io::{self, Read, Write},
     os::fd::AsRawFd,
@@ -20,15 +21,18 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub const DEFAULT_SOCKET_NAME: &str = "sol-compositor-0";
 pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
 const SHARED_SOCKET_ENV: &str = "SOL_SCP_SHARED_SOCKET";
+/// Explicit test-only escape hatch for subprocess integration fixtures.
+/// Production service definitions never set this variable.
+const INSECURE_STUB_SECURITY_ENV: &str = "SOL_SCP_INSECURE_STUB_SECURITY";
 
 /// How long a client thread waits before rechecking its socket and event queue.
 ///
@@ -42,13 +46,26 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(250);
 /// that a wedged one does not hold a thread and its queued descriptors forever.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Bound the thread-per-client transport so a connect flood cannot exhaust the
+/// compositor's descriptors or address space.
+pub const MAX_CLIENT_CONNECTIONS: usize = 256;
+
+/// Unauthenticated peers receive no events and must complete their handshake
+/// promptly instead of occupying a worker forever.
+#[cfg(not(test))]
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(100);
+
 /// Running SCP listener. Dropping it stops the accept loop and removes the
-/// filesystem socket. Active client threads finish when their peers disconnect.
+/// filesystem socket. Active client threads observe shutdown through the same
+/// bounded poll loop and tear down their sessions before returning.
 pub struct ScpServer {
     socket_path: PathBuf,
     state: Arc<Mutex<ScpState>>,
     shutdown: Arc<AtomicBool>,
     accept_thread: Option<JoinHandle<()>>,
+    client_threads: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 impl ScpServer {
@@ -58,9 +75,18 @@ impl ScpServer {
         } else {
             0o600
         };
+        let security: Arc<dyn SecurityCoordinator> =
+            if std::env::var_os(INSECURE_STUB_SECURITY_ENV).as_deref() == Some("1".as_ref()) {
+                tracing::warn!(
+                    "using insecure in-process SCP security stub; this is only valid in tests"
+                );
+                Arc::new(StubSecurityCoordinator::default())
+            } else {
+                Arc::new(DaemonSecurityCoordinator::from_env())
+            };
         Self::bind_with_state_and_mode(
             resolve_socket_path()?,
-            Arc::new(Mutex::new(ScpState::new())),
+            Arc::new(Mutex::new(ScpState::with_security(security))),
             mode,
         )
     }
@@ -84,9 +110,20 @@ impl ScpServer {
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread_shutdown = Arc::clone(&shutdown);
         let thread_state = Arc::clone(&state);
+        let active_connections = Arc::new(AtomicUsize::new(0));
+        let client_threads = Arc::new(Mutex::new(Vec::new()));
+        let thread_clients = Arc::clone(&client_threads);
         let accept_thread = thread::Builder::new()
             .name("scp-listener".to_string())
-            .spawn(move || accept_loop(listener, thread_state, thread_shutdown))?;
+            .spawn(move || {
+                accept_loop(
+                    listener,
+                    thread_state,
+                    thread_shutdown,
+                    active_connections,
+                    thread_clients,
+                )
+            })?;
 
         tracing::info!(socket = %socket_path.display(), "SCP listener ready");
         Ok(Self {
@@ -94,6 +131,7 @@ impl ScpServer {
             state,
             shutdown,
             accept_thread: Some(accept_thread),
+            client_threads,
         })
     }
 
@@ -191,6 +229,10 @@ impl Drop for ScpServer {
         if let Some(thread) = self.accept_thread.take() {
             let _ = thread.join();
         }
+        let workers: Vec<_> = lock_workers(&self.client_threads).drain(..).collect();
+        for worker in workers {
+            let _ = worker.join();
+        }
         match std::fs::remove_file(&self.socket_path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -221,18 +263,50 @@ pub fn resolve_socket_path() -> io::Result<PathBuf> {
     }
 }
 
-fn accept_loop(listener: UnixListener, state: Arc<Mutex<ScpState>>, shutdown: Arc<AtomicBool>) {
+fn accept_loop(
+    listener: UnixListener,
+    state: Arc<Mutex<ScpState>>,
+    shutdown: Arc<AtomicBool>,
+    active_connections: Arc<AtomicUsize>,
+    client_threads: Arc<Mutex<Vec<JoinHandle<()>>>>,
+) {
     while !shutdown.load(Ordering::Acquire) {
+        reap_finished_workers(&client_threads);
         match listener.accept() {
             Ok((stream, _)) => {
+                if active_connections
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                        (active < MAX_CLIENT_CONNECTIONS).then_some(active + 1)
+                    })
+                    .is_err()
+                {
+                    let mut stream = stream;
+                    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+                    let _ = write_protocol_error(
+                        &mut stream,
+                        "server-busy",
+                        "SCP connection limit reached; retry later".to_string(),
+                        true,
+                    );
+                    continue;
+                }
                 let state = Arc::clone(&state);
-                let _ = thread::Builder::new()
+                let client_shutdown = Arc::clone(&shutdown);
+                let connection_count = Arc::clone(&active_connections);
+                match thread::Builder::new()
                     .name("scp-client".to_string())
                     .spawn(move || {
-                        if let Err(error) = serve_client(stream, &state) {
+                        let _connection = ActiveConnection(connection_count);
+                        if let Err(error) = serve_client(stream, &state, &client_shutdown) {
                             tracing::debug!(?error, "SCP client disconnected with error");
                         }
-                    });
+                    }) {
+                    Ok(worker) => lock_workers(&client_threads).push(worker),
+                    Err(error) => {
+                        active_connections.fetch_sub(1, Ordering::AcqRel);
+                        tracing::error!(?error, "failed to spawn SCP client worker");
+                    }
+                }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
@@ -243,9 +317,51 @@ fn accept_loop(listener: UnixListener, state: Arc<Mutex<ScpState>>, shutdown: Ar
             }
         }
     }
+    reap_finished_workers(&client_threads);
 }
 
-fn serve_client(mut stream: UnixStream, state: &Arc<Mutex<ScpState>>) -> io::Result<()> {
+fn lock_workers(
+    workers: &Arc<Mutex<Vec<JoinHandle<()>>>>,
+) -> std::sync::MutexGuard<'_, Vec<JoinHandle<()>>> {
+    workers.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!("SCP worker registry mutex was poisoned; recovering");
+        poisoned.into_inner()
+    })
+}
+
+fn reap_finished_workers(workers: &Arc<Mutex<Vec<JoinHandle<()>>>>) {
+    let finished = {
+        let mut workers = lock_workers(workers);
+        let mut finished = Vec::new();
+        let mut active = Vec::with_capacity(workers.len());
+        for worker in workers.drain(..) {
+            if worker.is_finished() {
+                finished.push(worker);
+            } else {
+                active.push(worker);
+            }
+        }
+        *workers = active;
+        finished
+    };
+    for worker in finished {
+        let _ = worker.join();
+    }
+}
+
+struct ActiveConnection(Arc<AtomicUsize>);
+
+impl Drop for ActiveConnection {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn serve_client(
+    mut stream: UnixStream,
+    state: &Arc<Mutex<ScpState>>,
+    shutdown: &AtomicBool,
+) -> io::Result<()> {
     // A client that stops reading fills its socket buffer, and a blocking write
     // then parks this thread indefinitely — including before it can reach the
     // event-queue overflow check that exists to disconnect exactly this client.
@@ -265,6 +381,7 @@ fn serve_client(mut stream: UnixStream, state: &Arc<Mutex<ScpState>>) -> io::Res
         &mut session_id,
         &mut bytes,
         &mut pending_fds,
+        shutdown,
     );
 
     close_all(&mut pending_fds);
@@ -298,15 +415,27 @@ fn serve_client_inner(
     session_id: &mut Option<SessionId>,
     bytes: &mut ReceiveBuffer,
     pending_fds: &mut Vec<i32>,
+    shutdown: &AtomicBool,
 ) -> io::Result<()> {
     let (peer_pid, peer_uid, _) = unix_socket::get_peer_credentials(stream.as_raw_fd())?;
+    let accepted_at = Instant::now();
 
-    loop {
+    while !shutdown.load(Ordering::Acquire) {
         // Two things can need this thread: the client sending a request, or
         // another thread queueing an event for it. Waiting on both is what lets
         // input and frame callbacks reach a client that is not talking.
         let readiness =
             unix_socket::poll_readable(stream.as_raw_fd(), sink.wake_fd(), POLL_TIMEOUT)?;
+
+        if session_id.is_none() && accepted_at.elapsed() >= HANDSHAKE_TIMEOUT {
+            write_protocol_error(
+                stream,
+                "handshake-timeout",
+                "Client did not authenticate before the handshake deadline".to_string(),
+                true,
+            )?;
+            break;
+        }
 
         if !drain_sink(stream, sink)? {
             break;
@@ -340,14 +469,14 @@ fn serve_client_inner(
         }
 
         while let Some(payload) = take_frame(bytes)? {
-            let message: ClientMessage = match serde_json::from_slice(&payload) {
+            let message = match ClientMessage::decode_wire(&payload) {
                 Ok(message) => message,
                 Err(error) => {
                     close_all(pending_fds);
                     write_frame(
                         stream,
                         &CompositorMessage::ProtocolError {
-                            code: "invalid-json".to_string(),
+                            code: "invalid-protobuf".to_string(),
                             message: error.to_string(),
                             fatal: true,
                         },
@@ -356,8 +485,8 @@ fn serve_client_inner(
                 }
             };
 
-            if let ClientMessage::Connect { pid, .. } = &message
-                && *pid != peer_pid
+            if let Some(pid) = connect_pid(&message)
+                && pid != peer_pid
             {
                 close_all(pending_fds);
                 write_frame(
@@ -369,9 +498,7 @@ fn serve_client_inner(
                 return Ok(());
             }
 
-            if matches!(message, ClientMessage::Connect { .. })
-                && !lock_state(state).peer_uid_is_admitted(peer_uid)
-            {
+            if is_connect(&message) && !lock_state(state).peer_uid_is_admitted(peer_uid) {
                 close_all(pending_fds);
                 write_frame(
                     stream,
@@ -384,29 +511,26 @@ fn serve_client_inner(
                 return Ok(());
             }
 
-            let received_fd = match &message {
-                message if carries_descriptor(message) && pending_fds.len() == 1 => {
-                    pending_fds.pop()
-                }
-                message if carries_descriptor(message) => {
+            let received_fds = match descriptor_count(&message) {
+                Some(expected) if pending_fds.len() == expected => std::mem::take(pending_fds),
+                Some(expected) => {
                     let count = pending_fds.len();
                     close_all(pending_fds);
                     write_protocol_error(
                         stream,
                         "invalid-fd-count",
-                        format!("this request requires one descriptor, received {count}"),
+                        format!("this request requires {expected} descriptor(s), received {count}"),
                         false,
                     )?;
                     continue;
                 }
-                _ if pending_fds.is_empty() => None,
-                _ => {
+                None if pending_fds.is_empty() => Vec::new(),
+                None => {
                     close_all(pending_fds);
                     write_protocol_error(
                         stream,
                         "unexpected-fd",
-                        "descriptors are only accepted with AttachBuffer and CreateShmPool"
-                            .to_string(),
+                        "descriptors are only accepted with buffer import requests".to_string(),
                         false,
                     )?;
                     continue;
@@ -416,7 +540,7 @@ fn serve_client_inner(
             let responses = {
                 let mut guard = lock_state(state);
                 let responses =
-                    guard.handle_transport_message(*session_id, message, received_fd, peer_uid);
+                    guard.handle_transport_message(*session_id, message, received_fds, peer_uid);
 
                 // Register this connection's outbound queue while still holding
                 // the lock that created the session. Releasing it first would
@@ -479,10 +603,30 @@ fn serve_client_inner(
 /// Both of these hand the compositor shared memory to read from. Every other
 /// request is refused a descriptor outright, so a client cannot smuggle one in
 /// alongside a message that has nowhere to put it.
-const fn carries_descriptor(message: &ClientMessage) -> bool {
+fn descriptor_count(message: &ClientMessage) -> Option<usize> {
+    match message {
+        ClientMessage::AttachBuffer { .. } | ClientMessage::CreateShmPool { .. } => Some(1),
+        ClientMessage::CreateDmabufBuffer { planes, .. } => planes
+            .iter()
+            .map(|plane| usize::try_from(plane.fd_index).ok()?.checked_add(1))
+            .try_fold(0, |highest, next| next.map(|next| highest.max(next))),
+        _ => None,
+    }
+}
+
+const fn connect_pid(message: &ClientMessage) -> Option<u32> {
+    match message {
+        ClientMessage::Connect { pid, .. } | ClientMessage::ConnectVersioned { pid, .. } => {
+            Some(*pid)
+        }
+        _ => None,
+    }
+}
+
+const fn is_connect(message: &ClientMessage) -> bool {
     matches!(
         message,
-        ClientMessage::AttachBuffer { .. } | ClientMessage::CreateShmPool { .. }
+        ClientMessage::Connect { .. } | ClientMessage::ConnectVersioned { .. }
     )
 }
 
@@ -609,7 +753,7 @@ fn write_protocol_error(
     )
 }
 
-pub fn write_frame<T: Serialize>(stream: &mut UnixStream, value: &T) -> io::Result<()> {
+pub fn write_frame<T: WireMessage>(stream: &mut UnixStream, value: &T) -> io::Result<()> {
     let frame = encode_frame(value)?;
     stream.write_all(&frame)
 }
@@ -624,13 +768,24 @@ pub fn write_frame<T: Serialize>(stream: &mut UnixStream, value: &T) -> io::Resu
 /// Public because it is the client half of [`ClientMessage::AttachBuffer`], the
 /// one request whose descriptor the compositor accepts: without it a client can
 /// name a buffer but never hand one over.
-pub fn write_frame_with_fd<T: Serialize>(
+pub fn write_frame_with_fd<T: WireMessage>(
     stream: &mut UnixStream,
     value: &T,
     fd: std::os::fd::RawFd,
 ) -> io::Result<()> {
+    write_frame_with_fds(stream, value, &[fd])
+}
+
+/// Write one frame with an ordered DMA-BUF plane descriptor array.
+///
+/// Plane fd_index values in the message address this exact SCM_RIGHTS array.
+pub fn write_frame_with_fds<T: WireMessage>(
+    stream: &mut UnixStream,
+    value: &T,
+    fds: &[std::os::fd::RawFd],
+) -> io::Result<()> {
     let frame = encode_frame(value)?;
-    let sent = unix_socket::sendmsg_with_fds(stream.as_raw_fd(), &frame, &[fd])?;
+    let sent = unix_socket::sendmsg_with_fds(stream.as_raw_fd(), &frame, fds)?;
     if sent != frame.len() {
         return Err(io::Error::new(
             io::ErrorKind::WriteZero,
@@ -643,8 +798,8 @@ pub fn write_frame_with_fd<T: Serialize>(
     Ok(())
 }
 
-fn encode_frame<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
-    let payload = serde_json::to_vec(value).map_err(io::Error::other)?;
+fn encode_frame<T: WireMessage>(value: &T) -> io::Result<Vec<u8>> {
+    let payload = value.encode_wire()?;
     if payload.is_empty() || payload.len() > MAX_FRAME_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -660,7 +815,7 @@ fn encode_frame<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
     Ok(frame)
 }
 
-pub fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> io::Result<T> {
+pub fn read_frame<T: WireMessage>(stream: &mut UnixStream) -> io::Result<T> {
     let mut length = [0_u8; 4];
     stream.read_exact(&mut length)?;
     let length = u32::from_be_bytes(length) as usize;
@@ -672,7 +827,7 @@ pub fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> io::Result<T>
     }
     let mut payload = vec![0_u8; length];
     stream.read_exact(&mut payload)?;
-    serde_json::from_slice(&payload).map_err(io::Error::other)
+    T::decode_wire(&payload)
 }
 
 fn close_all(fds: &mut Vec<i32>) {
@@ -757,5 +912,84 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read(&path).expect("read fixture"), b"keep");
         std::fs::remove_file(path).expect("remove regular file fixture");
+    }
+
+    #[test]
+    fn unauthenticated_connection_is_closed_after_the_handshake_deadline() {
+        let path = fixture_path("handshake-timeout");
+        let server = ScpServer::bind(path.clone()).expect("bind");
+        let mut client = UnixStream::connect(&path).expect("connect idle client");
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set timeout");
+
+        let response: CompositorMessage = read_frame(&mut client).expect("timeout response");
+        assert!(matches!(
+            response,
+            CompositorMessage::ProtocolError {
+                ref code,
+                fatal: true,
+                ..
+            } if code == "handshake-timeout"
+        ));
+        drop(server);
+    }
+
+    #[test]
+    fn server_shutdown_joins_workers_and_cleans_authenticated_sessions() {
+        let path = fixture_path("clean-shutdown");
+        let server = ScpServer::bind(path.clone()).expect("bind");
+        let state = server.state();
+        let mut client = UnixStream::connect(&path).expect("connect client");
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set timeout");
+        let app_id = std::fs::read_to_string(format!("/proc/{}/comm", std::process::id()))
+            .expect("read process identity")
+            .trim()
+            .to_string();
+        write_frame(
+            &mut client,
+            &ClientMessage::Connect {
+                app_id,
+                pid: std::process::id(),
+            },
+        )
+        .expect("send handshake");
+        let response: CompositorMessage = read_frame(&mut client).expect("connected response");
+        assert!(matches!(response, CompositorMessage::Connected { .. }));
+        assert_eq!(lock_state(&state).session_count(), 1);
+
+        drop(server);
+        assert_eq!(
+            lock_state(&state).session_count(),
+            0,
+            "server drop must wait for worker-owned session cleanup"
+        );
+    }
+
+    #[test]
+    fn dmabuf_descriptor_count_uses_the_highest_plane_index() {
+        let message = ClientMessage::CreateDmabufBuffer {
+            buffer_id: 1,
+            width: 64,
+            height: 64,
+            format: crate::scp::protocol::DmabufFormat::Nv12,
+            modifier: crate::scp::protocol::DRM_FORMAT_MOD_LINEAR,
+            planes: vec![
+                crate::scp::protocol::DmabufPlane {
+                    fd_index: 0,
+                    offset: 0,
+                    stride: 64,
+                },
+                crate::scp::protocol::DmabufPlane {
+                    fd_index: 1,
+                    offset: 4096,
+                    stride: 64,
+                },
+            ],
+            fds: Vec::new(),
+        };
+        assert_eq!(descriptor_count(&message), Some(2));
     }
 }

@@ -1,7 +1,7 @@
 # SOL ISO Build System
 
-This directory contains the complete CI/CD infrastructure for building bootable
-SOL OS ISO images.
+This directory contains the current development CI/CD path for bootable SOL OS
+ISO images. It is not the complete production Stage-0/recovery architecture.
 
 ## Architecture
 
@@ -16,11 +16,11 @@ The ISO build pipeline is split into 5 distinct stages:
 5. Boot Testing    → QEMU + OVMF smoke test
 ```
 
-Boot chain (no GRUB, no systemd, no dracut):
+Current development boot chain (no GRUB, no systemd, no dracut):
 
 ```
 OVMF (UEFI)
- └─ EFI/BOOT/BOOTX64.EFI            = sol-boot (signed UEFI application)
+ └─ EFI/BOOT/BOOTX64.EFI            = sol-boot development manager
      └─ EFI/SOL/slots/A/system.efi  = UKI (kernel, CONFIG_EFI_STUB)
          └─ kernel loads EFI/SOL/slots/A/initrd.img (busybox initramfs)
              └─ initramfs mounts /live/filesystem.squashfs (overlay root)
@@ -35,6 +35,12 @@ OVMF (UEFI)
                      └─ sol-settingsd / sol-notificationd / sol-portal
                         (D-Bus activated on demand)
 ```
+
+The external `initrd.img` is a development-image exception. The production
+contract uses a complete UKI containing kernel, initrd, immutable command line,
+and release metadata, rooted through a stable Stage-0 with independently
+addressable platform recovery. A successful ISO smoke boot does not prove that
+target topology.
 
 ## Quick Start
 
@@ -111,14 +117,16 @@ sudo dd if=build/iso/sol-*.iso of=/dev/sdX bs=4M status=progress
 
 SOL is a Linux Family OS, not a distribution. Its runtime is SOL-owned:
 
-- **bootloader** — `sol-boot` (boot/), a signed UEFI application with A/B
-  slots, bounded trials, and verified UKI transfer (ADR-0026);
+- **development boot manager** — `sol-boot` (boot/), a signed UEFI application
+  with bounded deployment trials and UKI transfer; target Stage-0, independent
+  recovery, authenticated health, and anti-rollback remain separate work;
 - **init** — `sol-init` (services/sol-init), the SOL daemon supervisor with
   dependency ordering, restart policies, and `.daemon` definitions;
 - **initramfs** — a small busybox initramfs that locates the live squashfs
   and hands control to `/sbin/init`;
 - **services** — every SOL service ships and is supervised by sol-init.
 
-The kernel still carries CONFIG_CMDLINE with the initrd path because sol-boot
-transfers control without a command line (anonymous buffer LoadImage); the
-initrd file itself lives on the SOL ESP next to the UKI.
+The development kernel still carries `CONFIG_CMDLINE` with an external initrd
+path because the current manager transfers control without a loaded-image
+command line. This path is not the production verified-boot contract and must
+not be used as evidence that the final indivisible UKI is complete.

@@ -29,10 +29,10 @@ cargo check --workspace
 # Build entire workspace
 cargo build --workspace
 
-# Run the native SCP compositor service
+# Run the native SCP compositor with DRM/KMS backend (default)
 cargo run -p sol-compositor
 
-# `--headless` remains accepted for CI compatibility; SCP is headless today
+# Run compositor in headless mode (for testing/CI)
 cargo run -p sol-compositor -- --headless
 
 # Test the compositor
@@ -44,8 +44,14 @@ cargo test --workspace
 
 ## Development Environment
 
-The active compositor build is SCP-only and headless. Renderer, input and
-real-hardware DRM/KMS integration are pending native implementations.
+The compositor supports two backend modes:
+
+- **DRM/KMS (default)**: Runs on real hardware, requires `/dev/dri/card0` access
+- **Headless (`--headless`)**: Software-only mode for testing and CI
+
+The active compositor build includes both backends. DRM/KMS integration scans out to
+real displays via dumb buffers and page flipping. Input and hardware event handling
+are pending native implementations.
 
 ## Architecture (Big Picture)
 
@@ -67,14 +73,20 @@ Linux Kernel  systemd/kernel/drivers
 
 ### Compositor (`compositor/`)
 Core is `src/scp/state.rs`, which owns SCP protocol state and object management. Key components:
+- `main.rs`: Backend selection and presentation loop (DRM/KMS or headless)
+- `drm_backend.rs`: DRM/KMS backend for real hardware scanout via dumb buffers
 - `scp/state.rs`: `ScpState` - SCP protocol handlers and state
-- `main.rs`: SCP service lifetime
 - `scp/`: SOL Compositor Protocol implementation (capability-based security)
+- `scp/compose.rs`: Software composition of surfaces into output framebuffers
 - `scp/surface.rs`: SCP surface, toplevel, and layer-surface lifecycle
 - `scp/input.rs`: native input focus and event routing state
 - `scp/output.rs`: native output descriptions and scale state
 
 **Protocol**: SOL uses SCP (SOL Compositor Protocol) exclusively. No Wayland compatibility (see ADR-0028).
+
+**Backend**: The compositor uses software composition (CPU blending) and DRM dumb buffers for scanout.
+This provides portability (no GPU driver dependencies), determinism (reproducible pixel output), and
+simplicity (no shader compilation or GPU command submission). Input handling is pending.
 
 ### Shell (`shell/`)
 Desktop shell (top bar, dock, launcher). Runs as a separate process from the compositor for crash safety. Communicates via SCP layer-shell capability and D-Bus IPC (ADR-0006). Currently a scaffold/placeholder.

@@ -1,7 +1,7 @@
 # SOL Roadmap
 
 > **Status:** Living document — this file is refined as each Phase closes.
-> **Last reviewed:** 2026-08-23, against the PRD, OS Platform Definition,
+> **Last reviewed:** 2026-09-02, against the PRD, OS Platform Definition,
 > Shell contract, and accepted ADRs through ADR-0025.
 > **Basis:** [PRD §38 Development Phases](PRD.md) define the goal and success
 > criterion for each Phase.
@@ -41,13 +41,14 @@ normative acceptance gate.
 | 0 | Foundation | Native SCP session | Complete an authenticated SCP surface/toplevel round trip | ✅ Headless protocol foundation accepted |
 | 1 | Desktop Core | Visible native SCP desktop | SOL runs a visible, input-capable SCP session on supported hardware | ⏳ Native renderer/input/output closure pending |
 | 2 | SolKit | Native app framework | Build an app with native SOL look and interaction entirely in SolKit | ⏳ In progress (real-platform closure pending) |
-| 3 | First-party Applications | First-party apps | The three first-party apps share a unified UX | ⏳ In progress |
+| 3 | Initial First-party Applications | Core first-party apps | Files, Terminal, and Settings share a unified UX | ⏳ In progress |
 | 4 | Shell Experience | Complete desktop interaction model | SOL forms a complete, coherent desktop interaction model | ⏳ In progress |
 | 5 | Daily Driver | Long-term daily use | Developers can use SOL as their primary desktop long-term | ⏳ In progress (foundations) |
 | 6 | Developer Platform | Ecosystem & SDK stability | Third-party devs build high-quality native apps without knowing SOL internals | ⏳ In progress |
-| 7 | OS Foundation | Bootable and recoverable SOL system | Failed boot/recovery/deployment trials retain a firmware-visible known-good path | 🔲 Planned |
+| 7 | OS Foundation | Bootable and recoverable SOL system | Failed manager/deployment trials retain a boot path, and recovery does not depend on the manager it repairs | 🔲 Planned |
 | 8 | Native App Platform | Transactional `.app`, explicit permission, and managed account platform | Compatible app resolution and coordinator-atomic grants survive rollback/crash without authority or data rollback | 🔲 Planned |
 | 9 | Runtime & Ecosystem | Compact apps and coherent adaptive materials | External apps use major/revision/feature runtime contracts without weakening isolation or accessibility | 🔲 Planned |
+| 10 | Professional Applications | Hyperion, Phoebe, and Iapetus | Production-scale AI development and creative workflows meet professional quality, safety, and performance gates | 🔲 Planned |
 
 > **OS rebaseline (2026-08-22):** Phases 0–6 describe the desktop substrate and
 > remain useful engineering history. SOL is now a complete Linux-kernel OS.
@@ -115,9 +116,10 @@ removes every inherited completion claim outside the explicitly audited Phase
 | 4 | Native Dock/Launcher/Overview/Notification surfaces, Shell IPC, live thumbnails, global menu/status/Live Capsule, and real gesture input | Complete desktop interaction model |
 | 5 | Physical hardware matrix, suspend/resume, display hotplug/scaling, native data transfer, capture, IME, and authorized system writes | Daily-driver claim |
 | 6 | Published/versioned SDK, external consumer build, migration/API docs, debugger and native `.app` packaging path | Independent third-party development claim |
-| 7 | Reproducible signed image plus fault-injected boot/update/recovery trials on the first hardware target | Recoverable OS image |
+| 7 | Reproducible signed image plus deterministic and OVMF fault-injected Stage-0/manager/deployment/recovery trials | Recoverable OS image |
 | 8 | Transactional `.app` activation plus kernel/broker enforcement and coordinator-atomic permission/account tests | Native application trust boundary |
 | 9 | Stable runtime descriptor/ABI/IPC, external signed app proof, compatibility conformance, and material frame/accessibility gates | Runtime/ecosystem release |
+| 10 | Shared pro-app foundations plus production-scale Hyperion/Phoebe/Iapetus workflow, recovery, performance, color, AI, extension, and interchange validation | Professional first-party application release |
 
 ### Delivery tracks and dependency gates
 
@@ -128,9 +130,10 @@ named gate.
 | Track | Execution order | Merge gate |
 |---|---|---|
 | Desktop closure | Phase 2 → Phases 3/4 → Phase 5 → Phase 6 external proof | Phase 3/4 native surfaces use the same platform-validated SolKit and Shell contracts |
-| OS trust | M7.1 formats → M7.2 deployment state machine → M7.3 boot/recovery → M7.4 hardware release | No artifact is called known-good before an authenticated trial and health gate |
+| OS trust | M7.1 trust/formats → M7.2 deployment state machine → M7.3 Stage-0/recovery → M7.4 release evidence | No artifact is called known-good before authenticated health, data compatibility, and rollback-index gates |
 | App trust | M8.1 bundle/store → M8.2 activation → M8.3 security → M8.4 accounts → M8.5 hardening | App ID, publisher, bundle hash, process generation, grants, and leases remain correlated end to end |
 | Runtime/ecosystem | M9.1 runtime contract → M9.2 SDK delivery → M9.3 compatibility; M9.4 material may proceed in parallel | M9.1 descriptor schema is required by M8.2 resolution; M8 security/package services are required by the external-app release proof |
+| Professional apps | M10.1 shared foundations → M10.2 Hyperion / M10.3 Phoebe / M10.4 Iapetus in parallel → M10.5 release gate | Phase 10 consumes the released runtime, sandbox, GPU/media, account, background-task, and extension contracts from Phases 5–9 |
 
 The OS MVP is the first integrated release slice. It joins the Phase 5 desktop
 baseline with M7 recovery, M8 package/security/account enforcement, and one
@@ -800,73 +803,87 @@ claim that the unavailable SCP display and assistive-technology environment pass
 ## Phase 7 — OS Foundation
 
 > **Goal:** boot, update, validate, roll back, and recover a SOL-owned system
-> image on supported x86-64 UEFI hardware.
+> image on conforming x86-64 UEFI without a curated certification matrix.
 
-### M7.1 — Formats, trust roots, and reproducibility
+### M7.1 — Trust topology, formats, and reproducibility
 
-- [S0] Close PRD §41 decisions #13, #22, and #23 for release channels/upstream
-      cadence, boot measurement/key enrollment/EFI encoding, and system-image
-      filesystem/delta encoding without weakening ADR-0019 invariants.
-- [S0] Finish the versioned canonical schema set for deployment manifests,
-      boot/recovery trial records, slot state, boot-success reports, and
-      revocation metadata, using the implemented deployment manifest as the
-      first foundation.
+- [S0] Select the minimal Stage-0 implementation and EFI entry layout. Platform
+      recovery must be firmware-addressable without a working `sol-boot`, and a
+      signed external recovery path must cover ESP/storage loss.
+- [S0] Close PRD §41 decisions #13, #22, and #23 for release channels,
+      key enrollment, measured boot, replay-resistant rollback storage, and
+      system-image encoding without weakening ADR-0019 invariants.
+- [S0] Finish distinct canonical schemas for manager/recovery trials,
+      deployment placement, Android-like priority/bootable/tries/successful
+      state, authenticated health checkpoints, revocation, and rollback epochs.
 - [S2] Define allocation-free format-1 deployment state and boot-success
       encodings with strict canonical parsing, monotonic redundant-copy
       sequencing, CRC32 torn-write detection, and byte-stable migration
-      fixtures. Boot/recovery authority and revocation schemas remain open.
-- [S2] Extend the installed deployment schema for the ADR-0026 UKI digest,
-      logical kernel/initrd identities, dm-verity root hash, and slot-specific
-      root identity without reinterpreting manifest format 1.
+      fixtures. The implemented CRC format is torn-write detection only and is
+      not the production state authenticator or anti-replay mechanism.
+- [S2] Extend the installed deployment schema for a content identity independent
+      of A/B placement, complete UKI digest, logical kernel/initrd identities,
+      dm-verity root, key epoch, security version, and compatibility constraints
+      without reinterpreting manifest format 1.
 - [S2] `sol-image` manifest foundation: reproducible deployment manifests bind
-      each slot and generation to the kernel, initrd, root-image SHA-256
-      digest/length, and sorted runtime major/revision/feature descriptors.
+      the current development slot and generation to kernel, initrd, root-image
+      SHA-256 digest/length, and sorted runtime major/revision/feature
+      descriptors.
       Canonical parsing, atomic output, and mutation fixtures reject drift in
       every bound artifact; signing, final image/UEFI encoding, and composition
       remain separate gates.
 - [S0] Produce an inspectable build manifest/SBOM and a reproducibility report
       from two isolated builds; document any allowed non-deterministic fields.
 
-### M7.2 — System deployment transaction
+### M7.2 — Deployment transaction, health, and rollback
 
 - [S0] Implement the `resolve → fetch → verify → stage → validate → commit`
       transaction with the inactive slot written first and its manifest
       committed last.
-- [S2] `sol-boot-core` policy foundation: firmware-independent strong types and
-      deterministic A/B selection consume each bounded trial attempt before
-      transfer, bind promotion to the exact slot/generation/attempt, retain a
-      known-good fallback, and select non-graphical recovery when required.
-      The durable deployment schema and exhaustive torn-write host harness are
-      implemented; adapter integration and authority-copy trials remain open.
+- [S2] `sol-boot-core` remains the firmware-independent deployment selector:
+      consume each trial before transfer and bind observations to the exact
+      deployment/generation/attempt. It is not evidence that manager self-
+      recovery, report authentication, or anti-rollback is complete.
 - [S0] `sol-boot` verifies artifacts, selects only a complete signed deployment,
       enforces bounded retry, and falls back to a retained known-good slot.
-- [S0] `sol-boot` selects an exact EDID-preferred GOP mode when available,
-      renders one bounded static SOL frame, and invokes the selected signed UKI
-      without clearing or changing the mode again.
-- [S0] Early userspace reports authenticated slot, generation, and system version;
-      a verified image becomes known-good only after the health gate succeeds.
-- [S0] An initrd DRM splash preserves the boot surface until the native driver
-      and compositor have prepared a complete replacement frame; routine boot
-      logs never take over the graphical console.
+- [S0] Production uses one complete UKI containing kernel, initrd, immutable
+      command line, and release metadata; an external-initrd development ISO is
+      not production verified-boot evidence.
+- [S0] `sol-boot` may draw one static centered mark in the unchanged current GOP
+      mode. It never reads EDID, chooses a mode, or calls `SetMode()`; graphics
+      failure is ignored and Linux DRM owns native resolution and interaction.
+- [S0] Early userspace reports an authenticated measured identity and reaches
+      distinct verified-root, repairability, shared-data compatibility, and
+      promotion checkpoints for the exact unpredictable attempt.
+- [S0] Advance the replay-resistant security rollback index only after
+      promotion. A failed unpromoted trial must still boot the retained version.
+- [S0] Irreversible shared-data or firmware migrations happen after the rollback
+      barrier or use a snapshot/versioning contract the retained image can read.
 - [S0] Power loss, partial download/write, signature failure, corrupt manifest,
       failed health gate, and stale/replayed boot-success reports leave the
       previous deployment selected and user data unchanged.
 
-### M7.3 — Redundant boot and recovery authority
+### M7.3 — Stage-0, manager, and independent recovery
 
-- [S0] Ship independently addressable current/fallback signed `sol-boot` copies
-      and independently addressable current/fallback recovery copies.
-- [S0] Implement two-phase boot/recovery updates: write inactive copy, verify,
-      register one-shot trial, then promote or return through a firmware-visible
-      path to the retained copy.
-- [S0] Recovery boots without the compositor or Shell and can verify, repair, or
-      reinstall a deployment while preserving or explicitly erasing user data.
-- [S0] Garbage collection retains an independent boot, recovery, and deployment
-      fallback until its replacement has passed the corresponding trial gate.
+- [S0] Ship a stable signed Stage-0 that can select retained/trial signed manager
+      copies and automatically reach platform recovery when neither runs.
+- [S0] Keep platform recovery independently firmware-addressable. It can repair
+      Stage-0, the ESP, managers, and deployment state without executing the
+      manager being repaired; signed external recovery covers device loss.
+- [S0] Support automatic exhaustion, durable software requests, and a firmware
+      or physical manual recovery action. A request is acknowledged only after
+      recovery starts, so power loss cannot silently consume it.
+- [S0] Implement separate two-phase manager and recovery updates: write inactive,
+      verify, register one-shot trial, then promote or retain the old copy.
+- [S0] Deployment-paired recovery boots without the compositor or Shell and can
+      repair its compatible deployment/data without implicitly lowering another
+      deployment's trust policy.
+- [S0] Garbage collection retains a manager, recovery, and deployment fallback
+      until its replacement has passed the corresponding trial gate.
 
-### M7.4 — Installation and hardware release gate
+### M7.4 — Installation and release evidence
 
-- [S0] Installer for the first x86-64 UEFI target with explicit disk layout,
+- [S0] Generic x86-64 UEFI installer with explicit disk layout,
       encryption, Secure Boot/key enrollment, recovery-key, reinstall, and data
       preservation behavior.
   - [S2] **Live-session welcome surface:** `sol-installer` provides a native,
@@ -875,22 +892,23 @@ claim that the unavailable SCP display and assistive-technology environment pass
         concise preview of disk, encryption/Secure Boot, and final-review
         decisions. Disk discovery and the installation transaction remain
         outside this bounded UI deliverable.
-- [S0] Hardware CI covers clean install; interrupted EFI/recovery/deployment
-      update; corrupt image; failed trial boot; firmware-variable failure; power
-      loss at every commit boundary; automatic fallback; manual recovery; and
-      user-data preservation.
-- [S0] Certified graphics fixtures record GOP/EDID selection and native-driver
-      takeover. After the first SOL frame, resolution remains stable and the
-      compositor first attempts a same-content atomic framebuffer replacement
-      without allowing a modeset; degraded hardware records the fallback.
-- [S0] Publish a signed release-evidence manifest recording artifacts, test matrix,
-      hardware/firmware identifiers, failures, waivers, and retained fallbacks.
+- [S0] Deterministic fault injection and OVMF cover clean install; interrupted
+      manager/recovery/deployment update; corrupt image; failed trial; firmware-
+      variable failure; power loss at every commit boundary; stale/replayed
+      state; automatic fallback; manual recovery; and data preservation.
+- [S0] Boot graphics tests prove only that missing/broken GOP cannot affect boot
+      policy and that optional static drawing never uses EDID or `SetMode()`.
+      SOL maintains no certified boot-graphics hardware matrix and makes no
+      native-resolution, flicker-free, or seamless-handoff release claim.
+- [S0] Publish a signed release-evidence manifest recording exact artifacts,
+      deterministic/OVMF coverage, known failures, waivers, and retained paths.
 
 ### M7 dependencies and non-claims
 
-- **Inputs:** ADR-0019 and `os-platform.md` §3–4; a frozen first hardware target,
-  trust-root/key-enrollment policy, disk layout, and image encoding are required
-  before M7.4 can close.
+- **Inputs:** ADR-0019 and `os-platform.md` §3–4; trust-root/key-enrollment
+  policy, disk layout, image encoding, Stage-0, and recovery entry topology are
+  required before M7.4 can close. A manually curated certified hardware matrix
+  is explicitly not an input.
 - **Parallelism:** image composition and state-machine fault injection can run
   without the graphical desktop; recovery UX must not depend on Phase 4.
 - **Non-claim:** a QEMU boot or signature check alone does not prove firmware
@@ -898,14 +916,15 @@ claim that the unavailable SCP display and assistive-technology environment pass
 
 ### M7 success criterion
 
-> A failed staged EFI, recovery, or system-deployment update cannot strand the
-> machine: firmware can still reach a retained `sol-boot`, `sol-boot` can still
-> reach a signed known-good deployment and independent recovery, and user data
-> is unchanged.
+> A failed staged manager, recovery, or deployment update cannot remove every
+> authorized path: Stage-0 can reach a retained manager or platform recovery,
+> recovery does not depend on the manager it repairs, security rollback remains
+> blocked, and shared data remains usable by the retained deployment.
 
 **Required closure evidence:** one clean install, one successful update, and the
-full failure matrix above must pass on the first supported hardware target as
-well as in deterministic VM/fault-injection coverage.
+full failure matrix above pass in deterministic and OVMF fault-injection
+coverage. Real-machine results are useful smoke evidence, not a certified boot-
+graphics compatibility class.
 
 ---
 
@@ -1124,6 +1143,80 @@ material render paths.
 
 ---
 
+## Phase 10 — Professional First-party Applications
+
+> **Goal:** ship a professional application tier: Hyperion, an ultra-flagship
+> AI IDE; Phoebe, a Lightroom-class photo workflow; and Iapetus, a
+> Photoshop-class image editor (PRD §24 and §27A–27C).
+
+### M10.1 — Shared professional application foundations
+
+- [S0] Publish versioned public contracts for large documents, recoverable
+      history/autosave, background jobs, GPU compute/tiles, color management,
+      model execution/provenance, extension isolation, and project asset links.
+- [S0] Establish shared observability and resource budgets for memory, GPU,
+      storage, model downloads, cancellation, crash recovery, and thermal or
+      battery pressure; degradation must preserve document correctness.
+- [S0] Keep application-specific workflow and document models separate while
+      moving genuinely shared platform behavior into SolKit/SOL Runtime.
+
+### M10.2 — Hyperion: ultra-flagship professional AI IDE
+
+- [S0] Deliver large-repository multi-language editing, LSP, debugger, tests,
+      profiler, source control, terminals, tasks, and local/remote workspaces.
+- [S0] Make repository-aware AI planning, editing, building, testing, and
+      debugging first-class, with reviewable plans/diffs/tool calls, explicit
+      authority, provenance, checkpoints, and isolated parallel agents.
+- [S0] Support local/cloud model providers and sandboxed extensions without
+      giving either ambient filesystem, process, network, account, or secret
+      access.
+
+### M10.3 — Phoebe: professional photo workflow
+
+- [S0] Deliver color-managed RAW ingestion, catalog/search, culling, metadata,
+      collections, non-destructive adjustments, masks, presets, history,
+      virtual copies, batch editing, and deterministic export recipes.
+- [S0] Preserve immutable originals and portable edit metadata; GPU previews,
+      background export, AI denoise/selection/search, backup, and recovery must
+      remain cancellable, attributable, and restart-safe.
+
+### M10.4 — Iapetus: professional image editing
+
+- [S0] Deliver layers, masks, blend modes, adjustment layers, transforms,
+      selections, painting, paths, typography, retouching, filters, automation,
+      and recoverable history on tiled large canvases.
+- [S0] Validate high-bit-depth, wide-gamut, HDR, and print workflows; sandboxed
+      brushes/filters/scripts and AI selection/generation/fill/restoration are
+      versioned, attributable, editable operations.
+- [S0] Import/export common raster, vector, camera, and layered formats with a
+      published compatibility matrix and explicit unsupported-feature handling.
+
+### M10.5 — Professional release gate
+
+- [S0] Run production-scale reference projects through complete edit, save,
+      crash/restart, export/build/test, collaboration/interchange, extension,
+      update/rollback, and permission-revocation paths.
+- [S0] Publish supported hardware/model/file-format matrices and measured
+      latency, memory, GPU, color-accuracy, accessibility, recovery, and output-
+      fidelity results; no benchmark-class positioning closes on feature count
+      or screenshots alone.
+
+### M10 success criterion
+
+> A professional can complete and recover a production-scale software project
+> in Hyperion or imaging project in Phoebe/Iapetus. AI actions are attributable
+> and reviewable, promised creative edits are non-destructive, extensions are
+> sandboxed, and large-project performance, color, accessibility, document
+> interchange, and output fidelity pass the published release matrix.
+
+**Dependencies and non-claims:** Phase 10 is post-MVP and depends on the
+released Phases 5–9 platform contracts. The three products may proceed in
+parallel after M10.1 stabilizes. Naming a feature, embedding a model, opening a
+sample image, or rendering a large file once does not establish professional
+readiness.
+
+---
+
 ## Cross-cutting: technical debt & governance
 
 | Topic | Starts | Notes |
@@ -1138,15 +1231,16 @@ material render paths.
 | Fluid material | Phase 2/4/9 | Semantic tokens now; protected compositor effects and fallback QA later |
 | Shell spatial grammar | Phase 4 | ADR-0025 fixes Dock/menu/window-control/right-zone placement and Live Capsule trust |
 | Toolkit adapters | Phase 9 | Bundled private runtime + explicit SOL adapter; capability equality, not pixel-identical widgets |
-| Boot / deployment trust | Phase 7 | Redundant EFI/recovery trial state, slot-bound signed deployments, boot success, and fallback are one contract |
+| Boot / deployment trust | Phase 7 | Stage-0, manager trials, independent recovery, deployment placement, authenticated health, anti-rollback, and data barriers have separate state joined by explicit commits |
 | Package identity | Phase 8 | `.app` App ID/publisher/hash must remain correlated from repository to process |
 | Runtime compatibility | Phase 9 | Stable major slots; C-compatible ABI + versioned IPC, never internal Rust ABI |
+| Professional documents and AI | Phase 10 | Recoverable large-document history, color/GPU correctness, model provenance, sandboxed extensions, and explicit authority are shared release gates |
 | Hardware test matrix | throughout | AMD → Intel → NVIDIA; laptop/desktop; single/multi-display; HiDPI (§33) |
-| Fault injection | Phases 7–9 | Exercise every persistent transaction boundary, service restart, stale generation, and rollback path before release |
-| Release evidence | Phases 6–9 | Signed artifact inventory, exact test matrix, hardware/runtime identifiers, known failures, and explicit waivers |
+| Fault injection | Phases 7–10 | Exercise every persistent transaction boundary, service restart, stale generation, and rollback path before release |
+| Release evidence | Phases 6–10 | Signed artifact inventory, exact test matrix, hardware/runtime identifiers, known failures, and explicit waivers |
 | Accessibility / localization | throughout | Real AT, keyboard, text scale, contrast, reduced motion/transparency, RTL internals, narrow/scaled/multi-output layouts |
 
-## Long-term platform direction (after Phase 9, PRD §42)
+## Long-term platform direction (after Phase 10, PRD §42)
 
 ```text
 Linux
@@ -1173,6 +1267,17 @@ SOL Applications → Third-party Applications
 
 ## Revision history
 
+- **2026-09-02** — Rebased Phase 7 around a stable Stage-0, independently
+  reachable recovery, Android-like deployment slot state, promotion-gated
+  anti-rollback, shared-data rollback barriers, indivisible production UKIs,
+  and best-effort current-GOP presentation. Removed native-resolution,
+  seamless-boot, and certified boot-graphics matrix requirements.
+
+- **2026-09-02** — Added the post-MVP professional first-party application
+  tier: Hyperion (ultra-flagship professional AI IDE), Phoebe (Lightroom-class
+  photo workflow), and Iapetus (Photoshop-class image editor), with shared
+  foundations and measurable Phase 10 release gates.
+
 - **2026-08-24** — Reopened Phase 1 after auditing implementation against its
   daily-use success criterion. Replaced binary completion semantics with S0–S5
   maturity stages and a uniform Definition of Done; added the then-normative,
@@ -1188,7 +1293,7 @@ SOL Applications → Third-party Applications
 
 - **2026-08-22** — Rebased SOL from a desktop platform into a
   complete Linux-kernel OS. Added Phases 7–9 for redundant trial-updated
-  `sol-boot`/recovery, slot-bound signed A/B deployments,
+  Stage-0/`sol-boot`/independent recovery, content-identified A/B deployments,
   `sol-pkg`/`sol-packaged`, self-contained `.app` bundles, default-deny sandbox
   permissions, and side-by-side SOL Runtime majors.
 

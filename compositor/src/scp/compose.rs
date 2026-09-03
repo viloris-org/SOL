@@ -26,7 +26,7 @@
 use crate::scp::{
     protocol::{BufferFormat, Rect, SessionId, SurfaceId},
     stack::WindowStack,
-    surface::{CapturePolicy, SurfaceBuffer},
+    surface::{CapturePolicy, SurfaceBuffer, SurfaceBufferKind},
 };
 use std::os::fd::RawFd;
 
@@ -85,7 +85,10 @@ impl Framebuffer {
     /// Returns `None` for a degenerate or implausibly large output rather than
     /// attempting the allocation.
     pub fn filled(width: i32, height: i32, color: Rgba8) -> Option<Self> {
-        if width <= 0 || height <= 0 || width > MAX_OUTPUT_DIMENSION || height > MAX_OUTPUT_DIMENSION
+        if width <= 0
+            || height <= 0
+            || width > MAX_OUTPUT_DIMENSION
+            || height > MAX_OUTPUT_DIMENSION
         {
             return None;
         }
@@ -118,6 +121,38 @@ impl Framebuffer {
     /// Row-major RGBA8 bytes.
     pub fn pixels(&self) -> &[u8] {
         &self.pixels
+    }
+
+    /// Copy a clipped rectangle into a tightly-packed framebuffer.
+    pub fn cropped(&self, rect: Rect) -> Option<Self> {
+        let left = rect.x.max(0).min(self.width as i32);
+        let top = rect.y.max(0).min(self.height as i32);
+        let right = rect
+            .x
+            .saturating_add(rect.width)
+            .max(0)
+            .min(self.width as i32);
+        let bottom = rect
+            .y
+            .saturating_add(rect.height)
+            .max(0)
+            .min(self.height as i32);
+        if left >= right || top >= bottom {
+            return None;
+        }
+        let width = u32::try_from(right - left).ok()?;
+        let height = u32::try_from(bottom - top).ok()?;
+        let row_bytes = width as usize * BYTES_PER_PIXEL;
+        let mut pixels = Vec::with_capacity(row_bytes * height as usize);
+        for y in top..bottom {
+            let start = (y as usize * self.width as usize + left as usize) * BYTES_PER_PIXEL;
+            pixels.extend_from_slice(self.pixels.get(start..start + row_bytes)?);
+        }
+        Some(Self {
+            width,
+            height,
+            pixels,
+        })
     }
 
     /// Read one pixel, or `None` when the coordinate is outside the image.
@@ -163,7 +198,10 @@ impl Framebuffer {
         let left = rect.x.max(0);
         let top = rect.y.max(0);
         let right = rect.x.saturating_add(painted_width).min(self.width as i32);
-        let bottom = rect.y.saturating_add(painted_height).min(self.height as i32);
+        let bottom = rect
+            .y
+            .saturating_add(painted_height)
+            .min(self.height as i32);
         if left >= right || top >= bottom {
             return;
         }
@@ -178,8 +216,7 @@ impl Framebuffer {
                 let Some(pixel) = source.pixel_in(source_row, source_x) else {
                     continue;
                 };
-                let index =
-                    (y as usize * self.width as usize + x as usize) * BYTES_PER_PIXEL;
+                let index = (y as usize * self.width as usize + x as usize) * BYTES_PER_PIXEL;
                 let Some(destination) = self.pixels.get_mut(index..index + BYTES_PER_PIXEL) else {
                     continue;
                 };
@@ -209,8 +246,7 @@ impl Framebuffer {
         let value = color.as_bytes();
         for y in top..bottom {
             for x in left..right {
-                let index =
-                    (y as usize * self.width as usize + x as usize) * BYTES_PER_PIXEL;
+                let index = (y as usize * self.width as usize + x as usize) * BYTES_PER_PIXEL;
                 if let Some(destination) = self.pixels.get_mut(index..index + BYTES_PER_PIXEL) {
                     destination.copy_from_slice(&value);
                 }
@@ -376,8 +412,9 @@ impl<'a> SurfacePixels<'a> {
         if x < 0 || x >= self.width {
             return None;
         }
-        let start = usize::try_from(x).ok()?.checked_mul(BYTES_PER_PIXEL)?;
-        let pixel = row.get(start..start.checked_add(BYTES_PER_PIXEL)?)?;
+        let bytes_per_pixel = usize::try_from(self.format.bytes_per_pixel()).ok()?;
+        let start = usize::try_from(x).ok()?.checked_mul(bytes_per_pixel)?;
+        let pixel = row.get(start..start.checked_add(bytes_per_pixel)?)?;
         Some(decode(self.format, pixel))
     }
 }
@@ -391,6 +428,18 @@ fn decode(format: BufferFormat, pixel: &[u8]) -> Rgba8 {
         BufferFormat::Argb8888 => Rgba8(pixel[2], pixel[1], pixel[0], pixel[3]),
         BufferFormat::Xrgb8888 => Rgba8(pixel[2], pixel[1], pixel[0], u8::MAX),
         BufferFormat::Rgba8888 => Rgba8(pixel[0], pixel[1], pixel[2], pixel[3]),
+        BufferFormat::Rgb565 => {
+            let packed = u16::from_le_bytes([pixel[0], pixel[1]]);
+            let red = ((packed >> 11) & 0x1f) as u8;
+            let green = ((packed >> 5) & 0x3f) as u8;
+            let blue = (packed & 0x1f) as u8;
+            Rgba8(
+                (red << 3) | (red >> 2),
+                (green << 2) | (green >> 4),
+                (blue << 3) | (blue >> 2),
+                u8::MAX,
+            )
+        }
     }
 }
 
@@ -398,6 +447,8 @@ fn decode(format: BufferFormat, pixel: &[u8]) -> Rgba8 {
 struct Mapping {
     address: *mut libc::c_void,
     length: usize,
+    data_offset: usize,
+    dma_sync_fd: Option<RawFd>,
 }
 
 impl Mapping {
@@ -417,11 +468,41 @@ impl Mapping {
             buffer.stride,
             buffer.format.bytes_per_pixel(),
         )?;
-        crate::scp::buffer::validate_descriptor(buffer.fd, required)?;
-        Self::read_only(buffer.fd, required)
+        let extent = buffer
+            .offset
+            .checked_add(required)
+            .ok_or("buffer offset and byte length overflow")?;
+        match buffer.kind {
+            SurfaceBufferKind::Shm => {
+                crate::scp::buffer::validate_descriptor(buffer.fd, extent)?;
+            }
+            SurfaceBufferKind::Dmabuf => {
+                if buffer.fd < 0 {
+                    return Err("DMA-BUF requires the native GPU importer".to_string());
+                }
+                let actual = crate::scp::unix_socket::fd_size(buffer.fd)
+                    .map_err(|error| format!("Cannot size DMA-BUF descriptor: {error}"))?;
+                if actual > 0 && u64::try_from(extent).unwrap_or(u64::MAX) > actual {
+                    return Err(format!(
+                        "DMA-BUF needs {extent} bytes but its descriptor has {actual}"
+                    ));
+                }
+            }
+        }
+        Self::read_only(
+            buffer.fd,
+            extent,
+            buffer.offset,
+            (buffer.kind == SurfaceBufferKind::Dmabuf).then_some(buffer.fd),
+        )
     }
 
-    fn read_only(fd: RawFd, length: usize) -> Result<Self, String> {
+    fn read_only(
+        fd: RawFd,
+        length: usize,
+        data_offset: usize,
+        dma_sync_fd: Option<RawFd>,
+    ) -> Result<Self, String> {
         if length == 0 {
             return Err("refusing to map an empty buffer".to_string());
         }
@@ -444,23 +525,59 @@ impl Mapping {
                 std::io::Error::last_os_error()
             ));
         }
-        Ok(Self { address, length })
+        if let Some(fd) = dma_sync_fd
+            && let Err(error) = dma_buf_sync(fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ)
+        {
+            unsafe {
+                libc::munmap(address, length);
+            }
+            return Err(error);
+        }
+        Ok(Self {
+            address,
+            length,
+            data_offset,
+            dma_sync_fd,
+        })
     }
 
     fn as_slice(&self) -> &[u8] {
         // SAFETY: `address` is a live mapping of exactly `length` readable
         // bytes, and the returned slice cannot outlive `self`.
-        unsafe { std::slice::from_raw_parts(self.address.cast::<u8>(), self.length) }
+        let mapping = unsafe { std::slice::from_raw_parts(self.address.cast::<u8>(), self.length) };
+        &mapping[self.data_offset..]
     }
 }
 
 impl Drop for Mapping {
     fn drop(&mut self) {
+        if let Some(fd) = self.dma_sync_fd {
+            let _ = dma_buf_sync(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
+        }
         // SAFETY: unmapping the same address and length that `mmap` returned.
         unsafe {
             libc::munmap(self.address, self.length);
         }
     }
+}
+
+const DMA_BUF_SYNC_READ: u64 = 1;
+const DMA_BUF_SYNC_START: u64 = 0;
+const DMA_BUF_SYNC_END: u64 = 4;
+const DMA_BUF_IOCTL_SYNC: libc::c_ulong = 0x4008_6200;
+
+fn dma_buf_sync(fd: RawFd, flags: u64) -> Result<(), String> {
+    let result = unsafe { libc::ioctl(fd, DMA_BUF_IOCTL_SYNC, &flags) };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    // A fake mmap-able fd is useful for deterministic tests. Real DMA-BUFs
+    // support the sync ioctl; other errors still reject the frame.
+    if error.raw_os_error() == Some(libc::ENOTTY) {
+        return Ok(());
+    }
+    Err(format!("DMA_BUF_IOCTL_SYNC failed: {error}"))
 }
 
 /// Minimal PNG writer.
@@ -482,7 +599,11 @@ mod png {
         header.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit, RGBA, no interlace
         chunk(&mut output, b"IHDR", &header);
 
-        chunk(&mut output, b"IDAT", &zlib(&scanlines(width, height, pixels)));
+        chunk(
+            &mut output,
+            b"IDAT",
+            &zlib(&scanlines(width, height, pixels)),
+        );
         chunk(&mut output, b"IEND", &[]);
         output
     }
@@ -598,6 +719,9 @@ mod tests {
         memfd::seal_readonly(fd).expect("seal the buffer as a client must");
         SurfaceBuffer {
             buffer_id: 1,
+            offset: 0,
+            managed: false,
+            kind: SurfaceBufferKind::Shm,
             fd,
             width,
             height,
@@ -794,6 +918,57 @@ mod tests {
 
         assert_eq!(capture.pixel(0, 0), Some(CAPTURE_REDACTION));
         assert_eq!(capture.pixel(7, 7), Some(CAPTURE_REDACTION));
+    }
+
+    #[test]
+    fn pooled_rgb565_content_is_read_from_its_declared_offset() {
+        let mut file = memfd::create_file("scp-offset-compose-test").unwrap();
+        // Prefix bytes model another buffer in the same pool. 0xf800 is pure
+        // red in little-endian RGB565.
+        file.write_all(&[9, 8, 7, 0x00, 0xf8]).unwrap();
+        let fd = memfd::into_raw_fd(file);
+        memfd::seal_readonly(fd).unwrap();
+        let fixture = Fixture {
+            buffers: vec![(
+                (1, 1),
+                SurfaceBuffer {
+                    buffer_id: 4,
+                    offset: 3,
+                    managed: true,
+                    kind: SurfaceBufferKind::Shm,
+                    fd,
+                    width: 1,
+                    height: 1,
+                    stride: 2,
+                    format: BufferFormat::Rgb565,
+                },
+            )],
+            excluded: Vec::new(),
+        };
+        let mut stack = WindowStack::new();
+        stack.push(entry(
+            1,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+        ));
+
+        let frame = compose(
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            Rgba8::BLACK,
+            &stack,
+            &fixture,
+        )
+        .unwrap();
+        assert_eq!(frame.pixel(0, 0), Some(Rgba8(255, 0, 0, 255)));
     }
 
     #[test]

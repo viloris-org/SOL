@@ -2,28 +2,36 @@
 
 use crate::scp::{
     buffer::BufferManager,
-    compose::{self, BufferSource, Framebuffer, Rgba8},
     capability::{
-        Capability, CapabilityGrant, CapabilityToken, Decision, blocked_while_locked,
+        Capability, CapabilityGrant, CapabilityToken, CaptureScope, Decision, blocked_while_locked,
         requires_foreground, requires_recent_interaction,
     },
+    compose::{self, BufferSource, Framebuffer, Rgba8},
     data_device::DataDevice,
+    dmabuf::DmabufManager,
     event_queue::{EventRouter, OutboundEvent, SessionSink},
     input::InputState,
     keymap::{KeymapState, ModifierState, RepeatInfo},
     output::OutputManager,
     popup::{Popup, PopupManager, position_popup},
     protocol::{
-        BufferId, ButtonState, ClientMessage, CompositorMessage, DismissReason, InputEvent,
-        LayerSurfaceId, OutputId, PopupId, Rect, SessionId, SurfaceId, ToplevelId,
+        BufferId, ButtonState, CURRENT_PROTOCOL_VERSION, CaptureFormat, CaptureId, CaptureTarget,
+        ClientMessage, CompositorMessage, DismissReason, InputEvent, KeyBinding, LayerSurfaceId,
+        MIN_PROTOCOL_VERSION, OutputId, PopupId, Rect, SessionId, ShortcutPriority, SurfaceId,
+        ToplevelId,
     },
     security::{AppId, AuditOutcome, SecurityCoordinator, StubSecurityCoordinator},
     session_lock::{LockGrant, SessionLockManager},
+    shortcuts::ShortcutManager,
     stack::{StackEntry, StackKind, WindowStack, place_toplevel},
     surface::{Anchor, KeyboardInteractivity, Layer, Margin, SurfaceManager, SurfaceRole},
     unix_socket,
 };
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 /// Fallback output geometry used before any real output is registered.
 const FALLBACK_OUTPUT: Rect = Rect {
@@ -55,6 +63,10 @@ const DESKTOP_CLEAR: Rgba8 = Rgba8::BLACK;
 /// Matches the `<ESC> = 9` mapping in [`crate::scp::keymap`].
 const KEY_ESCAPE: u32 = 9;
 
+/// Defense in depth for in-process users of `ScpState`; the socket transport
+/// enforces the same order of magnitude before spawning a worker.
+pub const MAX_SESSIONS: usize = 256;
+
 /// Authenticated client session.
 #[derive(Debug)]
 pub struct ClientSession {
@@ -66,6 +78,7 @@ pub struct ClientSession {
     pub connection_time: Instant,
     pub last_user_interaction: Option<Instant>,
     pub is_foreground: bool,
+    pub protocol_version: u32,
 }
 
 impl ClientSession {
@@ -79,6 +92,7 @@ impl ClientSession {
             connection_time: Instant::now(),
             last_user_interaction: None,
             is_foreground: false,
+            protocol_version: MIN_PROTOCOL_VERSION,
         }
     }
 
@@ -133,6 +147,7 @@ pub struct ScpState {
     next_session_id: SessionId,
     surface_manager: SurfaceManager,
     buffer_manager: BufferManager,
+    dmabuf_manager: DmabufManager,
     input_state: InputState,
     output_manager: OutputManager,
     popups: PopupManager,
@@ -146,6 +161,7 @@ pub struct ScpState {
     /// Absolute pointer position in output-layout coordinates.
     pointer_position: (f64, f64),
     next_serial: u32,
+    next_capture_id: CaptureId,
 
     // Keyboard state
     keymap_state: KeymapState,
@@ -154,6 +170,12 @@ pub struct ScpState {
 
     // Data device (clipboard/DnD)
     data_device: DataDevice,
+
+    /// Conflict-arbitrated global bindings, released with their owner session.
+    shortcuts: ShortcutManager,
+    active_shortcut_keys: HashSet<u32>,
+    /// Outputs intersected by each currently stacked surface.
+    surface_outputs: HashMap<(SessionId, SurfaceId), HashSet<OutputId>>,
 
     /// Session lock. While engaged it takes over input and stacking entirely.
     session_lock: SessionLockManager,
@@ -181,6 +203,7 @@ impl ScpState {
             next_session_id: 1,
             surface_manager: SurfaceManager::new(),
             buffer_manager: BufferManager::new(),
+            dmabuf_manager: DmabufManager::new(),
             input_state: InputState::new(),
             output_manager: OutputManager::new(),
             popups: PopupManager::new(),
@@ -191,10 +214,14 @@ impl ScpState {
             cursor_surface: None,
             pointer_position: (0.0, 0.0),
             next_serial: 1,
+            next_capture_id: 1,
             keymap_state: KeymapState::new(),
             repeat_info: RepeatInfo::default(),
             modifier_state: ModifierState::new(),
             data_device: DataDevice::new(),
+            shortcuts: ShortcutManager::new(),
+            active_shortcut_keys: HashSet::new(),
+            surface_outputs: HashMap::new(),
             session_lock: SessionLockManager::new(),
             active_session_uid: None,
             events: EventRouter::new(),
@@ -209,7 +236,7 @@ impl ScpState {
 
     fn next_buffer_id(&mut self) -> BufferId {
         let id = self.next_buffer_id;
-        self.next_buffer_id += 1;
+        self.next_buffer_id = self.next_buffer_id.wrapping_add(1);
         id
     }
 
@@ -227,6 +254,62 @@ impl ScpState {
 
     pub fn output_manager_mut(&mut self) -> &mut OutputManager {
         &mut self.output_manager
+    }
+
+    /// Register a backend output and notify every connected client.
+    pub fn add_output(
+        &mut self,
+        name: String,
+        description: String,
+        width: i32,
+        height: i32,
+        refresh_rate: i32,
+    ) -> Result<OutputId, String> {
+        if width <= 0
+            || height <= 0
+            || width > compose::MAX_OUTPUT_DIMENSION
+            || height > compose::MAX_OUTPUT_DIMENSION
+            || refresh_rate <= 0
+        {
+            return Err("Invalid output mode".to_string());
+        }
+        let id = self
+            .output_manager
+            .add_output(name, description, width, height, refresh_rate);
+        let output = self
+            .output_manager
+            .get_output(id)
+            .cloned()
+            .ok_or("Output manager lost the output it just inserted")?;
+        let message = output_added(&output);
+        let sessions: Vec<_> = self.events.session_ids().collect();
+        self.events.send_all(
+            sessions
+                .into_iter()
+                .map(|session| (session, message.clone())),
+        );
+        let outputs = self.output_ids();
+        self.session_lock.outputs_changed(&outputs);
+        self.sync_surface_outputs();
+        Ok(id)
+    }
+
+    /// Remove a backend output and invalidate lock confirmation if topology no
+    /// longer matches the surfaces acknowledged by the locker.
+    pub fn remove_output(&mut self, output_id: OutputId) -> Result<(), String> {
+        self.output_manager
+            .remove_output(output_id)
+            .ok_or("Output not found")?;
+        self.sync_surface_outputs();
+        let sessions: Vec<_> = self.events.session_ids().collect();
+        self.events.send_all(
+            sessions
+                .into_iter()
+                .map(|session| (session, CompositorMessage::OutputRemoved { output_id })),
+        );
+        let outputs = self.output_ids();
+        self.session_lock.outputs_changed(&outputs);
+        Ok(())
     }
 
     pub fn popups(&self) -> &PopupManager {
@@ -258,6 +341,11 @@ impl ScpState {
     /// Event router used to push compositor-initiated messages to clients.
     pub fn events(&self) -> &EventRouter {
         &self.events
+    }
+
+    /// Number of authenticated sessions, exposed for health reporting.
+    pub fn session_count(&self) -> usize {
+        self.sessions.len()
     }
 
     /// Attach a connection's outbound queue to its session.
@@ -585,7 +673,41 @@ impl ScpState {
     ) -> Result<Vec<CompositorMessage>, String> {
         match (session_id, message) {
             (None, ClientMessage::Connect { app_id, pid }) => self.handle_connect(app_id, pid, uid),
-            (Some(_), ClientMessage::Connect { .. }) => Err("Already connected".to_string()),
+            (
+                None,
+                ClientMessage::ConnectVersioned {
+                    app_id,
+                    pid,
+                    min_version,
+                    max_version,
+                },
+            ) => {
+                let version = negotiate_version(min_version, max_version)?;
+                let mut responses = self.handle_connect(app_id, pid, uid)?;
+                if !matches!(responses.first(), Some(CompositorMessage::Rejected { .. })) {
+                    let connected_session = responses.iter().find_map(|response| match response {
+                        CompositorMessage::Connected { session_id, .. } => Some(*session_id),
+                        _ => None,
+                    });
+                    if let Some(session_id) = connected_session
+                        && let Some(session) = self.sessions.get_mut(&session_id)
+                    {
+                        session.protocol_version = version;
+                    }
+                    responses.insert(
+                        0,
+                        CompositorMessage::ProtocolVersion {
+                            version,
+                            features: protocol_features(version),
+                        },
+                    );
+                    responses.extend(self.output_manager.outputs().iter().map(output_added));
+                }
+                Ok(responses)
+            }
+            (Some(_), ClientMessage::Connect { .. } | ClientMessage::ConnectVersioned { .. }) => {
+                Err("Already connected".to_string())
+            }
             (None, _) => Err("Not connected".to_string()),
             (Some(session_id), message) => self.handle_authenticated_message(session_id, message),
         }
@@ -597,23 +719,35 @@ impl ScpState {
         &mut self,
         session_id: Option<SessionId>,
         mut message: ClientMessage,
-        received_fd: Option<i32>,
+        mut received_fds: Vec<i32>,
         peer_uid: u32,
     ) -> Result<Vec<CompositorMessage>, String> {
         match &mut message {
             ClientMessage::AttachBuffer { buffer_fd, .. } => {
-                *buffer_fd =
-                    received_fd.ok_or("AttachBuffer requires exactly one file descriptor")?;
+                *buffer_fd = received_fds
+                    .pop()
+                    .ok_or("AttachBuffer requires exactly one file descriptor")?;
             }
             ClientMessage::CreateShmPool { fd, .. } => {
-                *fd = received_fd.ok_or("CreateShmPool requires exactly one file descriptor")?;
+                *fd = received_fds
+                    .pop()
+                    .ok_or("CreateShmPool requires exactly one file descriptor")?;
             }
-            _ if received_fd.is_some() => {
-                if let Some(fd) = received_fd {
+            ClientMessage::CreateDmabufBuffer { fds, .. } => {
+                if session_id.is_none() {
+                    for fd in received_fds {
+                        unix_socket::close_fd(fd);
+                    }
+                    return Err("Not connected".to_string());
+                }
+                *fds = std::mem::take(&mut received_fds);
+            }
+            _ if !received_fds.is_empty() => {
+                for fd in received_fds {
                     unix_socket::close_fd(fd);
                 }
                 return Err(
-                    "File descriptor is only valid with AttachBuffer or CreateShmPool".to_string(),
+                    "File descriptors are only valid with buffer import requests".to_string(),
                 );
             }
             _ => {}
@@ -655,6 +789,12 @@ impl ScpState {
                     "App ID mismatch: claimed '{app_id}', verified '{}'",
                     verified_app_id.0
                 ),
+            }]);
+        }
+
+        if self.sessions.len() >= MAX_SESSIONS {
+            return Ok(vec![CompositorMessage::Rejected {
+                reason: "SCP session limit reached; retry later".to_string(),
             }]);
         }
 
@@ -707,6 +847,7 @@ impl ScpState {
         session_id: SessionId,
         message: ClientMessage,
     ) -> Result<Vec<CompositorMessage>, String> {
+        self.cleanup_expired_capabilities(session_id);
         let app_id = self
             .sessions
             .get(&session_id)
@@ -714,7 +855,7 @@ impl ScpState {
             .app_id
             .clone();
 
-        match message {
+        let result = match message {
             ClientMessage::CreateSurface { surface_id } => {
                 self.surface_manager
                     .create_surface(session_id, surface_id, app_id)?;
@@ -740,14 +881,20 @@ impl ScpState {
                     .surface_manager
                     .get_surface_mut(session_id, surface_id)
                     .ok_or("Surface not found")?;
-                surface.attach_buffer(crate::scp::surface::SurfaceBuffer {
+                let replaced = surface.attach_buffer(crate::scp::surface::SurfaceBuffer {
                     buffer_id,
+                    offset: 0,
+                    managed: false,
+                    kind: crate::scp::surface::SurfaceBufferKind::Shm,
                     fd: buffer_fd,
                     width,
                     height,
                     stride,
                     format,
                 });
+                if let Some(replaced) = replaced.filter(|buffer| buffer.managed) {
+                    self.release_managed_buffer(session_id, replaced.buffer_id);
+                }
                 Ok(vec![])
             }
             ClientMessage::Commit {
@@ -766,7 +913,10 @@ impl ScpState {
                     surface.request_frame(callback_id);
                 }
 
-                surface.commit();
+                let evicted = surface.commit();
+                for buffer in evicted.into_iter().filter(|buffer| buffer.managed) {
+                    self.release_managed_buffer(session_id, buffer.buffer_id);
+                }
                 Ok(vec![])
             }
             ClientMessage::RequestCapability {
@@ -905,7 +1055,7 @@ impl ScpState {
                     },
                 }])
             }
-            ClientMessage::Connect { .. } => {
+            ClientMessage::Connect { .. } | ClientMessage::ConnectVersioned { .. } => {
                 unreachable!("connect is routed before authenticated messages")
             }
 
@@ -925,15 +1075,107 @@ impl ScpState {
                 height,
                 stride,
                 format,
-            } => self
+            } => {
+                if self.dmabuf_manager.contains(session_id, buffer_id) {
+                    return Err("Buffer ID already exists as a DMA-BUF".to_string());
+                }
+                self.buffer_manager
+                    .create_buffer(
+                        session_id, buffer_id, pool_id, offset, width, height, stride, format,
+                    )
+                    .map(|_| vec![])
+            }
+            ClientMessage::CreateDmabufBuffer {
+                buffer_id,
+                width,
+                height,
+                format,
+                modifier,
+                planes,
+                fds,
+            } => {
+                if self
+                    .buffer_manager
+                    .get_buffer(session_id, buffer_id)
+                    .is_some()
+                {
+                    for fd in fds {
+                        unix_socket::close_fd(fd);
+                    }
+                    return Err("Buffer ID already exists as an SHM buffer".to_string());
+                }
+                self.dmabuf_manager
+                    .create_buffer(
+                        session_id, buffer_id, width, height, format, modifier, planes, fds,
+                    )
+                    .map(|_| vec![])
+            }
+            ClientMessage::AttachShmBuffer {
+                surface_id,
+                buffer_id,
+            } => {
+                self.verify_surface_ownership(session_id, surface_id)?;
+                let buffer = self
+                    .buffer_manager
+                    .acquire_surface_buffer(session_id, buffer_id)?;
+                let replaced = self
+                    .surface_manager
+                    .get_surface_mut(session_id, surface_id)
+                    .ok_or("Surface not found")?
+                    .attach_buffer(buffer);
+                if let Some(replaced) = replaced.filter(|buffer| buffer.managed) {
+                    self.release_managed_buffer(session_id, replaced.buffer_id);
+                }
+                Ok(vec![])
+            }
+            ClientMessage::AttachDmabufBuffer {
+                surface_id,
+                buffer_id,
+            } => {
+                self.verify_surface_ownership(session_id, surface_id)?;
+                let buffer = self
+                    .dmabuf_manager
+                    .acquire_surface_buffer(session_id, buffer_id)?;
+                let replaced = self
+                    .surface_manager
+                    .get_surface_mut(session_id, surface_id)
+                    .ok_or("Surface not found")?
+                    .attach_buffer(buffer);
+                if let Some(replaced) = replaced.filter(|buffer| buffer.managed) {
+                    self.release_managed_buffer(session_id, replaced.buffer_id);
+                }
+                Ok(vec![])
+            }
+            ClientMessage::DetachBuffer { surface_id } => {
+                self.verify_surface_ownership(session_id, surface_id)?;
+                let replaced = self
+                    .surface_manager
+                    .get_surface_mut(session_id, surface_id)
+                    .ok_or("Surface not found")?
+                    .detach_buffer();
+                if let Some(replaced) = replaced.filter(|buffer| buffer.managed) {
+                    self.release_managed_buffer(session_id, replaced.buffer_id);
+                }
+                Ok(vec![])
+            }
+            ClientMessage::DestroyBuffer { buffer_id } => {
+                if self
+                    .buffer_manager
+                    .get_buffer(session_id, buffer_id)
+                    .is_some()
+                {
+                    self.buffer_manager
+                        .destroy_buffer(session_id, buffer_id)
+                        .map(|_| vec![])
+                } else {
+                    self.dmabuf_manager
+                        .destroy_buffer(session_id, buffer_id)
+                        .map(|_| vec![])
+                }
+            }
+            ClientMessage::DestroyShmPool { pool_id } => self
                 .buffer_manager
-                .create_buffer(
-                    session_id, buffer_id, pool_id, offset, width, height, stride, format,
-                )
-                .map(|_| vec![]),
-            ClientMessage::DestroyBuffer { buffer_id } => self
-                .buffer_manager
-                .destroy_buffer(session_id, buffer_id)
+                .destroy_pool(session_id, pool_id)
                 .map(|_| vec![]),
             ClientMessage::Damage {
                 surface_id,
@@ -1800,7 +2042,108 @@ impl ScpState {
                 }
                 Ok(vec![CompositorMessage::DragCancelled])
             }
+
+            ClientMessage::SetDragActions { actions, preferred } => {
+                let action = self
+                    .data_device
+                    .set_drag_actions(session_id, actions, preferred)
+                    .map_err(str::to_string)?;
+                let source = self
+                    .data_device
+                    .active_drag()
+                    .ok_or("No active drag")?
+                    .source;
+                self.events
+                    .send_logged(source, CompositorMessage::DragActionSelected { action });
+                Ok(vec![CompositorMessage::DragActionSelected { action }])
+            }
+
+            ClientMessage::RequestCapture {
+                target,
+                cursor_mode,
+                capability_token,
+            } => {
+                let capability = capture_capability(target);
+                self.verify_capability_token(session_id, &capability, &capability_token)?;
+                self.verify_interactive_capability(session_id, &capability)?;
+
+                let frame = self.capture_target(target)?;
+                let width = frame.width();
+                let height = frame.height();
+                let stride = width.checked_mul(4).ok_or("Capture stride overflow")?;
+                let fd = crate::scp::capture::export_frame(&frame)
+                    .map_err(|error| format!("Failed to export capture: {error}"))?;
+                let capture_id = self.next_capture_id;
+                self.next_capture_id = self
+                    .next_capture_id
+                    .checked_add(1)
+                    .ok_or("Capture ID space exhausted")?;
+                let raw_fd = std::os::fd::AsRawFd::as_raw_fd(&fd);
+                let event = OutboundEvent::with_fd(
+                    CompositorMessage::CaptureGranted {
+                        capture_id,
+                        width,
+                        height,
+                        stride,
+                        format: CaptureFormat::Rgba8888,
+                        cursor_mode,
+                        fd: raw_fd,
+                    },
+                    fd,
+                );
+                self.events
+                    .send_event(session_id, event)
+                    .map_err(|error| format!("Failed to queue capture frame: {error:?}"))?;
+
+                self.consume_capability(session_id, &capability);
+                self.security
+                    .audit_capability_use(&app_id, &capability, AuditOutcome::Used);
+                Ok(vec![])
+            }
+
+            ClientMessage::RegisterShortcut {
+                binding,
+                justification,
+                capability_token,
+            } => {
+                let capability = Capability::GlobalShortcuts;
+                self.verify_capability_token(session_id, &capability, &capability_token)?;
+                self.verify_interactive_capability(session_id, &capability)?;
+                let priority = if app_id.0 == crate::scp::security::SHELL_APP_ID {
+                    ShortcutPriority::Shell
+                } else {
+                    ShortcutPriority::App
+                };
+                let (registration, displaced) =
+                    self.shortcuts
+                        .register(session_id, binding, priority, &justification)?;
+                if let Some(displaced) = displaced {
+                    self.events.send_logged(
+                        displaced.owner,
+                        CompositorMessage::ShortcutRevoked {
+                            shortcut_id: displaced.id,
+                            reason: "Displaced by a higher-priority binding".to_string(),
+                        },
+                    );
+                }
+                self.security
+                    .audit_capability_use(&app_id, &capability, AuditOutcome::Used);
+                Ok(vec![CompositorMessage::ShortcutGranted {
+                    shortcut_id: registration.id,
+                    binding,
+                    priority,
+                }])
+            }
+
+            ClientMessage::UnregisterShortcut { shortcut_id } => {
+                self.shortcuts.unregister(session_id, shortcut_id)?;
+                Ok(vec![])
+            }
+        };
+        if result.is_ok() {
+            self.sync_surface_outputs();
         }
+        result
     }
 
     /// Hand a readable/writable pipe pair to two clients so content flows
@@ -1835,6 +2178,132 @@ impl ScpState {
             .send_event(consumer, deliver_event)
             .map_err(|error| format!("Requesting client is unreachable: {error:?}"))?;
         Ok(())
+    }
+
+    /// Compose one privacy-filtered capture target.
+    fn capture_target(&self, target: CaptureTarget) -> Result<Framebuffer, String> {
+        match target {
+            CaptureTarget::Output(output_id) => self
+                .compose_capture_output(output_id)
+                .ok_or_else(|| "Capture output is unavailable".to_string()),
+            CaptureTarget::Workspace => {
+                let mut outputs = self.output_manager.outputs().iter();
+                let first = outputs.next().ok_or("No output is available")?;
+                let mut bounds = first.geometry;
+                for output in outputs {
+                    let right = bounds
+                        .x
+                        .saturating_add(bounds.width)
+                        .max(output.geometry.x.saturating_add(output.geometry.width));
+                    let bottom = bounds
+                        .y
+                        .saturating_add(bounds.height)
+                        .max(output.geometry.y.saturating_add(output.geometry.height));
+                    bounds.x = bounds.x.min(output.geometry.x);
+                    bounds.y = bounds.y.min(output.geometry.y);
+                    bounds.width = right.saturating_sub(bounds.x);
+                    bounds.height = bottom.saturating_sub(bounds.y);
+                }
+                compose::compose_for(
+                    crate::scp::compose::RenderPurpose::Capture,
+                    bounds,
+                    DESKTOP_CLEAR,
+                    &self.build_stack(),
+                    self,
+                )
+                .ok_or_else(|| "Workspace capture is too large".to_string())
+            }
+            CaptureTarget::Window(toplevel_id) => {
+                let toplevel = self
+                    .surface_manager
+                    .get_toplevel(toplevel_id)
+                    .ok_or("Capture window does not exist")?;
+                let window = Rect {
+                    x: toplevel.geometry.x,
+                    y: toplevel.geometry.y,
+                    width: toplevel.geometry.width,
+                    height: toplevel.geometry.height,
+                };
+                let output = self
+                    .output_manager
+                    .outputs()
+                    .iter()
+                    .max_by_key(|output| intersection_area(window, output.geometry))
+                    .filter(|output| intersection_area(window, output.geometry) > 0)
+                    .ok_or("Capture window is not visible on an output")?;
+                let local = Rect {
+                    x: window.x.saturating_sub(output.geometry.x),
+                    y: window.y.saturating_sub(output.geometry.y),
+                    width: window.width,
+                    height: window.height,
+                };
+                self.compose_capture_output(output.id)
+                    .and_then(|frame| frame.cropped(local))
+                    .ok_or_else(|| "Capture window has no visible pixels".to_string())
+            }
+        }
+    }
+
+    /// Reconcile each stacked surface's output membership and emit only the
+    /// transitions. Repeated commits therefore do not produce duplicate events.
+    fn sync_surface_outputs(&mut self) {
+        let stack = self.build_stack();
+        let mut desired: HashMap<(SessionId, SurfaceId), HashSet<OutputId>> = HashMap::new();
+        for entry in stack.iter_bottom_up() {
+            let outputs = desired
+                .entry((entry.session_id, entry.surface_id))
+                .or_default();
+            for output in self.output_manager.outputs() {
+                if intersection_area(entry.rect, output.geometry) > 0 {
+                    outputs.insert(output.id);
+                }
+            }
+        }
+
+        let mut transitions = Vec::new();
+        for (&(session_id, surface_id), outputs) in &desired {
+            let previous = self.surface_outputs.get(&(session_id, surface_id));
+            for &output_id in outputs {
+                if previous.is_none_or(|previous| !previous.contains(&output_id)) {
+                    transitions.push((
+                        session_id,
+                        CompositorMessage::SurfaceEnterOutput {
+                            surface_id,
+                            output_id,
+                        },
+                    ));
+                }
+            }
+        }
+        for (&(session_id, surface_id), outputs) in &self.surface_outputs {
+            let current = desired.get(&(session_id, surface_id));
+            for &output_id in outputs {
+                if current.is_none_or(|current| !current.contains(&output_id)) {
+                    transitions.push((
+                        session_id,
+                        CompositorMessage::SurfaceLeaveOutput {
+                            surface_id,
+                            output_id,
+                        },
+                    ));
+                }
+            }
+        }
+        self.surface_outputs = desired;
+        self.events.send_all(transitions);
+    }
+
+    /// Remove a single-use grant after its operation has been successfully
+    /// queued. Releasing it from the coordinator also prevents token replay.
+    fn consume_capability(&mut self, session_id: SessionId, capability: &Capability) {
+        let token = self
+            .sessions
+            .get_mut(&session_id)
+            .and_then(|session| session.granted_capabilities.remove(capability))
+            .map(|grant| grant.token);
+        if let Some(token) = token {
+            self.security.release_tokens(&[token]);
+        }
     }
 
     fn handle_capability_request(
@@ -1878,10 +2347,15 @@ impl ScpState {
         match self.security.evaluate_capability(&app_id, &capability) {
             Decision::Granted { token, expires_at } => {
                 let token_data = token.data.clone();
-                self.sessions
+                let session = self
+                    .sessions
                     .get_mut(&session_id)
-                    .ok_or("Invalid session")?
-                    .grant_capability(capability.clone(), token, expires_at);
+                    .ok_or("Invalid session")?;
+                let replaced = session.granted_capabilities.remove(&capability);
+                session.grant_capability(capability.clone(), token, expires_at);
+                if let Some(replaced) = replaced {
+                    self.security.release_tokens(&[replaced.token]);
+                }
                 self.security
                     .audit_capability_use(&app_id, &capability, AuditOutcome::Granted);
                 Ok(vec![CompositorMessage::CapabilityDecision {
@@ -1939,6 +2413,104 @@ impl ScpState {
             .get_surface(session_id, surface_id)
             .map(|_| ())
             .ok_or_else(|| "Surface not found for this session".to_string())
+    }
+
+    fn cleanup_expired_capabilities(&mut self, session_id: SessionId) {
+        let Some(session) = self.sessions.get_mut(&session_id) else {
+            return;
+        };
+        let expired: Vec<_> = session
+            .granted_capabilities
+            .iter()
+            .filter_map(|(capability, grant)| (!grant.is_valid()).then_some(capability.clone()))
+            .collect();
+        let shortcuts_expired = expired.contains(&Capability::GlobalShortcuts);
+        let expired_names: Vec<_> = expired
+            .iter()
+            .map(|capability| capability.wire_name().to_string())
+            .collect();
+        let tokens: Vec<_> = expired
+            .into_iter()
+            .filter_map(|capability| session.granted_capabilities.remove(&capability))
+            .map(|grant| grant.token)
+            .collect();
+        self.security.release_tokens(&tokens);
+        if shortcuts_expired {
+            self.shortcuts.remove_session(session_id);
+        }
+        for capability in expired_names {
+            self.events.send_logged(
+                session_id,
+                CompositorMessage::CapabilityRevoked {
+                    capability,
+                    reason: "Capability grant expired".to_string(),
+                },
+            );
+        }
+    }
+
+    /// Apply an asynchronous policy revocation from the security service.
+    /// Existing protocol objects remain valid unless they embody the revoked
+    /// authority; global bindings, clipboard ownership, and active drags are
+    /// withdrawn immediately.
+    pub fn revoke_capability_for_app(
+        &mut self,
+        app_id: &AppId,
+        capability: &Capability,
+        reason: impl Into<String>,
+    ) -> usize {
+        let reason = reason.into();
+        let affected: Vec<_> = self
+            .sessions
+            .iter()
+            .filter_map(|(&session_id, session)| {
+                (&session.app_id == app_id && session.granted_capabilities.contains_key(capability))
+                    .then_some(session_id)
+            })
+            .collect();
+
+        for session_id in &affected {
+            if let Some(grant) = self
+                .sessions
+                .get_mut(session_id)
+                .and_then(|session| session.granted_capabilities.remove(capability))
+            {
+                self.security.release_tokens(&[grant.token]);
+            }
+            if *capability == Capability::GlobalShortcuts {
+                self.shortcuts.remove_session(*session_id);
+            }
+            if *capability == Capability::ClipboardWrite
+                && self
+                    .data_device
+                    .get_selection_full()
+                    .is_some_and(|selection| selection.owner == *session_id)
+            {
+                self.data_device.clear_selection();
+                self.events
+                    .broadcast_except(*session_id, &CompositorMessage::SelectionCleared);
+            }
+            if *capability == Capability::DragAndDrop
+                && let Some(drag) = self.data_device.active_drag().cloned()
+                && drag.source == *session_id
+            {
+                self.data_device.clear_drag();
+                if let Some(target) = drag.target {
+                    self.events
+                        .send_logged(target, CompositorMessage::DragCancelled);
+                }
+            }
+            self.events.send_logged(
+                *session_id,
+                CompositorMessage::CapabilityRevoked {
+                    capability: capability.wire_name().to_string(),
+                    reason: reason.clone(),
+                },
+            );
+            self.security
+                .audit_capability_use(app_id, capability, AuditOutcome::Denied);
+        }
+        affected.len()
     }
 
     fn verify_toplevel_ownership(
@@ -2098,9 +2670,7 @@ impl ScpState {
         let user_sessions: Vec<SessionId> = self
             .sessions
             .iter()
-            .filter_map(|(&id, session)| {
-                (Some(id) != except && session.uid == uid).then_some(id)
-            })
+            .filter_map(|(&id, session)| (Some(id) != except && session.uid == uid).then_some(id))
             .collect();
         for user_session in user_sessions {
             self.disconnect(user_session);
@@ -2109,6 +2679,7 @@ impl ScpState {
 
     pub fn disconnect(&mut self, session_id: SessionId) {
         self.events.unregister(session_id);
+        self.shortcuts.remove_session(session_id);
 
         // Grants die with the connection that holds them, so hand the tokens
         // back rather than leaving the coordinator tracking them forever.
@@ -2147,6 +2718,7 @@ impl ScpState {
         // Pools own their descriptors, so releasing them here is what keeps a
         // disconnect from leaking one.
         self.buffer_manager.destroy_session(session_id);
+        self.dmabuf_manager.destroy_session(session_id);
 
         // Clipboard content is owned by a live client. Once it exits there is
         // nothing to read, so the offer must not outlive it.
@@ -2195,6 +2767,8 @@ impl ScpState {
         {
             self.cursor_surface = None;
         }
+        self.surface_outputs
+            .retain(|(owner, _), _| *owner != session_id);
     }
 
     /// Remove a surface and finish the teardown its role implies.
@@ -2203,6 +2777,12 @@ impl ScpState {
         session_id: SessionId,
         surface_id: SurfaceId,
     ) -> Result<(), String> {
+        let managed_buffers = self
+            .surface_manager
+            .get_surface(session_id, surface_id)
+            .ok_or("Surface not found")?
+            .managed_buffer_ids();
+
         // Child popups must go first: once the parent surface is gone their
         // geometry can no longer be resolved.
         let orphaned = self
@@ -2213,6 +2793,13 @@ impl ScpState {
         let role = self
             .surface_manager
             .destroy_surface(session_id, surface_id)?;
+
+        // Destruction is also a presentation retirement point: the compositor
+        // cannot read any of this surface's buffers again. Release every stage,
+        // including a buffer attached but never committed.
+        for buffer_id in managed_buffers {
+            self.release_managed_buffer(session_id, buffer_id);
+        }
 
         match role {
             SurfaceRole::Toplevel(toplevel_id) => {
@@ -2288,6 +2875,7 @@ impl ScpState {
         {
             self.set_keyboard_focus(Some(next));
         }
+        self.sync_surface_outputs();
     }
 
     fn focused_surface_is_toplevel(&self, toplevel_id: ToplevelId) -> bool {
@@ -2310,6 +2898,23 @@ impl ScpState {
 
     pub fn iter_layer_surfaces_sorted(&self) -> Vec<&crate::scp::surface::LayerSurface> {
         self.surface_manager.iter_layer_surfaces_sorted()
+    }
+
+    /// Resolve complete plane and modifier metadata for native GPU import.
+    pub fn committed_dmabuf(
+        &self,
+        session_id: SessionId,
+        surface_id: SurfaceId,
+    ) -> Option<&crate::scp::dmabuf::Dmabuf> {
+        let buffer = self
+            .surface_manager
+            .get_surface(session_id, surface_id)?
+            .buffer
+            .as_ref()?;
+        if buffer.kind != crate::scp::surface::SurfaceBufferKind::Dmabuf {
+            return None;
+        }
+        self.dmabuf_manager.get_buffer(session_id, buffer.buffer_id)
     }
 
     /// Deliver frame callbacks for every surface that requested one.
@@ -2342,12 +2947,7 @@ impl ScpState {
     /// was presented. [`Self::present_frame`] is the pass that has that effect.
     pub fn compose_output(&self, output_id: OutputId) -> Option<Framebuffer> {
         let output = self.output_manager.get_output(output_id)?;
-        compose::compose(
-            output.geometry,
-            DESKTOP_CLEAR,
-            &self.build_stack(),
-            self,
-        )
+        compose::compose(output.geometry, DESKTOP_CLEAR, &self.build_stack(), self)
     }
 
     /// Compose the primary output, or `None` when no output is configured.
@@ -2403,15 +3003,21 @@ impl ScpState {
     /// into a buffer the moment it is released. A frame that fails to compose
     /// releases nothing and fires nothing, so the client's next commit still
     /// finds its previous buffer intact.
-    pub fn present_frame(
-        &mut self,
-        output_id: OutputId,
-        timestamp_ms: u64,
-    ) -> Option<Framebuffer> {
+    pub fn present_frame(&mut self, output_id: OutputId, timestamp_ms: u64) -> Option<Framebuffer> {
         let framebuffer = self.compose_output(output_id)?;
+        self.finish_presented_frame(timestamp_ms);
+        Some(framebuffer)
+    }
+
+    /// Complete a frame after a backend has accepted it for presentation.
+    ///
+    /// Hardware backends use this two-phase API (`compose_output`, scanout,
+    /// then `finish_presented_frame`) so a failed page flip cannot falsely tell
+    /// clients that their frame was displayed. The headless backend uses
+    /// `present_frame`, whose in-memory presentation cannot fail after compose.
+    pub fn finish_presented_frame(&mut self, timestamp_ms: u64) {
         self.release_presented_buffers();
         self.send_frame_callbacks(timestamp_ms);
-        Some(framebuffer)
     }
 
     /// Hand back every buffer a later commit replaced. Returns how many.
@@ -2419,10 +3025,34 @@ impl ScpState {
         let released = self.surface_manager.take_released_buffers();
         let count = released.len();
         for (session_id, buffer_id) in released {
-            self.events
-                .send_logged(session_id, CompositorMessage::BufferRelease { buffer_id });
+            self.release_managed_buffer(session_id, buffer_id);
         }
         count
+    }
+
+    fn release_managed_buffer(&mut self, session_id: SessionId, buffer_id: BufferId) {
+        let released = if self
+            .buffer_manager
+            .get_buffer(session_id, buffer_id)
+            .is_some()
+        {
+            self.buffer_manager
+                .mark_buffer_released(session_id, buffer_id)
+        } else {
+            self.dmabuf_manager
+                .mark_buffer_released(session_id, buffer_id)
+        };
+        match released {
+            Ok(()) => self
+                .events
+                .send_logged(session_id, CompositorMessage::BufferRelease { buffer_id }),
+            Err(error) => tracing::warn!(
+                session_id,
+                buffer_id,
+                %error,
+                "managed SCP buffer disappeared before release"
+            ),
+        }
     }
 
     pub const fn get_focused_surface(&self) -> Option<(SessionId, SurfaceId)> {
@@ -2622,6 +3252,7 @@ impl ScpState {
         let dismissed = self.popups.dismiss_subtree(popup_id);
         let count = dismissed.len();
         self.finish_popup_dismissal(&dismissed, reason);
+        self.sync_surface_outputs();
         count
     }
 
@@ -2650,6 +3281,29 @@ impl ScpState {
         match state {
             KeyState::Pressed => self.modifier_state.key_pressed(keycode),
             KeyState::Released => self.modifier_state.key_released(keycode),
+        }
+
+        // A global binding consumes both halves of its key sequence. Delivering
+        // only the release to the focused application would leave its keyboard
+        // state inconsistent.
+        if state == KeyState::Released && self.active_shortcut_keys.remove(&keycode) {
+            return;
+        }
+        if state == KeyState::Pressed && !self.session_lock.is_locked() {
+            let modifiers = self.modifier_state.mods_depressed
+                | self.modifier_state.mods_latched
+                | self.modifier_state.mods_locked;
+            if let Some(shortcut) = self.shortcuts.matching(KeyBinding { keycode, modifiers }) {
+                self.active_shortcut_keys.insert(keycode);
+                self.events.send_logged(
+                    shortcut.owner,
+                    CompositorMessage::ShortcutActivated {
+                        shortcut_id: shortcut.id,
+                        timestamp_ms: time_ms,
+                    },
+                );
+                return;
+            }
         }
 
         if state == KeyState::Pressed
@@ -2715,6 +3369,7 @@ impl ScpState {
     /// Reset modifier state, e.g. when the compositor session loses the VT.
     pub fn reset_keyboard_state(&mut self) {
         self.modifier_state.reset();
+        self.active_shortcut_keys.clear();
     }
 
     pub const fn modifier_state(&self) -> &ModifierState {
@@ -3153,6 +3808,79 @@ impl Default for ScpState {
     }
 }
 
+fn negotiate_version(minimum: u32, maximum: u32) -> Result<u32, String> {
+    if minimum > maximum {
+        return Err("Protocol version range is inverted".to_string());
+    }
+    let selected = maximum.min(CURRENT_PROTOCOL_VERSION);
+    if selected < minimum || selected < MIN_PROTOCOL_VERSION {
+        return Err(format!(
+            "No compatible SCP version (server supports {MIN_PROTOCOL_VERSION}..={CURRENT_PROTOCOL_VERSION})"
+        ));
+    }
+    Ok(selected)
+}
+
+fn protocol_features(version: u32) -> Vec<String> {
+    if version < 2 {
+        return Vec::new();
+    }
+    [
+        "capture-fd",
+        "capability-revocation",
+        "drag-actions",
+        "dmabuf-v1",
+        "global-shortcuts",
+        "output-hotplug",
+        "shm-buffer-objects",
+        "version-negotiation",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn capture_capability(target: CaptureTarget) -> Capability {
+    Capability::ScreenCapture {
+        scope: match target {
+            CaptureTarget::Window(_) => CaptureScope::SingleWindow,
+            CaptureTarget::Output(_) => CaptureScope::Output,
+            CaptureTarget::Workspace => CaptureScope::Workspace,
+        },
+    }
+}
+
+fn intersection_area(left: Rect, right: Rect) -> i64 {
+    let width = left
+        .x
+        .saturating_add(left.width)
+        .min(right.x.saturating_add(right.width))
+        .saturating_sub(left.x.max(right.x))
+        .max(0);
+    let height = left
+        .y
+        .saturating_add(left.height)
+        .min(right.y.saturating_add(right.height))
+        .saturating_sub(left.y.max(right.y))
+        .max(0);
+    i64::from(width) * i64::from(height)
+}
+
+fn output_added(output: &crate::scp::output::Output) -> CompositorMessage {
+    CompositorMessage::OutputAdded {
+        output_id: output.id,
+        name: output.name.clone(),
+        description: output.description.clone(),
+        geometry: output.geometry,
+        physical_size: output.physical_size,
+        subpixel: output.subpixel,
+        transform: output.transform,
+        scale: output.scale,
+        modes: output.modes.clone(),
+        current_mode: output.current_mode,
+    }
+}
+
 /// Composition reads surface content through this narrow view rather than
 /// through the whole of [`ScpState`], so a rendering pass cannot reach protocol
 /// state it has no business touching.
@@ -3190,6 +3918,16 @@ mod tests {
         security::{AuditOutcome, SecurityCoordinator},
     };
     use std::sync::Mutex;
+
+    fn shrink_sealed_memfd(bytes: usize) -> i32 {
+        use std::os::fd::IntoRawFd;
+
+        let file = crate::scp::memfd::create_file("scp-state-buffer-test").unwrap();
+        file.set_len(bytes as u64).unwrap();
+        let fd = file.into_raw_fd();
+        crate::scp::memfd::add_seals(fd, crate::scp::memfd::F_SEAL_SHRINK).unwrap();
+        fd
+    }
 
     #[derive(Default)]
     struct TestSecurity {
@@ -3251,6 +3989,122 @@ mod tests {
             } => (*session_id, capability_tokens["window-toplevel"].clone()),
             response => panic!("unexpected response: {response:?}"),
         }
+    }
+
+    #[test]
+    fn managed_shm_buffers_form_a_reusable_release_cycle() {
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        let (session_id, _) = connect(&mut state, 901);
+        let sink = SessionSink::new().unwrap();
+        state.register_session_sink(session_id, Arc::clone(&sink));
+
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::CreateShmPool {
+                    pool_id: 3,
+                    fd: shrink_sealed_memfd(128),
+                    size: 128,
+                },
+            )
+            .unwrap();
+        for (buffer_id, offset) in [(7, 0), (8, 64)] {
+            state
+                .handle_message(
+                    Some(session_id),
+                    ClientMessage::CreateBuffer {
+                        buffer_id,
+                        pool_id: 3,
+                        offset,
+                        width: 4,
+                        height: 4,
+                        stride: 16,
+                        format: crate::scp::protocol::ShmFormat::Argb8888,
+                    },
+                )
+                .unwrap();
+        }
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::CreateSurface { surface_id: 5 },
+            )
+            .unwrap();
+
+        for buffer_id in [7, 8] {
+            state
+                .handle_message(
+                    Some(session_id),
+                    ClientMessage::AttachShmBuffer {
+                        surface_id: 5,
+                        buffer_id,
+                    },
+                )
+                .unwrap();
+            state
+                .handle_message(
+                    Some(session_id),
+                    ClientMessage::Commit {
+                        surface_id: 5,
+                        frame_callback: None,
+                    },
+                )
+                .unwrap();
+        }
+
+        assert!(
+            state
+                .handle_message(
+                    Some(session_id),
+                    ClientMessage::DestroyBuffer { buffer_id: 7 },
+                )
+                .is_err(),
+            "the compositor still owns the first buffer before presentation"
+        );
+        assert_eq!(state.release_presented_buffers(), 1);
+        assert!(sink.drain().into_iter().any(|event| matches!(
+            event.message,
+            CompositorMessage::BufferRelease { buffer_id: 7 }
+        )));
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::DestroyBuffer { buffer_id: 7 },
+            )
+            .expect("a released buffer is reusable or destroyable");
+
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::DetachBuffer { surface_id: 5 },
+            )
+            .unwrap();
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::Commit {
+                    surface_id: 5,
+                    frame_callback: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(state.release_presented_buffers(), 1);
+        assert!(sink.drain().into_iter().any(|event| matches!(
+            event.message,
+            CompositorMessage::BufferRelease { buffer_id: 8 }
+        )));
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::DestroyBuffer { buffer_id: 8 },
+            )
+            .unwrap();
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::DestroyShmPool { pool_id: 3 },
+            )
+            .unwrap();
     }
 
     /// Grant `session_id` the session-lock capability and return its token.
@@ -3810,5 +4664,266 @@ mod tests {
             )
             .expect_err("cross-session toplevel access must fail");
         assert!(error.contains("does not belong"));
+    }
+
+    #[test]
+    fn version_aware_clients_negotiate_v2_without_breaking_v1() {
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        let responses = state
+            .handle_message(
+                None,
+                ClientMessage::ConnectVersioned {
+                    app_id: "app-501".to_string(),
+                    pid: 501,
+                    min_version: 1,
+                    max_version: 99,
+                },
+            )
+            .expect("version range overlaps");
+        assert!(matches!(
+            &responses[0],
+            CompositorMessage::ProtocolVersion { version: 2, features }
+                if features.contains(&"capture-fd".to_string())
+        ));
+        assert!(matches!(responses[1], CompositorMessage::Connected { .. }));
+
+        let error = state
+            .handle_message(
+                None,
+                ClientMessage::ConnectVersioned {
+                    app_id: "app-502".to_string(),
+                    pid: 502,
+                    min_version: CURRENT_PROTOCOL_VERSION + 1,
+                    max_version: CURRENT_PROTOCOL_VERSION + 2,
+                },
+            )
+            .expect_err("future-only client must be refused");
+        assert!(error.contains("No compatible SCP version"));
+    }
+
+    #[test]
+    fn capture_exports_one_immutable_frame_and_consumes_the_grant() {
+        use std::io::Read;
+
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        let output = state
+            .add_output("test".to_string(), "test".to_string(), 4, 3, 60_000)
+            .unwrap();
+        let (session_id, _) = app_with_focused_window(&mut state, 601);
+        let sink = SessionSink::new().unwrap();
+        state.register_session_sink(session_id, Arc::clone(&sink));
+
+        let grant = state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::RequestCapability {
+                    capability: "screen-capture-output".to_string(),
+                    justification: "test capture".to_string(),
+                },
+            )
+            .unwrap();
+        let token = match &grant[0] {
+            CompositorMessage::CapabilityDecision {
+                granted: true,
+                token: Some(token),
+                ..
+            } => token.clone(),
+            other => panic!("unexpected grant: {other:?}"),
+        };
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::RequestCapture {
+                    target: CaptureTarget::Output(output),
+                    cursor_mode: crate::scp::protocol::CursorMode::Exclude,
+                    capability_token: token.clone(),
+                },
+            )
+            .unwrap();
+
+        let event = sink
+            .drain()
+            .into_iter()
+            .find(|event| matches!(event.message, CompositorMessage::CaptureGranted { .. }))
+            .expect("capture event queued");
+        assert!(matches!(
+            event.message,
+            CompositorMessage::CaptureGranted {
+                width: 4,
+                height: 3,
+                stride: 16,
+                ..
+            }
+        ));
+        let mut bytes = Vec::new();
+        std::fs::File::from(event.fd.expect("capture descriptor"))
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes.len(), 4 * 3 * 4);
+
+        let replay = state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::RequestCapture {
+                    target: CaptureTarget::Output(output),
+                    cursor_mode: crate::scp::protocol::CursorMode::Exclude,
+                    capability_token: token,
+                },
+            )
+            .expect_err("a capture grant is one-shot");
+        assert!(replay.contains("not granted"));
+    }
+
+    #[test]
+    fn registered_global_shortcut_consumes_key_press_and_release() {
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        state
+            .add_output("test".to_string(), "test".to_string(), 800, 600, 60_000)
+            .unwrap();
+        let (session_id, _) = app_with_focused_window(&mut state, 701);
+        let sink = SessionSink::new().unwrap();
+        state.register_session_sink(session_id, Arc::clone(&sink));
+
+        let grant = state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::RequestCapability {
+                    capability: "global-shortcuts".to_string(),
+                    justification: "test shortcut".to_string(),
+                },
+            )
+            .unwrap();
+        let token = match &grant[0] {
+            CompositorMessage::CapabilityDecision {
+                token: Some(token), ..
+            } => token.clone(),
+            other => panic!("unexpected grant: {other:?}"),
+        };
+        let binding = KeyBinding {
+            keycode: 24,
+            modifiers: crate::scp::keymap::modifiers::SUPER,
+        };
+        let granted = state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::RegisterShortcut {
+                    binding,
+                    justification: "Open the test app".to_string(),
+                    capability_token: token,
+                },
+            )
+            .unwrap();
+        let shortcut_id = match granted[0] {
+            CompositorMessage::ShortcutGranted { shortcut_id, .. } => shortcut_id,
+            ref other => panic!("unexpected shortcut response: {other:?}"),
+        };
+
+        use crate::scp::protocol::KeyState;
+        state.handle_key(133, KeyState::Pressed, 1);
+        sink.drain();
+        state.handle_key(24, KeyState::Pressed, 2);
+        state.handle_key(24, KeyState::Released, 3);
+        let messages: Vec<_> = sink
+            .drain()
+            .into_iter()
+            .map(|event| event.message)
+            .collect();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            CompositorMessage::ShortcutActivated {
+                shortcut_id: id,
+                timestamp_ms: 2
+            } if *id == shortcut_id
+        )));
+        assert!(!messages.iter().any(|message| matches!(
+            message,
+            CompositorMessage::InputEvent {
+                event: InputEvent::KeyboardKey { key: 24, .. },
+                ..
+            }
+        )));
+
+        assert_eq!(
+            state.revoke_capability_for_app(
+                &AppId("app-701".to_string()),
+                &Capability::GlobalShortcuts,
+                "test policy change"
+            ),
+            1
+        );
+        sink.drain();
+        state.handle_key(24, KeyState::Pressed, 4);
+        let messages: Vec<_> = sink
+            .drain()
+            .into_iter()
+            .map(|event| event.message)
+            .collect();
+        assert!(
+            !messages
+                .iter()
+                .any(|message| matches!(message, CompositorMessage::ShortcutActivated { .. }))
+        );
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            CompositorMessage::InputEvent {
+                event: InputEvent::KeyboardKey { key: 24, .. },
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn surface_output_membership_tracks_role_creation_and_hot_unplug() {
+        let mut state = ScpState::with_security(Arc::new(TestSecurity::default()));
+        let output = state
+            .add_output("test".to_string(), "test".to_string(), 800, 600, 60_000)
+            .unwrap();
+        let (session_id, token) = connect(&mut state, 801);
+        let sink = SessionSink::new().unwrap();
+        state.register_session_sink(session_id, Arc::clone(&sink));
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::CreateSurface { surface_id: 1 },
+            )
+            .unwrap();
+        state
+            .handle_message(
+                Some(session_id),
+                ClientMessage::CreateToplevel {
+                    surface_id: 1,
+                    capability_token: token,
+                    title: "membership".to_string(),
+                },
+            )
+            .unwrap();
+        let entered = sink.drain().into_iter().any(|event| {
+            matches!(
+                event.message,
+                CompositorMessage::SurfaceEnterOutput {
+                    surface_id: 1,
+                    output_id
+                } if output_id == output
+            )
+        });
+        assert!(entered);
+
+        state.remove_output(output).unwrap();
+        let messages: Vec<_> = sink
+            .drain()
+            .into_iter()
+            .map(|event| event.message)
+            .collect();
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            CompositorMessage::SurfaceLeaveOutput {
+                surface_id: 1,
+                output_id
+            } if *output_id == output
+        )));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            CompositorMessage::OutputRemoved { output_id } if *output_id == output
+        )));
     }
 }

@@ -3,6 +3,12 @@
 #![cfg_attr(target_os = "uefi", no_main)]
 #![cfg_attr(target_os = "uefi", no_std)]
 
+#[cfg(target_os = "uefi")]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
+    uefi::runtime::reset(uefi::runtime::ResetType::COLD, uefi::Status::ABORTED, None)
+}
+
 #[cfg(not(target_os = "uefi"))]
 fn main() {
     eprintln!("sol-boot-test-payload is only used by the OVMF integration test");
@@ -18,7 +24,10 @@ mod firmware {
         if uefi::helpers::init().is_err() {
             return Status::ABORTED;
         }
-        uefi::println!("SOL_BOOT_TEST_PAYLOAD_STARTED");
+        uefi::println!(
+            "SOL_BOOT_TEST_PAYLOAD_STARTED_{}",
+            env!("SOL_BOOT_TEST_PAYLOAD_MARKER")
+        );
         runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, None)
     }
 }

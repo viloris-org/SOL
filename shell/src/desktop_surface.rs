@@ -151,10 +151,7 @@ impl DesktopSurface {
     }
 
     /// Paint and present the background.
-    pub fn present(
-        &mut self,
-        host: &mut impl DesktopHost,
-    ) -> Result<(), DesktopSurfaceError> {
+    pub fn present(&mut self, host: &mut impl DesktopHost) -> Result<(), DesktopSurfaceError> {
         let contract = self.contract()?;
         let pixels = rasterize(&contract)?;
         host.present(&contract.placement, &pixels)?;

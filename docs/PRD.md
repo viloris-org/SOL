@@ -280,7 +280,7 @@ reduced transparency and high contrast always have solid alternatives.
 ├──────────────────────────────────────────────┤
 │        SOL System Image and Boot Chain       │
 │                                              │
-│ sol-boot / Linux / systemd / Mesa / etc.    │
+│ Stage-0 / sol-boot / Linux / Mesa / etc.    │
 └──────────────────────────────────────────────┘
 ```
 
@@ -308,25 +308,36 @@ Linux namespaces / cgroups / seccomp / LSMs
 UEFI and UKI conventions
 ```
 
-The native boot path is `UEFI → sol-boot → verified A/B system deployment →
-Linux userspace`. Each deployment binds its kernel, initrd, root-image digest,
-runtime descriptors, and generation. `sol-boot` owns signature policy, slot
-selection, bounded retry, known-good fallback, and recovery handoff. Current and
-fallback `sol-boot` copies and recovery copies remain independently addressable;
-their updates use inactive-copy verification and one-shot trial activation rather
-than overwriting the only known-good path. User data remains outside system
-slots.
+The native boot path is `UEFI → stable Stage-0 → sol-boot manager →
+verified A/B deployment → Linux userspace`. Platform recovery is a sibling
+firmware/Stage-0 path, not a child that depends on the manager it may repair.
+Each signed deployment identity binds a complete UKI, root/dm-verity identity,
+runtime descriptors, generation, key epoch, and security version; physical A/B
+slots are placement state. `sol-boot` owns deployment selection, bounded retry,
+known-good fallback, and UKI transfer. Manager, recovery, and deployment trials
+use separate state machines. A hardware-backed rollback index advances only
+after promotion. User data remains outside system slots, and irreversible data
+migration cannot cross the rollback barrier without a compatible snapshot or
+versioning path.
+
+Boot graphics are intentionally modest. Stage-0 is display-absent; `sol-boot`
+may draw a static mark in the current GOP mode but never reads EDID, chooses a
+resolution, or calls `SetMode()`. Native resolution and all interactive boot or
+recovery UI belong to Linux DRM. SOL maintains no certified boot-graphics
+hardware matrix and makes no seamless or flicker-free boot promise.
 
 ---
 
 # 7. Package architecture
 
 SOL owns `sol-pkg` (CLI and inspection) and `sol-packaged` (privileged
-transaction service). A Software app is a client of this authority, not a
-parallel installer.
+transaction staging service). A Software app is a client of this authority,
+not a parallel installer. Stage-0 and `sol-boot` still perform independent
+activation checks; package staging cannot create boot trust.
 
-Boot/recovery copies use verified one-shot trial activation. System releases are
-signed, read-only deployments activated through A/B boot slots.
+Boot-manager and recovery copies use separate verified one-shot trials selected
+by Stage-0. System releases are signed, read-only content identities placed and
+activated through A/B deployment slots.
 Applications are signed `.app` bundles installed in a content-addressed store
 and activated by an atomic version switch. Both use the transaction sequence:
 
@@ -364,7 +375,7 @@ Upstream projects / build inputs
       ↓
 SOL Integration
       ↓
-Reproducible image + hardware/security testing
+Reproducible image + security/fault-injection testing
       ↓
 Signed SOL channel
       ↓
@@ -1128,6 +1139,24 @@ Screenshot tool
 Screen recording
 ```
 
+Professional first-party applications after the platform release gates:
+
+```text
+Hyperion — ultra-flagship professional AI IDE
+Phoebe   — professional photo workflow, benchmarked against Lightroom
+Iapetus  — professional image editing, benchmarked against Photoshop
+```
+
+Professional application names follow the Saturn-moon system. Hyperion,
+Iapetus, and Phoebe belong to the same astronomical family; future additions
+to this product tier must preserve that naming rule.
+
+These products are not enlarged utility apps. They form a professional
+application tier and must prove that SOL can sustain large documents,
+GPU-intensive work, color-managed media, extensibility, long-running jobs, and
+AI-assisted workflows without bypassing the public application platform or its
+security model.
+
 First-party apps also carry the responsibility of dogfooding SolKit.
 
 Rule:
@@ -1228,6 +1257,78 @@ MVP targets:
 The default shell remains whatever Linux shell the user has already chosen.
 
 SOL does not need to re-implement a shell language for this desktop project.
+
+---
+
+# 27A. Hyperion
+
+Hyperion is SOL's ultra-flagship professional AI IDE. Its benchmark is the
+best complete development environments, with AI treated as a native,
+inspectable engineering workflow rather than a chat panel.
+
+Core requirements:
+
+- Large-repository, multi-language editing with LSP, debugging, testing,
+  profiling, source control, terminals, tasks, and remote workspaces
+- Repository-aware AI that can research, plan, edit, build, test, and debug
+  across a project while preserving user control
+- Reviewable plans, diffs, commands, tool calls, model identity, and provenance;
+  no silent file mutation, process execution, credential use, or publication
+- Parallel agent workflows with isolated workspaces, explicit merge/review, and
+  recoverable checkpoints
+- Local and cloud model providers behind one permissioned model/tool contract
+- Sandboxed extensions and language tooling with bounded resource use
+- Fast startup, low-latency editing, and graceful operation on very large
+  repositories
+
+Hyperion dogfoods the same public SolKit, document, command, task, sandbox,
+account, and portal APIs available to third-party developer tools.
+
+# 27B. Phoebe
+
+Phoebe is SOL's professional photo library and non-destructive development
+application, positioned against Lightroom.
+
+Core requirements:
+
+- Color-managed RAW ingestion, cataloging, rating, culling, metadata, search,
+  collections, and duplicate-aware asset management
+- Parametric non-destructive adjustments, local masks, presets, history,
+  before/after comparison, batch synchronization, and virtual copies
+- GPU-accelerated preview and export with background jobs that survive normal
+  application suspension and restart
+- Camera/lens profiles, wide-gamut and HDR workflows, soft proofing, and
+  deterministic export recipes
+- Immutable originals, portable sidecar/edit metadata, and explicit library
+  backup/recovery behavior
+- Optional AI selection, denoise, search, and retouch features with visible
+  model provenance and reversible results
+
+# 27C. Iapetus
+
+Iapetus is SOL's professional pixel editing and compositing application,
+positioned against Photoshop. Its name comes from the two-toned Saturnian moon,
+whose extreme light/dark contrast gives the product a direct visual association.
+
+Core requirements:
+
+- Layered documents with masks, blend modes, groups, adjustment layers,
+  non-destructive transforms, linked assets, and a recoverable history
+- Precision selections, painting, vector paths, typography, retouching,
+  compositing, filters, and automation
+- Color-managed high-bit-depth, wide-gamut, HDR, and print-oriented workflows
+- Tiled GPU rendering for large canvases with bounded memory use and predictable
+  quality fallbacks
+- Sandboxed brushes, filters, scripts, and plug-ins using versioned public APIs
+- Interchange with common raster, vector, camera, and layered-document formats,
+  with unsupported features reported instead of silently flattened
+- Optional AI selection, generation, fill, and restoration as editable,
+  attributable operations rather than destructive black-box changes
+
+Phoebe and Iapetus share a versioned SOL imaging foundation for color management,
+GPU tiles, masks, metadata, undo/history, AI model execution, and export. Shared
+capability belongs in SolKit/runtime libraries rather than private duplicated
+engines, while each application keeps its own workflow and document model.
 
 ---
 
@@ -1526,9 +1627,10 @@ MVP includes:
 ```text
 Signed x86-64 UEFI boot path
 Two bootable system slots
-Slot-bound kernel/initrd/root-image deployment manifests
-Redundant trial-updated sol-boot and recovery copies
-Known-good deployment and firmware-visible boot fallback
+Content-identified UKI/root/dm-verity deployment manifests
+Stable Stage-0 with separately trialed sol-boot managers
+Independent platform and signed external recovery paths
+Authenticated health checkpoints and rollback protection
 Reproducible SOL system deployment
 ```
 
@@ -1596,6 +1698,7 @@ The OS MVP does **not** require:
 - Mobile support
 - Cloud ecosystem
 - Office suite
+- Hyperion, Phoebe, or Iapetus professional-product release
 - A custom driver stack or cryptographic primitive
 - Long-term support for more than the first SOL Runtime major
 - Mobile and non-x86-64 boot targets
@@ -1761,17 +1864,19 @@ Planned deliverables:
 
 ```text
 Reproducible system-image composition
-Signed redundant UEFI sol-boot path with one-shot trial activation
-A/B deployment manifests binding kernel, initrd, root image, and runtime state
-Slot selection and boot-success protocol
-Redundant recovery environment with independent fallback
-Installer for supported x86-64 hardware
+Stable signed UEFI Stage-0 with retained/trial sol-boot managers
+A/B placement of content-identified UKI, root image, and runtime state
+Priority/bootable/tries/successful selection and authenticated health protocol
+Promotion-gated security rollback index and shared-data rollback barrier
+Firmware-addressable platform recovery plus signed external recovery
+x86-64 UEFI installer without a certified boot-graphics hardware matrix
 ```
 
 Success criterion:
 
-> A failed or corrupted staged system update automatically returns to a known-
-> good bootable SOL image, and recovery works without the graphical shell.
+> A failed or corrupted staged manager or system update returns to a retained
+> bootable path, and recovery can repair that path without the graphical shell
+> or the manager being repaired.
 
 ## Phase 8 — Native application platform
 
@@ -1818,6 +1923,30 @@ Success criterion:
 > rollback resolves a compatible retained app version or an explicit unavailable
 > state without blocking boot or rewinding app data.
 
+## Phase 10 — Professional first-party applications
+
+Planned scope:
+
+```text
+Shared professional document, GPU imaging, color, AI, and extension foundations
+Hyperion — ultra-flagship professional AI IDE
+Phoebe — non-destructive professional photo workflow
+Iapetus — professional layered image editing and compositing
+```
+
+Hyperion, Phoebe, and Iapetus may be developed in parallel after their shared
+contracts stabilize. This phase does not weaken the Phase 3 gate: Files,
+Terminal, and Settings remain the initial SolKit conformance suite and ship
+independently of the professional applications.
+
+Success criterion:
+
+> A professional can complete and recover a production-scale software or image
+> project in a first-party SOL application; AI actions are attributable and
+> reviewable, creative edits are non-destructive where promised, extensions are
+> sandboxed, and large-project performance, color, accessibility, and document
+> interchange pass the published release matrix.
+
 ---
 
 # 39. Repository strategy
@@ -1845,7 +1974,10 @@ sol/
 ├── apps/
 │   ├── files/
 │   ├── terminal/
-│   └── settings/
+│   ├── settings/
+│   ├── hyperion/    # planned Phase 10
+│   ├── phoebe/      # planned Phase 10
+│   └── iapetus/     # planned Phase 10
 ├── protocols/
 ├── packaging/
 │   ├── sol/
@@ -1877,7 +2009,7 @@ Currently settled:
 | Networking | NetworkManager |
 | Bluetooth | BlueZ |
 | Init / services | systemd |
-| Boot | Redundant signed UEFI/recovery copies with trial activation; slot-bound A/B deployments |
+| Boot | Stable Stage-0; separately trialed managers; independent recovery; content-identified A/B deployments; authenticated health and anti-rollback |
 | System package manager | `sol-pkg` + `sol-packaged`; boot/recovery/system/app transactions |
 | Native app format | Signed, self-contained `.app` bundle |
 | App distribution | Signed content-addressed installs; per-deployment compatible-version resolution |
@@ -1933,8 +2065,9 @@ open and must be decided during prototyping.
 20. `.app` deterministic container encoding and compression
 21. SOL Runtime ABI generator, feature-registry encoding, and IPC schema
     technology (major/revision/feature compatibility model settled by ADR-0020)
-22. Boot measurement, key enrollment, hardware-backed attestation, and exact EFI
-    entry encoding (redundancy/trial/fallback settled by ADR-0019)
+22. Concrete Stage-0, boot measurement, key enrollment, TPM rollback/state
+    protocol, and exact EFI entry encoding (anchor/manager/recovery separation,
+    trial semantics, and best-effort graphics settled by ADR-0019/0026)
 23. System-image filesystem and delta-update encoding
 24. Account vault database and hardware-sealing implementation
 25. Fluid-material compositor sampling/refraction path and fallback thresholds

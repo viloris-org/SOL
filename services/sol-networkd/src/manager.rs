@@ -381,6 +381,16 @@ impl NetworkManager {
         inner.devices.get(id).cloned()
     }
 
+    pub async fn get_all_devices(&self) -> Vec<Device> {
+        let inner = self.inner.read().await;
+        inner.devices.values().cloned().collect()
+    }
+
+    pub async fn get_profile(&self, id: &ProfileId) -> Result<Option<Profile>> {
+        let inner = self.inner.read().await;
+        inner.profiles.get(id).await
+    }
+
     pub async fn connect_to_profile(&self, profile_id: &ProfileId) -> Result<()> {
         info!("Connecting to profile: {}", profile_id);
 

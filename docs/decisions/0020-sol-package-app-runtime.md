@@ -17,8 +17,10 @@ makes coherent framework evolution difficult.
 ## Decision
 
 SOL owns `sol-pkg`, its user/admin CLI, and `sol-packaged`, the sole privileged
-boot/recovery, system-deployment, and application transaction service. A
-Software UI is an unprivileged client of the same service.
+staging service for boot-manager, recovery, system-deployment, and application
+transactions. A Software UI is an unprivileged client of the same service.
+Staging authority is not boot trust: Stage-0, `sol-boot`, and the application
+runtime independently validate and activate artifacts at their own layers.
 
 The native application unit is a deterministic, signed, relocatable, read-only
 `.app` bundle installed in a content-addressed store. It contains a canonical
@@ -39,7 +41,10 @@ system capabilities use versioned IPC. SolKit provides source-level language
 bindings over those contracts.
 
 System-image and app operations both use `resolve → fetch → verify → stage →
-validate → commit`. System deployments activate through A/B boot slots. An app
+validate → commit`. Manager, recovery, and deployment activation then use
+their separate ADR-0019/0026 trial records and promotion gates; a package
+transaction cannot create boot trust by writing selection state. System
+deployments activate through physical A/B slots. An app
 transaction atomically switches its preferred bundle hash; launch derives an
 effective bundle hash compatible with the current deployment's authenticated
 runtime descriptor. Neither rollback rewinds user data.

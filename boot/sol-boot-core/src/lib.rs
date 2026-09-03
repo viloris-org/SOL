@@ -9,9 +9,17 @@
 use core::error::Error;
 use core::fmt;
 
+mod auth;
 mod codec;
 mod deployment;
+mod rollback;
 
+pub use auth::{
+    ATTEMPT_NONCE_SIZE, AUTH_TAG_SIZE, AuthError, AuthenticatedBootState, AuthenticatedStorage,
+    AuthenticatedSuccessReport, HealthCheckpoints, SoftwareAuthenticatedStorage,
+};
+#[cfg(feature = "tpm")]
+pub use auth::{TpmAuthenticatedStorage, TpmError};
 pub use codec::{
     BOOT_STATE_FORMAT_V1, BOOT_STATE_V1_SIZE, BOOT_SUCCESS_FORMAT_V1, BOOT_SUCCESS_V1_SIZE,
     CodecError, DurableBootState, DurableStateCopy, SelectedDurableState, select_redundant_state,
@@ -20,6 +28,7 @@ pub use deployment::{
     ArtifactBinding, DEPLOYMENT_FORMAT_V1, DEPLOYMENT_SIGNED_V1_SIZE, DEPLOYMENT_V1_PAYLOAD_SIZE,
     DeploymentDescriptor, DeploymentDescriptorError, SignedDeploymentDescriptor,
 };
+pub use rollback::{RollbackProtection, SecurityPolicy};
 
 /// Physical A/B system deployment slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -452,6 +461,14 @@ pub struct BootSuccessReport {
 
 /// Selects a verified deployment without reading firmware, clocks, files, or
 /// graphics state.
+///
+/// # Attempt Identity Exhaustion
+///
+/// If the u64 attempt counter reaches its maximum value (2^64 - 1), selection
+/// enters recovery instead of wrapping. This represents a theoretical scenario
+/// requiring ~5 billion years at 1 attempt/second, but ensures monotonicity
+/// guarantees remain intact. Production systems should log and investigate if
+/// this condition is ever observed (likely indicates state corruption).
 #[must_use]
 pub fn prepare_boot(state: &BootState, observation: BootObservation) -> BootPlan {
     if observation.recovery_requested {
@@ -468,6 +485,7 @@ pub fn prepare_boot(state: &BootState, observation: BootObservation) -> BootPlan
             DeploymentStatus::Trial {
                 remaining_attempts, ..
             } if remaining_attempts > 0 => {
+                // Check for attempt identity exhaustion (theoretical edge case).
                 let Some(next_attempt) = state.next_attempt.checked_add(1) else {
                     return BootPlan::Ready(BootAction::Recovery(
                         RecoveryReason::AttemptIdentityExhausted,

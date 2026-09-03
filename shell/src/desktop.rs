@@ -45,9 +45,7 @@ use crate::{
     },
     scp_host::{DesktopHost, DesktopHostError, HostOutput, ScpDesktopHost},
     topbar::TopBarSnapshot,
-    topbar_surface::{
-        ForegroundApplication, TOPBAR_NAMESPACE, TopBarSurface, TopBarSurfaceError,
-    },
+    topbar_surface::{ForegroundApplication, TOPBAR_NAMESPACE, TopBarSurface, TopBarSurfaceError},
 };
 
 use sol_system::SystemActionApi;
@@ -210,10 +208,7 @@ impl<H: DesktopHost, A: SystemActionApi, D: DesktopActionAdapter> DesktopSession
     }
 
     /// Replace the top bar's provider snapshot and repaint just the bar.
-    pub fn refresh_status(
-        &mut self,
-        status: TopBarSnapshot,
-    ) -> Result<(), DesktopSessionError> {
+    pub fn refresh_status(&mut self, status: TopBarSnapshot) -> Result<(), DesktopSessionError> {
         self.topbar.refresh(status);
         self.topbar.present(&mut self.host)?;
         Ok(())
@@ -429,7 +424,10 @@ impl<A: SystemActionApi, D: DesktopActionAdapter> DesktopSession<ScpDesktopHost,
                 self.pointer = Some((surface_id, x, y));
             }
             InputEvent::PointerLeave { .. } => {
-                if self.pointer.is_some_and(|(owner, _, _)| owner == surface_id) {
+                if self
+                    .pointer
+                    .is_some_and(|(owner, _, _)| owner == surface_id)
+                {
                     self.pointer = None;
                 }
             }
@@ -467,10 +465,7 @@ impl<A: SystemActionApi, D: DesktopActionAdapter> DesktopSession<ScpDesktopHost,
 
         // The compositor reports surface-local coordinates in physical pixels;
         // every surface lays itself out in logical ones.
-        let (x, y) = (
-            x as f32 / self.output.scale,
-            y as f32 / self.output.scale,
-        );
+        let (x, y) = (x as f32 / self.output.scale, y as f32 / self.output.scale);
 
         match namespace.as_str() {
             DOCK_NAMESPACE => {
@@ -502,11 +497,7 @@ impl<A: SystemActionApi, D: DesktopActionAdapter> DesktopSession<ScpDesktopHost,
 /// pretending otherwise here would produce a search field that types the wrong
 /// characters on a non-US layout.
 fn keycode_to_key(keycode: u32) -> Option<Key> {
-    const LETTER_ROWS: [(u32, &str); 3] = [
-        (24, "qwertyuiop"),
-        (38, "asdfghjkl"),
-        (52, "zxcvbnm"),
-    ];
+    const LETTER_ROWS: [(u32, &str); 3] = [(24, "qwertyuiop"), (38, "asdfghjkl"), (52, "zxcvbnm")];
 
     match keycode {
         9 => return Some(Key::Escape),
@@ -629,8 +620,7 @@ mod tests {
         session.present_all().expect("present");
 
         assert_eq!(
-            session.host.presented[0].0.namespace,
-            DESKTOP_NAMESPACE,
+            session.host.presented[0].0.namespace, DESKTOP_NAMESPACE,
             "the desktop composes bottom-up"
         );
     }
@@ -681,7 +671,10 @@ mod tests {
     #[test]
     fn the_dock_launcher_entry_toggles_rather_than_launching() {
         let mut session = session();
-        assert_eq!(session.activate(DockTarget::Launcher).expect("activate"), None);
+        assert_eq!(
+            session.activate(DockTarget::Launcher).expect("activate"),
+            None
+        );
         assert!(session.is_launcher_open());
     }
 
@@ -695,7 +688,11 @@ mod tests {
         session.refresh_dock().expect("refresh");
 
         let contract = session.dock.last_contract.clone().expect("contract");
-        assert_eq!(contract.tiles.len(), 2, "launcher entry plus one running app");
+        assert_eq!(
+            contract.tiles.len(),
+            2,
+            "launcher entry plus one running app"
+        );
         assert_eq!(contract.tiles[1].label, "Terminal");
         assert!(contract.tiles[1].running);
     }
@@ -728,7 +725,12 @@ mod tests {
             .set_output(HostOutput::new(1280, 720, 1.0))
             .expect("resize");
 
-        for namespace in [DESKTOP_NAMESPACE, DOCK_NAMESPACE, TOPBAR_NAMESPACE, LAUNCHER_NAMESPACE] {
+        for namespace in [
+            DESKTOP_NAMESPACE,
+            DOCK_NAMESPACE,
+            TOPBAR_NAMESPACE,
+            LAUNCHER_NAMESPACE,
+        ] {
             let (placement, pixels) = session
                 .host
                 .last_frame(namespace)

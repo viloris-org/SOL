@@ -486,7 +486,7 @@ impl Parser {
                         match token {
                             Token::Pipe | Token::Newline | Token::Semicolon => break,
                             _ => {
-                                args.push(self.parse_primary()?);
+                                args.push(self.parse_arg()?);
                             }
                         }
                     }
@@ -504,7 +504,7 @@ impl Parser {
                                     // 检查是否有值
                                     if matches!(self.lexer.peek(), Some(Token::Assign)) {
                                         self.lexer.advance();
-                                        let value = self.parse_primary()?;
+                                        let value = self.parse_arg()?;
                                         flags.insert(flag_name, value);
                                     } else {
                                         flags.insert(flag_name, Expr::Literal(Value::Bool(true)));
@@ -521,7 +521,7 @@ impl Parser {
                         }
                         Some(Token::Number(_)) => {
                             // 负数
-                            let num_expr = self.parse_primary()?;
+                            let num_expr = self.parse_arg()?;
                             args.push(Expr::Unary {
                                 op: UnaryOp::Neg,
                                 expr: Box::new(num_expr),
@@ -541,12 +541,99 @@ impl Parser {
                     }
                 }
                 _ => {
-                    args.push(self.parse_primary()?);
+                    args.push(self.parse_arg()?);
                 }
             }
         }
 
         Ok(Expr::Call { name, args, flags })
+    }
+
+    // 解析命令参数 - 与 parse_primary 类似，但标识符直接作为字符串参数
+    // 支持路径参数（如 /home/user 会被组合成一个字符串）
+    fn parse_arg(&mut self) -> ParseResult<Expr> {
+        match self.lexer.peek() {
+            Some(Token::Number(n)) => {
+                let n = *n;
+                self.lexer.advance();
+                Ok(Expr::Literal(Value::Number(n)))
+            }
+            Some(Token::String(s)) => {
+                let s = s.clone();
+                self.lexer.advance();
+                Ok(Expr::Literal(Value::String(s)))
+            }
+            Some(Token::Bool(b)) => {
+                let b = *b;
+                self.lexer.advance();
+                Ok(Expr::Literal(Value::Bool(b)))
+            }
+            Some(Token::Null) => {
+                self.lexer.advance();
+                Ok(Expr::Literal(Value::Null))
+            }
+            Some(Token::Dollar) => {
+                self.lexer.advance();
+                match self.lexer.advance() {
+                    Some(Token::Ident(name)) => Ok(Expr::Variable(name)),
+                    Some(tok) => Err(ParseError::ExpectedToken {
+                        expected: "variable name".to_string(),
+                        found: tok.to_string(),
+                    }),
+                    None => Err(ParseError::UnexpectedEof),
+                }
+            }
+            Some(Token::Slash) | Some(Token::Ident(_)) | Some(Token::Dot) | Some(Token::DotDot) => {
+                // 可能是路径或标识符 - 组合所有连续的路径相关token
+                let mut path = String::new();
+
+                loop {
+                    match self.lexer.peek() {
+                        Some(Token::Slash) => {
+                            self.lexer.advance();
+                            path.push('/');
+                        }
+                        Some(Token::Ident(s)) => {
+                            let s = s.clone();
+                            self.lexer.advance();
+                            path.push_str(&s);
+                        }
+                        Some(Token::Dot) => {
+                            self.lexer.advance();
+                            path.push('.');
+                        }
+                        Some(Token::DotDot) => {
+                            self.lexer.advance();
+                            path.push_str("..");
+                        }
+                        Some(Token::Minus) => {
+                            // 支持文件名中的连字符
+                            self.lexer.advance();
+                            path.push('-');
+                        }
+                        Some(Token::Number(n)) => {
+                            // 支持路径中的数字
+                            let n = *n;
+                            self.lexer.advance();
+                            path.push_str(&n.to_string());
+                        }
+                        _ => break,
+                    }
+                }
+
+                Ok(Expr::Literal(Value::String(path)))
+            }
+            Some(Token::LBracket) => self.parse_list(),
+            Some(Token::LBrace) => self.parse_record(),
+            Some(Token::LParen) => {
+                self.lexer.advance();
+                let expr = self.parse_expr()?;
+                self.expect_token(Token::RParen)?;
+                Ok(expr)
+            }
+            Some(tok) => Err(ParseError::UnexpectedToken(tok.to_string())),
+            None => Err(ParseError::UnexpectedEof),
+        }
     }
 
     fn parse_list(&mut self) -> ParseResult<Expr> {

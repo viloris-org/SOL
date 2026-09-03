@@ -15,6 +15,7 @@ use sol_compositor::scp::{
     resolve_socket_path,
     transport::{MAX_FRAME_SIZE, write_frame, write_frame_with_fd},
     unix_socket,
+    wire::WireMessage,
 };
 
 use super::{
@@ -259,7 +260,7 @@ impl ScpClient {
     /// Feed every complete buffered frame through the driver.
     fn drain_pending_frames(&mut self) -> Result<(), Error> {
         while let Some(payload) = take_frame(&mut self.pending)? {
-            let message: CompositorMessage = serde_json::from_slice(&payload)
+            let message = CompositorMessage::decode_wire(&payload)
                 .map_err(|error| Error::Decode(error.to_string()))?;
             let step = self.driver.handle(message).map_err(Error::Lock)?;
             for message in &step.outbound {

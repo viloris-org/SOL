@@ -163,9 +163,7 @@ impl Canvas {
         let left = rect.x.floor().max(0.0) as u32;
         let top = rect.y.floor().max(0.0) as u32;
         let right = (rect.x + rect.width).ceil().clamp(0.0, self.width as f32) as u32;
-        let bottom = (rect.y + rect.height)
-            .ceil()
-            .clamp(0.0, self.height as f32) as u32;
+        let bottom = (rect.y + rect.height).ceil().clamp(0.0, self.height as f32) as u32;
 
         for y in top..bottom.min(self.height) {
             for x in left..right.min(self.width) {
@@ -458,12 +456,8 @@ mod font {
             '%' => [
                 0b11001, 0b11010, 0b00010, 0b00100, 0b01000, 0b01011, 0b10011,
             ],
-            '!' => [
-                0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0, 0b00100,
-            ],
-            '?' => [
-                0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0, 0b00100,
-            ],
+            '!' => [0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0, 0b00100],
+            '?' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0, 0b00100],
             '(' => [
                 0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010,
             ],
@@ -591,14 +585,20 @@ mod tests {
                 .filter(|(x, y)| canvas.pixel(*x, *y).is_some_and(|pixel| pixel[3] > 0))
                 .count()
         };
-        assert!(ink(&without_glyph) > 0, "missing glyphs must still be shown");
+        assert!(
+            ink(&without_glyph) > 0,
+            "missing glyphs must still be shown"
+        );
         assert!(ink(&with_glyph) > 0);
     }
 
     #[test]
     fn an_empty_string_paints_nothing_and_measures_zero() {
         let mut canvas = Canvas::new(8, 8).expect("allocate");
-        assert_eq!(canvas.draw_text((0.0, 0.0), 2.0, opaque(1.0, 1.0, 1.0), ""), 0.0);
+        assert_eq!(
+            canvas.draw_text((0.0, 0.0), 2.0, opaque(1.0, 1.0, 1.0), ""),
+            0.0
+        );
         assert_eq!(Canvas::text_width(2.0, ""), 0.0);
         assert_eq!(canvas.pixel(0, 0), Some([0, 0, 0, 0]));
     }

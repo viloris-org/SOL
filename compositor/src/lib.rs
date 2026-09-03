@@ -11,4 +11,6 @@
 // fixture that cannot be built should fail the test loudly and immediately.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod drm_backend;
+pub mod native_input;
 pub mod scp;

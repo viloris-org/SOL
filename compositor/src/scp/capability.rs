@@ -198,7 +198,10 @@ pub fn requires_recent_interaction(cap: &Capability) -> Option<Duration> {
 
 /// Check if a capability requires foreground focus.
 pub fn requires_foreground(cap: &Capability) -> bool {
-    matches!(cap, Capability::ClipboardRead | Capability::GlobalShortcuts)
+    matches!(
+        cap,
+        Capability::ClipboardRead | Capability::GlobalShortcuts | Capability::ScreenCapture { .. }
+    )
 }
 
 #[cfg(test)]

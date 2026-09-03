@@ -179,6 +179,33 @@ fn trial_is_exposed_only_after_exact_redundant_readback() {
 }
 
 #[test]
+fn trial_selection_authorizes_only_the_retained_known_good_fallback() {
+    let known_good = identity(DeploymentSlot::A, 22);
+    let trial = identity(DeploymentSlot::B, 23);
+    let state = BootState::new(known_good)
+        .stage_trial(trial, 1)
+        .expect("stage");
+    let (mut manager, key) = manager_with_state(state);
+    install_slot(
+        manager.storage_mut(),
+        &key,
+        known_good,
+        b"manifest A",
+        b"UKI A",
+    );
+    install_slot(manager.storage_mut(), &key, trial, b"manifest B", b"UKI B");
+
+    let selection = manager.select(false).expect("trial");
+    assert_eq!(selection.fallback_deployment(), Some(known_good));
+    assert_eq!(
+        manager
+            .load_fallback_uki(selection)
+            .expect("verified fallback"),
+        Some(b"UKI A".to_vec())
+    );
+}
+
+#[test]
 fn exact_success_report_promotes_before_next_selection() {
     let known_good = identity(DeploymentSlot::A, 30);
     let trial = identity(DeploymentSlot::B, 31);

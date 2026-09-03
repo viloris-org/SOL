@@ -1,7 +1,8 @@
 # SOL ISO Build System
 
-Complete CI/CD pipeline for building bootable SOL OS ISO images with the
-latest stable kernel.
+Development CI/CD pipeline for building bootable SOL OS ISO images with the
+latest stable kernel. This pipeline is a smoke-test vehicle, not the final
+Stage-0, independent-recovery, or installed-system trust topology.
 
 ## Quick Start
 
@@ -60,7 +61,7 @@ latest stable kernel.
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Boot chain
+## Current development boot chain
 
 ```
 EFI/BOOT/BOOTX64.EFI (sol-boot)
@@ -70,6 +71,13 @@ EFI/BOOT/BOOTX64.EFI (sol-boot)
               └─ overlay root -> switch_root -> /sbin/init
                   └─ sol-init supervises every SOL daemon
 ```
+
+This live image currently loads an external initrd from the ESP. Production
+verified boot instead requires one complete UKI containing kernel, initrd,
+immutable command line, and release metadata. It also roots `sol-boot` managers
+below a stable Stage-0 and keeps platform recovery firmware-addressable without
+a working manager. The development ISO must not be cited as evidence that those
+properties exist.
 
 ## Output
 
@@ -90,8 +98,9 @@ Features:
 
 ## Design constraints
 
-- **sol-boot, not GRUB**: the ISO is a UEFI-only El Torito image; the EFI boot
-  entry is sol-boot, which verifies and starts a signed slot deployment.
+- **current sol-boot entry**: the ISO is a UEFI-only El Torito image; its
+  development EFI entry directly runs `sol-boot`. The production entry will be
+  the selected stable Stage-0, not a manager that must recover itself.
 - **sol-init, not systemd**: the base rootfs is `--variant=minbase` with
   systemd excluded; sol-init supervises compositor, shell, and services via
   `.daemon` files with dependency ordering and restart policies.
@@ -99,6 +108,7 @@ Features:
   that mounts the live squashfs and hands control to `/sbin/init`.
 - **All services ship**: settingsd, notificationd, portal, networkd, audiod,
   ntpd, diagnostics, deviced, init, plus the sol-files/terminal/settings apps.
-- **Kernel cmdline**: sol-boot transfers control without a command line, so
+- **Development kernel cmdline**: sol-boot transfers control without a command line, so
   the initrd path is embedded via CONFIG_CMDLINE and the initrd file lives on
-  the SOL ESP (`EFI/SOL/slots/A/initrd.img`).
+  the SOL ESP (`EFI/SOL/slots/A/initrd.img`). This exception is not part of the
+  final indivisible-UKI contract.

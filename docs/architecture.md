@@ -22,8 +22,8 @@ Packages      (planned)     sol-pkg · sol-packaged · sol-bundle · app store
 Shell         (shell/)      dock · launcher · global menu · status · capsule
 Compositor    (compositor/) SCP state · capabilities · surfaces · transport
 ─────────────
-System image  (foundation)  sol-image manifest · planned read-only A/B slots
-Boot          (foundation)  sol-boot core · planned signed UEFI/UKI · GOP handoff
+System image  (foundation)  content identity · UKI/dm-verity · physical A/B placement
+Boot          (foundation)  Stage-0 · sol-boot manager · independent recovery
 ─────────────
 Upstream                    Linux · systemd · Mesa · PipeWire · drivers · etc.
 ```
@@ -33,33 +33,36 @@ The target native contracts are described in [OS Platform Definition](os-platfor
 ## Executable and data lifecycle
 
 ```text
-signed repository metadata
-          ↓ verify
- sol-packaged transaction
-     ┌────────────┬───────────────────┐
-     ↓            ↓                   ↓
-inactive EFI/  inactive deployment  content-addressed .app
-recovery copy  kernel+initrd+root       ↓ compatible switch
-     ↓ trial       ↓ next boot       sandboxed app process
-     └────────→ sol-boot verification ←──────┘
-                       ↓
+UEFI Secure Boot
+  ├─ independent platform/external recovery
+  └─ stable Stage-0
+       ├─ retained/trial sol-boot managers
+       └─ automatic platform recovery
+                    ↓
+       signed deployment identity
+                    ↓ physical A/B selection
+          complete UKI + dm-verity root
+                    ↓ authenticated health gates
           separate mutable user/machine data
 ```
 
-System rollback selects a previous deployment and then resolves the newest
-retained app bundle compatible with that deployment's runtime descriptor.
+Before promotion, functional rollback selects the retained deployment and then
+resolves the newest retained app bundle compatible with that deployment's
+runtime descriptor.
 Application rollback selects a previous compatible bundle hash. Neither
-operation rewinds user data.
+operation rewinds user data. A security rollback below the trusted epoch is
+rejected, and irreversible shared-data migration waits until the rollback
+barrier or uses a compatible snapshot/versioning contract.
 
 ## Boundary rules
 
 | Boundary | Rule | Basis |
 |---|---|---|
-| Firmware → boot | Redundant `sol-boot`/recovery copies use trial activation and a retained firmware-visible fallback | ADR-0019 |
-| Boot graphics → Linux/DRM | Select an exact EDID/GOP mode at most once, preserve the SOL frame through early boot, and prefer a mode-preserving compositor commit | ADR-0026 |
-| Boot → deployment | A signed manifest binds a slot's kernel, initrd, root-image digest, runtime descriptors, and generation | ADR-0019 |
+| Firmware → boot | Stable Stage-0 selects retained/trial managers; platform recovery remains independently firmware-addressable | ADR-0019, ADR-0026 |
+| Boot display → UKI/DRM | Optional static drawing uses the current GOP mode without EDID or `SetMode()`; Linux owns native display policy | ADR-0026 |
+| Boot → deployment | A signed content identity binds the complete UKI, dm-verity root, runtime, generation, key epoch, and security version independently of A/B placement | ADR-0019, ADR-0026 |
 | System image → mutable state | Executable system content is read-only and versioned; user/machine data is outside the slots | ADR-0019 |
-| Repository → install | Only `sol-packaged` commits verified boot/recovery/system/app transactions; CLI and Software are clients | ADR-0019, ADR-0020 |
+| Repository → install | Only `sol-packaged` stages verified manager/recovery/deployment/app transactions; Stage-0 and `sol-boot` independently activate their layers | ADR-0019, ADR-0020, ADR-0026 |
 | App bundle → dependencies | A `.app` vendors all non-SOL userspace dependencies; private libraries never satisfy another app | ADR-0020 |
 | App → SOL Runtime | Major + minimum contract revision + required features select the first non-revoked compatible hash in the preferred release's recorded fallback chain | ADR-0020 |
 | App release → grants | App ID + verified publisher lineage is durable; bundle/process generations bind live handles; uninstall or lineage discontinuity inherits nothing | ADR-0021 |

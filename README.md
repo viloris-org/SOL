@@ -34,12 +34,16 @@ remain closure gates.
 
 The OS rebaseline adds these system foundations:
 
-- `sol-image`: byte-reproducible, slot-bound deployment manifests with exact
-  kernel, initrd, root-image, generation, and runtime-contract verification.
-- `sol-boot`: redundant signed UEFI/recovery paths with trial activation and
-  verified slot-bound A/B system deployments.
-- `sol-pkg` + `sol-packaged`: one transactional manager for boot/recovery
-  copies, system deployments, and signed `.app` bundles.
+- `sol-image`: byte-reproducible development manifests with exact kernel,
+  initrd, root-image, generation, and runtime-contract verification; the
+  production format will separate signed content identity from A/B placement.
+- Boot foundation: stable Stage-0, separately trialed `sol-boot` managers,
+  independent recovery, authenticated health/anti-rollback, and verified
+  content-identified deployments placed in A/B slots. Only the deployment
+  selector and development UEFI adapter exist today.
+- `sol-pkg` + `sol-packaged`: one privileged staging service for manager,
+  recovery, deployment, and signed `.app` transactions; each trust layer
+  validates and activates its own artifacts.
 - `sol-securityd`: application identity, sandbox construction, capability
   grants, atomic consent/lease transactions, revocation, and audit.
 - `sol-accountsd` + `sol-vaultd`: system-managed accounts and encrypted
@@ -132,9 +136,11 @@ To build a bootable ISO image with the latest stable kernel:
 qemu-system-x86_64 -m 2G -smp 2 -cdrom build/iso/sol-*.iso
 ```
 
-The ISO build system automatically fetches the latest stable kernel from kernel.org
-and creates a hybrid BIOS/UEFI bootable image. See [docs/iso-build.md](docs/iso-build.md)
-for detailed documentation and CI/CD setup.
+The ISO build system automatically fetches the latest stable kernel from
+kernel.org and creates a UEFI-only development image. It directly exercises the
+current `sol-boot` manager and is not the final Stage-0/recovery topology. See
+[docs/iso-build.md](docs/iso-build.md) for detailed documentation and CI/CD
+setup.
 
 ## Principles (from PRD §4)
 

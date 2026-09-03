@@ -3,16 +3,14 @@
 // `expect` in a test is a deliberate assertion, not an unhandled error.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use nix::sys::socket::{ControlMessage, MsgFlags, sendmsg};
 use serial_test::serial;
 use sol_compositor::scp::{
     memfd,
     protocol::{BufferFormat, ClientMessage, CompositorMessage},
-    transport::{read_frame, write_frame},
+    transport::{read_frame, write_frame, write_frame_with_fd},
 };
 use std::{
     fs::File,
-    io::IoSlice,
     os::{
         fd::{AsRawFd, FromRawFd, OwnedFd},
         unix::net::UnixStream,
@@ -41,6 +39,10 @@ impl Session {
         let compositor = Command::new(env!("CARGO_BIN_EXE_sol-compositor"))
             .env("XDG_RUNTIME_DIR", &runtime_dir)
             .env("SOL_SCP_SOCKET", &socket_name)
+            // This fixture exercises framing, credentials and token rejection
+            // in a subprocess. Production omits this explicit unsafe switch and
+            // always coordinates with the separately supervised securityd.
+            .env("SOL_SCP_INSECURE_STUB_SECURITY", "1")
             .env(
                 "SOL_COMPOSITOR_SOCKET",
                 format!("sol-{}", std::process::id()),
@@ -242,20 +244,7 @@ fn a_buffer_descriptor_smaller_than_its_geometry_is_refused() {
 
 /// Send one framed message with a descriptor attached via SCM_RIGHTS.
 fn send_with_descriptor(stream: &mut UnixStream, message: &ClientMessage, fd: OwnedFd) {
-    let payload = serde_json::to_vec(message).expect("serialize request");
-    let mut frame = Vec::with_capacity(payload.len() + 4);
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    frame.extend_from_slice(&payload);
-
-    let fds = [fd.as_raw_fd()];
-    sendmsg::<()>(
-        stream.as_raw_fd(),
-        &[IoSlice::new(&frame)],
-        &[ControlMessage::ScmRights(&fds)],
-        MsgFlags::empty(),
-        None,
-    )
-    .expect("send descriptor");
+    write_frame_with_fd(stream, message, fd.as_raw_fd()).expect("send descriptor");
 }
 
 /// A memfd of exactly `bytes` length that can still be shrunk.

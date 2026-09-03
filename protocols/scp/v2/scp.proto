@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package sol.scp.v2;
+
+// Canonical SCP v2 wire contract. File descriptors referenced by comments are
+// carried out-of-band in the same sendmsg(2) call using SCM_RIGHTS and are
+// deliberately never represented as integers in this schema.
+
+message Empty {}
+message Id { uint32 id = 1; }
+message U64Id { uint64 id = 1; }
+message Surface { uint32 surface_id = 1; }
+message SurfaceBuffer { uint32 surface_id = 1; uint32 buffer_id = 2; }
+message Rect { sint32 x = 1; sint32 y = 2; sint32 width = 3; sint32 height = 4; }
+message Point { sint32 x = 1; sint32 y = 2; }
+message Size { sint32 width = 1; sint32 height = 2; }
+
+enum BufferFormat { BUFFER_FORMAT_UNSPECIFIED = 0; ARGB8888 = 1; XRGB8888 = 2; RGBA8888 = 3; RGB565 = 4; }
+enum ShmFormat { SHM_FORMAT_UNSPECIFIED = 0; SHM_ARGB8888 = 1; SHM_XRGB8888 = 2; SHM_RGB565 = 3; }
+enum DmabufFormat { DMABUF_FORMAT_UNSPECIFIED = 0; DMABUF_ARGB8888 = 1; DMABUF_XRGB8888 = 2; DMABUF_ABGR8888 = 3; DMABUF_XBGR8888 = 4; DMABUF_RGB565 = 5; DMABUF_NV12 = 6; }
+enum DragAction { DRAG_ACTION_UNSPECIFIED = 0; COPY = 1; MOVE = 2; ASK = 3; }
+enum CursorMode { CURSOR_MODE_UNSPECIFIED = 0; INCLUDE = 1; EXCLUDE = 2; }
+enum CaptureFormat { CAPTURE_FORMAT_UNSPECIFIED = 0; CAPTURE_RGBA8888 = 1; }
+enum ShortcutPriority { SHORTCUT_PRIORITY_UNSPECIFIED = 0; APP = 1; SHELL = 2; SYSTEM = 3; }
+enum Edge { EDGE_UNSPECIFIED = 0; TOP = 1; BOTTOM = 2; LEFT = 3; RIGHT = 4; }
+enum Gravity { GRAVITY_UNSPECIFIED = 0; GRAVITY_NONE = 1; GRAVITY_TOP = 2; GRAVITY_BOTTOM = 3; GRAVITY_LEFT = 4; GRAVITY_RIGHT = 5; TOP_LEFT = 6; TOP_RIGHT = 7; BOTTOM_LEFT = 8; BOTTOM_RIGHT = 9; }
+enum DismissReason { DISMISS_REASON_UNSPECIFIED = 0; OUTSIDE_CLICK = 1; PARENT_CLOSED = 2; ESCAPE_KEY = 3; }
+enum SubpixelLayout { SUBPIXEL_UNSPECIFIED = 0; SUBPIXEL_NONE = 1; HORIZONTAL_RGB = 2; HORIZONTAL_BGR = 3; VERTICAL_RGB = 4; VERTICAL_BGR = 5; }
+enum Transform { TRANSFORM_UNSPECIFIED = 0; NORMAL = 1; ROTATE_90 = 2; ROTATE_180 = 3; ROTATE_270 = 4; FLIPPED = 5; FLIPPED_90 = 6; FLIPPED_180 = 7; FLIPPED_270 = 8; }
+enum KeymapFormat { KEYMAP_FORMAT_UNSPECIFIED = 0; NO_KEYMAP = 1; XKB_V1 = 2; }
+enum AxisSource { AXIS_SOURCE_UNSPECIFIED = 0; WHEEL = 1; FINGER = 2; CONTINUOUS = 3; WHEEL_TILT = 4; }
+enum Orientation { ORIENTATION_UNSPECIFIED = 0; VERTICAL = 1; HORIZONTAL = 2; }
+enum ButtonState { BUTTON_STATE_UNSPECIFIED = 0; BUTTON_PRESSED = 1; BUTTON_RELEASED = 2; }
+enum KeyState { KEY_STATE_UNSPECIFIED = 0; KEY_PRESSED = 1; KEY_RELEASED = 2; }
+enum Layer { LAYER_UNSPECIFIED = 0; BACKGROUND = 1; LAYER_BOTTOM = 2; LAYER_TOP = 3; OVERLAY = 4; }
+enum KeyboardInteractivity { KEYBOARD_INTERACTIVITY_UNSPECIFIED = 0; KEYBOARD_NONE = 1; EXCLUSIVE = 2; ON_DEMAND = 3; }
+
+message Connect { string app_id = 1; uint32 pid = 2; }
+message ConnectVersioned { string app_id = 1; uint32 pid = 2; uint32 min_version = 3; uint32 max_version = 4; }
+message AttachBuffer { uint32 surface_id = 1; sint32 width = 2; sint32 height = 3; sint32 stride = 4; BufferFormat format = 5; }
+message Commit { uint32 surface_id = 1; optional uint32 frame_callback = 2; }
+message RequestCapability { string capability = 1; string justification = 2; }
+message CreateToplevel { uint32 surface_id = 1; bytes capability_token = 2; string title = 3; }
+message SetToplevelTitle { uint32 toplevel_id = 1; string title = 2; }
+message SetFullscreen { uint32 toplevel_id = 1; bytes capability_token = 2; }
+message AckConfigure { uint32 toplevel_id = 1; uint32 serial = 2; }
+message CreateShmPool { uint32 pool_id = 1; uint64 size = 2; }
+message CreateBuffer { uint32 buffer_id = 1; uint32 pool_id = 2; uint64 offset = 3; sint32 width = 4; sint32 height = 5; sint32 stride = 6; ShmFormat format = 7; }
+message DmabufPlane { uint32 fd_index = 1; uint32 offset = 2; uint32 stride = 3; }
+message CreateDmabufBuffer { uint32 buffer_id = 1; sint32 width = 2; sint32 height = 3; DmabufFormat format = 4; uint64 modifier = 5; repeated DmabufPlane planes = 6; }
+message Damage { uint32 surface_id = 1; sint32 x = 2; sint32 y = 3; sint32 width = 4; sint32 height = 5; }
+message Region { uint32 surface_id = 1; repeated Rect rects = 2; }
+message ConstraintAdjustment { bool flip_x = 1; bool flip_y = 2; bool slide_x = 3; bool slide_y = 4; bool resize_x = 5; bool resize_y = 6; }
+message PopupPositioner { Rect anchor_rect = 1; Edge anchor_edge = 2; Gravity gravity = 3; ConstraintAdjustment constraint = 4; Point offset = 5; Size size = 6; }
+message CreatePopup { uint32 surface_id = 1; uint32 parent_id = 2; PopupPositioner positioner = 3; bool grab = 4; }
+message ToplevelState { oneof state { Empty maximize = 1; Empty minimize = 2; OptionalOutput fullscreen = 3; Empty unset_maximize = 4; Empty unset_fullscreen = 5; } }
+message OptionalOutput { optional uint32 output_id = 1; }
+message SetToplevelState { uint32 toplevel_id = 1; ToplevelState state = 2; }
+message SetToplevelAppId { uint32 toplevel_id = 1; string app_id = 2; }
+message SetCursor { uint32 serial = 1; optional uint32 surface_id = 2; sint32 hotspot_x = 3; sint32 hotspot_y = 4; }
+message CreateLayerSurface { uint32 surface_id = 1; bytes capability_token = 2; Layer layer = 3; string namespace = 4; optional uint32 output_id = 5; }
+message SetLayerAnchor { uint32 layer_id = 1; bool top = 2; bool bottom = 3; bool left = 4; bool right = 5; }
+message SetLayerExclusiveZone { uint32 layer_id = 1; sint32 zone = 2; }
+message SetLayerMargin { uint32 layer_id = 1; sint32 top = 2; sint32 right = 3; sint32 bottom = 4; sint32 left = 5; }
+message SetLayerKeyboardInteractivity { uint32 layer_id = 1; KeyboardInteractivity interactivity = 2; }
+message SetLayerSize { uint32 layer_id = 1; sint32 width = 2; sint32 height = 3; }
+message AckLayerConfigure { uint32 layer_id = 1; uint32 serial = 2; }
+message Token { bytes capability_token = 1; }
+message CreateLockSurface { uint32 surface_id = 1; uint32 lock_id = 2; optional uint32 output_id = 3; }
+message AckLockConfigure { uint32 lock_surface_id = 1; uint32 serial = 2; }
+message AuthorizeSessionUser { uint32 lock_id = 1; uint32 uid = 2; }
+message RevokeSessionUser { uint32 uid = 1; bytes capability_token = 2; }
+message SetSelection { repeated string mime_types = 1; uint32 serial = 2; }
+message MimeType { string mime_type = 1; }
+message StartDrag { uint32 surface_id = 1; uint32 origin_surface = 2; optional uint32 icon_surface = 3; repeated string mime_types = 4; uint32 serial = 5; }
+message AcceptDrag { uint32 serial = 1; optional string mime_type = 2; }
+message SetDragActions { repeated DragAction actions = 1; optional DragAction preferred = 2; }
+message CaptureTarget { oneof target { uint32 window = 1; uint32 output = 2; Empty workspace = 3; } }
+message RequestCapture { CaptureTarget target = 1; CursorMode cursor_mode = 2; bytes capability_token = 3; }
+message KeyBinding { uint32 keycode = 1; uint32 modifiers = 2; }
+message RegisterShortcut { KeyBinding binding = 1; string justification = 2; bytes capability_token = 3; }
+
+message ClientMessage {
+  oneof message {
+    Connect connect = 1; ConnectVersioned connect_versioned = 2;
+    Surface create_surface = 3; Surface destroy_surface = 4; AttachBuffer attach_buffer = 5;
+    Commit commit = 6; RequestCapability request_capability = 7; CreateToplevel create_toplevel = 8;
+    SetToplevelTitle set_toplevel_title = 9; SetFullscreen set_fullscreen = 10; AckConfigure ack_configure = 11;
+    CreateShmPool create_shm_pool = 12; CreateBuffer create_buffer = 13; SurfaceBuffer attach_shm_buffer = 14;
+    Surface detach_buffer = 15; Id destroy_buffer = 16; Id destroy_shm_pool = 17; Damage damage = 18;
+    Region set_input_region = 19; Region set_opaque_region = 20; CreatePopup create_popup = 21; Id destroy_popup = 22;
+    SetToplevelState set_toplevel_state = 23; SetToplevelAppId set_toplevel_app_id = 24; Id close_toplevel = 25;
+    SetCursor set_cursor = 26; CreateLayerSurface create_layer_surface = 27; SetLayerAnchor set_layer_anchor = 28;
+    SetLayerExclusiveZone set_layer_exclusive_zone = 29; SetLayerMargin set_layer_margin = 30;
+    SetLayerKeyboardInteractivity set_layer_keyboard_interactivity = 31; SetLayerSize set_layer_size = 32;
+    AckLayerConfigure ack_layer_configure = 33; Token lock_session = 34; CreateLockSurface create_lock_surface = 35;
+    AckLockConfigure ack_lock_configure = 36; Id unlock_session = 37; AuthorizeSessionUser authorize_session_user = 38;
+    RevokeSessionUser revoke_session_user = 39; SetSelection set_selection = 40; MimeType request_selection = 41;
+    StartDrag start_drag = 42; MimeType receive_drag_data = 43; AcceptDrag accept_drag = 44; Empty finish_drag = 45;
+    Empty cancel_drag = 46; SetDragActions set_drag_actions = 47; RequestCapture request_capture = 48;
+    RegisterShortcut register_shortcut = 49; U64Id unregister_shortcut = 50;
+    CreateDmabufBuffer create_dmabuf_buffer = 51; SurfaceBuffer attach_dmabuf_buffer = 52;
+  }
+  reserved 53 to 99;
+}
+
+message CapabilityToken { string capability = 1; bytes token = 2; }
+message Connected { uint64 session_id = 1; repeated string granted_capabilities = 2; repeated CapabilityToken capability_tokens = 3; }
+message ProtocolVersion { uint32 version = 1; repeated string features = 2; }
+message Reason { string reason = 1; }
+message CapabilityDecision { string capability = 1; bool granted = 2; optional bytes token = 3; optional string reason = 4; bool needs_user_consent = 5; }
+message CapabilityRevoked { string capability = 1; string reason = 2; }
+message ProtocolError { string code = 1; string message = 2; bool fatal = 3; }
+message ToplevelStates { bool activated = 1; bool maximized = 2; bool fullscreen = 3; bool resizing = 4; }
+message ConfigureToplevel { uint32 toplevel_id = 1; uint32 serial = 2; sint32 width = 3; sint32 height = 4; sint32 decoration_height = 5; ToplevelStates states = 6; }
+message FrameCallback { uint32 surface_id = 1; uint32 callback_id = 2; uint64 timestamp_ms = 3; }
+message OutputChanged { sint32 width = 1; sint32 height = 2; double scale = 3; }
+message ConfigurePopup { uint32 popup_id = 1; sint32 x = 2; sint32 y = 3; sint32 width = 4; sint32 height = 5; }
+message PopupDismissed { uint32 popup_id = 1; DismissReason reason = 2; }
+message OutputMode { sint32 width = 1; sint32 height = 2; sint32 refresh_rate = 3; bool preferred = 4; }
+message PhysicalSize { sint32 width_mm = 1; sint32 height_mm = 2; }
+message OutputAdded { uint32 output_id = 1; string name = 2; string description = 3; Rect geometry = 4; PhysicalSize physical_size = 5; SubpixelLayout subpixel = 6; Transform transform = 7; sint32 scale = 8; repeated OutputMode modes = 9; uint64 current_mode = 10; }
+message OutputGeometryChanged { uint32 output_id = 1; Rect geometry = 2; }
+message OutputScaleChanged { uint32 output_id = 1; sint32 scale = 2; }
+message OutputModeChanged { uint32 output_id = 1; OutputMode mode = 2; }
+message SurfaceOutput { uint32 surface_id = 1; uint32 output_id = 2; }
+message Keymap { KeymapFormat format = 1; uint32 size = 2; }
+message RepeatInfo { sint32 rate = 1; sint32 delay = 2; }
+message Modifiers { uint32 surface_id = 1; uint32 serial = 2; uint32 mods_depressed = 3; uint32 mods_latched = 4; uint32 mods_locked = 5; uint32 group = 6; }
+message ConfigureLayerSurface { uint32 layer_id = 1; uint32 serial = 2; sint32 width = 3; sint32 height = 4; }
+message ConfigureLockSurface { uint32 lock_surface_id = 1; uint32 serial = 2; sint32 width = 3; sint32 height = 4; }
+message Locked { bool locked = 1; }
+message User { uint32 uid = 1; }
+message SelectionOffer { repeated string mime_types = 1; }
+message DragEnter { uint32 serial = 1; uint32 surface_id = 2; double x = 3; double y = 4; repeated string mime_types = 5; }
+message DragMotion { double x = 1; double y = 2; uint32 time_ms = 3; }
+message DragActionSelected { DragAction action = 1; }
+message CaptureGranted { uint64 capture_id = 1; uint32 width = 2; uint32 height = 3; uint32 stride = 4; CaptureFormat format = 5; CursorMode cursor_mode = 6; }
+message ShortcutGranted { uint64 shortcut_id = 1; KeyBinding binding = 2; ShortcutPriority priority = 3; }
+message ShortcutRevoked { uint64 shortcut_id = 1; string reason = 2; }
+message ShortcutActivated { uint64 shortcut_id = 1; uint32 timestamp_ms = 2; }
+
+message PointerEnter { uint32 serial = 1; double x = 2; double y = 3; }
+message Serial { uint32 serial = 1; }
+message PointerMotion { double x = 1; double y = 2; uint32 time_ms = 3; }
+message PointerButton { uint32 serial = 1; uint32 button = 2; ButtonState state = 3; uint32 time_ms = 4; }
+message PointerAxis { uint32 time_ms = 1; AxisSource axis_source = 2; Orientation orientation = 3; double value = 4; sint32 discrete = 5; }
+message KeyboardEnter { uint32 serial = 1; repeated uint32 keys = 2; }
+message KeyboardKey { uint32 serial = 1; uint32 key = 2; KeyState state = 3; uint32 time_ms = 4; }
+message TouchDown { uint32 serial = 1; sint32 touch_id = 2; double x = 3; double y = 4; uint32 time_ms = 5; }
+message TouchUp { uint32 serial = 1; sint32 touch_id = 2; uint32 time_ms = 3; }
+message TouchMotion { sint32 touch_id = 1; double x = 2; double y = 3; uint32 time_ms = 4; }
+message TouchShape { sint32 touch_id = 1; double major = 2; double minor = 3; }
+message TouchOrientation { sint32 touch_id = 1; double orientation = 2; }
+message InputModifiers { uint32 serial = 1; uint32 mods_depressed = 2; uint32 mods_latched = 3; uint32 mods_locked = 4; uint32 group = 5; }
+message InputEvent { oneof event { PointerEnter pointer_enter = 1; Serial pointer_leave = 2; PointerMotion pointer_motion = 3; PointerButton pointer_button = 4; PointerAxis pointer_axis = 5; Empty pointer_frame = 6; KeyboardEnter keyboard_enter = 7; Serial keyboard_leave = 8; KeyboardKey keyboard_key = 9; TouchDown touch_down = 10; TouchUp touch_up = 11; TouchMotion touch_motion = 12; Empty touch_cancel = 13; Empty touch_frame = 14; TouchShape touch_shape = 15; TouchOrientation touch_orientation = 16; InputModifiers modifiers = 17; } }
+message SurfaceInputEvent { uint32 surface_id = 1; InputEvent event = 2; }
+
+message CompositorMessage {
+  oneof message {
+    Connected connected = 1; ProtocolVersion protocol_version = 2; Reason rejected = 3;
+    CapabilityDecision capability_decision = 4; CapabilityRevoked capability_revoked = 5; ProtocolError protocol_error = 6;
+    ConfigureToplevel configure_toplevel = 7; Id toplevel_closed = 8; FrameCallback frame_callback = 9;
+    SurfaceInputEvent input_event = 10; OutputChanged output_changed = 11; Id buffer_release = 12;
+    ConfigurePopup configure_popup = 13; PopupDismissed popup_dismissed = 14; OutputAdded output_added = 15;
+    Id output_removed = 16; OutputGeometryChanged output_geometry_changed = 17; OutputScaleChanged output_scale_changed = 18;
+    OutputModeChanged output_mode_changed = 19; SurfaceOutput surface_enter_output = 20; SurfaceOutput surface_leave_output = 21;
+    Keymap keymap_format = 22; RepeatInfo repeat_info = 23; Modifiers modifiers = 24;
+    ConfigureLayerSurface configure_layer_surface = 25; Id layer_surface_closed = 26; Id session_lock_engaged = 27;
+    Id session_locked = 28; Reason session_lock_finished = 29; ConfigureLockSurface configure_lock_surface = 30;
+    Locked session_lock_state_changed = 31; User session_user_authorized = 32; User session_user_revoked = 33;
+    SelectionOffer selection_offer = 34; MimeType request_selection_data = 35; MimeType selection_data = 36;
+    Empty selection_cleared = 37; DragEnter drag_enter = 38; DragMotion drag_motion = 39; Empty drag_leave = 40;
+    Empty drop = 41; MimeType request_drag_data = 42; MimeType drag_data = 43; Empty drag_finished = 44;
+    Empty drag_cancelled = 45; DragActionSelected drag_action_selected = 46; CaptureGranted capture_granted = 47;
+    ShortcutGranted shortcut_granted = 48; ShortcutRevoked shortcut_revoked = 49; ShortcutActivated shortcut_activated = 50;
+  }
+  reserved 51 to 99;
+}

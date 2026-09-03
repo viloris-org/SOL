@@ -5,7 +5,7 @@
 //! - Drag-and-drop requires DragAndDrop capability
 //! - Both require a recent interaction serial
 
-use crate::scp::protocol::{SessionId, SurfaceId};
+use crate::scp::protocol::{DragAction, SessionId, SurfaceId};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -49,6 +49,8 @@ pub struct DragOperation {
     pub serial: u32,
     pub target: Option<SessionId>,
     pub accepted_mime: Option<String>,
+    pub offered_actions: Vec<DragAction>,
+    pub selected_action: Option<DragAction>,
 }
 
 /// Data device manager
@@ -166,6 +168,11 @@ impl DataDevice {
             serial,
             target: None,
             accepted_mime: None,
+            // SCP v1 had no action list; treating all standard actions as
+            // offered preserves that wire format while v2 targets negotiate a
+            // concrete result through SetDragActions.
+            offered_actions: vec![DragAction::Copy, DragAction::Move, DragAction::Ask],
+            selected_action: None,
         });
 
         Ok(())
@@ -204,6 +211,39 @@ impl DataDevice {
         let drag = self.drag.as_mut().ok_or("No active drag")?;
         drag.accepted_mime = mime_type;
         Ok(())
+    }
+
+    /// Select an operation supported by the source for the current drag.
+    pub fn set_drag_actions(
+        &mut self,
+        requester: SessionId,
+        actions: Vec<DragAction>,
+        preferred: Option<DragAction>,
+    ) -> Result<DragAction, &'static str> {
+        let drag = self.drag.as_mut().ok_or("No active drag")?;
+        if drag.target != Some(requester) {
+            return Err("Only the current drag target may select an action");
+        }
+        if actions.is_empty() || actions.len() > 3 {
+            return Err("Drag actions must contain between one and three entries");
+        }
+        let mut unique = Vec::with_capacity(actions.len());
+        for action in actions {
+            if !unique.contains(&action) {
+                unique.push(action);
+            }
+        }
+        let selected = preferred
+            .filter(|action| unique.contains(action) && drag.offered_actions.contains(action))
+            .or_else(|| {
+                unique
+                    .iter()
+                    .copied()
+                    .find(|action| drag.offered_actions.contains(action))
+            })
+            .ok_or("Source and target have no drag action in common")?;
+        drag.selected_action = Some(selected);
+        Ok(selected)
     }
 
     /// Finish drag operation successfully
@@ -423,6 +463,33 @@ mod tests {
 
         device.finish_drag().expect("finish drag");
         assert!(device.active_drag().is_none());
+    }
+
+    #[test]
+    fn drag_target_negotiates_an_action_from_the_source_offer() {
+        let mut device = DataDevice::new();
+        device.record_serial(10, 1, true);
+        device
+            .start_drag_validated(1, 7, None, vec!["text/plain".to_string()], 10)
+            .unwrap();
+        device.set_drag_target(Some(2));
+
+        assert_eq!(
+            device
+                .set_drag_actions(
+                    2,
+                    vec![DragAction::Move, DragAction::Copy],
+                    Some(DragAction::Move)
+                )
+                .unwrap(),
+            DragAction::Move
+        );
+        assert!(
+            device
+                .set_drag_actions(3, vec![DragAction::Copy], None)
+                .is_err(),
+            "a bystander must not negotiate the drop operation"
+        );
     }
 
     #[test]

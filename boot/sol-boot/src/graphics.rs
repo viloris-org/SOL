@@ -1,176 +1,82 @@
-//! Deterministic GOP mode selection, bounded boot-frame composition, and the
-//! branded Mac-classic boot splash renderer.
+//! Optional best-effort static boot frame in the current GOP mode.
+//!
+//! ADR-0026 permits (but does not require) one bounded static SOL frame through
+//! the currently active GOP mode. This module implements that optional capability
+//! with strict constraints:
+//!
+//! - Never read EDID or infer native/preferred resolution
+//! - Never enumerate modes or call `SetMode()`
+//! - Preserve current width, height, stride, and pixel format
+//! - Draw only a solid background and aspect-correct centered mark
+//! - No animation, interactive menu, or routine text output
+//! - Ignore missing GOP, unsupported pixel formats, and rendering failure
+//! - Never let graphics affect verification, retry, fallback, or recovery
 
-/// A usable firmware graphics mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GraphicsMode {
-    /// Firmware mode number.
-    pub index: u32,
-    /// Visible horizontal pixels.
-    pub width: usize,
-    /// Visible vertical pixels.
-    pub height: usize,
-    /// Pixels per scanline.
-    pub stride: usize,
-}
+use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
+use uefi::table::boot::ScopedProtocol;
 
-impl GraphicsMode {
-    const fn usable(self) -> bool {
-        self.width > 0 && self.height > 0 && self.stride >= self.width
+/// SOL brand color (blue-purple).
+const BRAND_COLOR: BltPixel = BltPixel::new(103, 80, 164); // #6750A4
+
+/// Background color (very dark, near black).
+const BACKGROUND_COLOR: BltPixel = BltPixel::new(16, 16, 20);
+
+/// Centered mark dimensions (logical pixels).
+const MARK_SIZE: usize = 120;
+
+/// Draws one static SOL brand mark in the current GOP mode.
+///
+/// This function is best-effort and never returns an error. Missing GOP,
+/// unsupported pixel formats, or rendering failures are silently ignored.
+/// The call has no effect on boot policy, verification, or recovery paths.
+pub fn draw_optional_boot_frame(gop: &mut ScopedProtocol<GraphicsOutput>) {
+    let mode = gop.current_mode_info();
+    let (width, height) = mode.resolution();
+
+    // Silently skip if the mode is too small for the mark.
+    if width < MARK_SIZE || height < MARK_SIZE {
+        return;
     }
-}
 
-/// EDID preferred physical resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PreferredResolution {
-    /// Preferred horizontal pixels.
-    pub width: usize,
-    /// Preferred vertical pixels.
-    pub height: usize,
-}
-
-/// Whether the adapter should preserve the current mode or make one change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GraphicsDecision {
-    /// The current usable mode is the best safe choice.
-    Preserve(GraphicsMode),
-    /// Select this exact advertised preferred mode once.
-    SetOnce(GraphicsMode),
-    /// Firmware did not expose a usable current mode.
-    Unavailable,
-}
-
-/// Selects an advertised GOP mode without assuming that the largest mode is native.
-#[must_use]
-pub fn select_graphics_mode(
-    modes: &[GraphicsMode],
-    current_index: u32,
-    preferred: Option<PreferredResolution>,
-) -> GraphicsDecision {
-    let current = modes
-        .iter()
-        .copied()
-        .find(|mode| mode.index == current_index && mode.usable());
-    let Some(current) = current else {
-        return GraphicsDecision::Unavailable;
-    };
-    let Some(preferred) = preferred else {
-        return GraphicsDecision::Preserve(current);
-    };
-    let exact = modes.iter().copied().find(|mode| {
-        mode.usable() && mode.width == preferred.width && mode.height == preferred.height
+    // Fill background (ignore failure).
+    let _ = gop.blt(BltOp::VideoFill {
+        color: BACKGROUND_COLOR,
+        dest: (0, 0),
+        dims: (width, height),
     });
-    match exact {
-        Some(mode) if mode.index == current.index => GraphicsDecision::Preserve(current),
-        Some(mode) => GraphicsDecision::SetOnce(mode),
-        None => GraphicsDecision::Preserve(current),
-    }
-}
 
-/// Ease-out cubic curve over progress in `0.0..=1.0`; fast at first, still
-/// near the target afterwards.
-///
-/// Splash animation advances between real work milestones with motion that
-/// decelerates into each target instead of stopping abruptly. Non-finite and
-/// out-of-range inputs clamp onto the nearest endpoint.
-#[must_use]
-pub fn ease_out_cubic(progress: f32) -> f32 {
-    // Only NaN has no meaningful endpoint; infinities clamp naturally.
-    let clamped = if progress.is_nan() {
-        0.0
-    } else {
-        progress.clamp(0.0, 1.0)
-    };
-    let inverse = 1.0 - clamped;
-    1.0 - inverse * inverse * inverse
-}
+    // Draw centered circular mark using scanline algorithm (efficient).
+    let center_x = width / 2;
+    let center_y = height / 2;
+    let radius = (MARK_SIZE / 2) as isize;
 
-/// Malformed or unsupported EDID base block.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EdidError {
-    /// A complete 128-byte base block was not supplied.
-    Truncated,
-    /// Header or checksum validation failed.
-    Invalid,
-    /// The first detailed timing descriptor did not contain a preferred timing.
-    NoPreferredTiming,
-}
-
-/// Parses the first detailed timing descriptor from a valid EDID base block.
-///
-/// # Errors
-///
-/// Rejects truncated blocks, invalid headers/checksums, and blocks without a
-/// usable first detailed timing.
-pub fn edid_preferred_mode(edid: &[u8]) -> Result<PreferredResolution, EdidError> {
-    if edid.len() < 128 {
-        return Err(EdidError::Truncated);
-    }
-    if edid[..8] != [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00]
-        || edid[..128]
-            .iter()
-            .fold(0_u8, |sum, byte| sum.wrapping_add(*byte))
-            != 0
-    {
-        return Err(EdidError::Invalid);
-    }
-    let timing = &edid[54..72];
-    if timing[0] == 0 && timing[1] == 0 {
-        return Err(EdidError::NoPreferredTiming);
-    }
-    let width = usize::from(timing[2]) | (usize::from(timing[4] & 0xf0) << 4);
-    let height = usize::from(timing[5]) | (usize::from(timing[7] & 0xf0) << 4);
-    if width == 0 || height == 0 {
-        return Err(EdidError::NoPreferredTiming);
-    }
-    Ok(PreferredResolution { width, height })
-}
-
-/// Portable BGRX pixel used by GOP block transfer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-pub struct BootPixel {
-    /// Blue channel.
-    pub blue: u8,
-    /// Green channel.
-    pub green: u8,
-    /// Red channel.
-    pub red: u8,
-    /// Reserved channel, always zero.
-    pub reserved: u8,
-}
-
-impl BootPixel {
-    #[must_use]
-    pub const fn rgb(red: u8, green: u8, blue: u8) -> Self {
-        Self {
-            blue,
-            green,
-            red,
-            reserved: 0,
+    // Midpoint circle algorithm - draw horizontal spans for each y coordinate.
+    // This reduces blit calls from ~11,000 to ~120 (100x improvement).
+    for dy in -radius..=radius {
+        let y = (center_y as isize + dy) as usize;
+        if y >= height {
+            continue;
         }
-    }
 
-    /// Linear interpolation towards `target`; `alpha` 255 selects `target`.
-    fn blended(self, target: Self, alpha: u8) -> Self {
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "each operand is at most 255, so the mixed sum stays within a byte"
-        )]
-        let mix = |base: u8, goal: u8| -> u8 {
-            (((u16::from(base) * (255 - u16::from(alpha)))
-                + (u16::from(goal) * u16::from(alpha))
-                + 127)
-                / 255) as u8
-        };
-        Self {
-            blue: mix(self.blue, target.blue),
-            green: mix(self.green, target.green),
-            red: mix(self.red, target.red),
-            reserved: 0,
+        // Calculate horizontal span width at this y using circle equation:
+        // x² + y² = r²  =>  x = sqrt(r² - y²)
+        let dy_sq = dy * dy;
+        let radius_sq = radius * radius;
+        if dy_sq > radius_sq {
+            continue;
+        }
+
+        let dx = ((radius_sq - dy_sq) as f64).sqrt() as isize;
+        let x_start = ((center_x as isize) - dx).max(0) as usize;
+        let x_end = ((center_x as isize) + dx).min(width as isize - 1) as usize;
+        let span_width = (x_end - x_start + 1).min(width - x_start);
+
+        if span_width > 0 {
+            let _ = gop.blt(BltOp::VideoFill {
+                color: BRAND_COLOR,
+                dest: (x_start, y),
+                dims: (span_width, 1),
+            });
         }
     }
 }
-
-mod splash;
-pub use splash::{MAX_FRAME_EDGE, SplashProgress, redraw_boot_frame, render_boot_frame};

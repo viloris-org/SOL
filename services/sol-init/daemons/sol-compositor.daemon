@@ -5,8 +5,8 @@ type = "core"
 start_mode = "boot"
 restart_policy = "always"
 
-after = []
-requires = []
+after = ["sol-securityd"]
+requires = ["sol-securityd"]
 
 capabilities = [
     "compositor.render",
@@ -20,3 +20,4 @@ SOL_SCP_SOCKET = "/run/sol/compositor.sock"
 # The path is reachable by the authenticated user's processes; SCP still
 # admits peers only after sol-logind authorizes their UID.
 SOL_SCP_SHARED_SOCKET = "1"
+SOL_SECURITYD_SOCKET = "/run/sol/securityd.sock"

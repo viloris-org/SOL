@@ -17,9 +17,13 @@
 use serial_test::serial;
 use sol_compositor::scp::{
     ScpState,
-    protocol::{ClientMessage, CompositorMessage, InputEvent, SessionId},
+    protocol::{
+        CURRENT_PROTOCOL_VERSION, CaptureTarget, ClientMessage, CompositorMessage, CursorMode,
+        InputEvent, SessionId,
+    },
     transport::{ScpServer, write_frame},
     unix_socket,
+    wire::WireMessage,
 };
 use std::{
     os::fd::{AsRawFd, RawFd},
@@ -107,7 +111,8 @@ impl Connection {
 
         loop {
             if let Some(payload) = self.take_frame() {
-                return serde_json::from_slice(&payload).expect("decode compositor message");
+                return CompositorMessage::decode_wire(&payload)
+                    .expect("decode compositor message");
             }
             assert!(Instant::now() < deadline, "timed out waiting for a frame");
 
@@ -165,6 +170,34 @@ impl Connection {
             pid: std::process::id(),
         });
 
+        match self.read_message() {
+            CompositorMessage::Connected {
+                session_id,
+                capability_tokens,
+                ..
+            } => (session_id, capability_tokens["window-toplevel"].clone()),
+            response => panic!("unexpected connect response: {response:?}"),
+        }
+    }
+
+    fn authenticate_v2(&mut self) -> (SessionId, Vec<u8>) {
+        let app_id = std::fs::read_to_string(format!("/proc/{}/comm", std::process::id()))
+            .expect("read process identity")
+            .trim()
+            .to_string();
+        self.send(&ClientMessage::ConnectVersioned {
+            app_id,
+            pid: std::process::id(),
+            min_version: 2,
+            max_version: 2,
+        });
+        assert!(matches!(
+            self.read_message(),
+            CompositorMessage::ProtocolVersion {
+                version: CURRENT_PROTOCOL_VERSION,
+                ..
+            }
+        ));
         match self.read_message() {
             CompositorMessage::Connected {
                 session_id,
@@ -421,8 +454,7 @@ fn events_reach_the_right_client_among_several() {
         .take_frame()
         .or_else(|| read_available(&mut first).and_then(|()| first.take_frame()))
     {
-        let message: CompositorMessage =
-            serde_json::from_slice(&payload).expect("decode compositor message");
+        let message = CompositorMessage::decode_wire(&payload).expect("decode compositor message");
         if matches!(
             message,
             CompositorMessage::InputEvent {
@@ -437,6 +469,74 @@ fn events_reach_the_right_client_among_several() {
         !saw_key,
         "a keystroke must only reach the focused client's window"
     );
+}
+
+#[test]
+#[serial]
+fn v2_capture_delivers_a_sealed_rgba_frame_over_scm_rights() {
+    use std::{io::Read, os::fd::FromRawFd};
+
+    let harness = Harness::start();
+    let mut client = harness.connect();
+    let (_session, token) = client.authenticate_v2();
+    client.create_toplevel(1, token);
+
+    client.send(&ClientMessage::RequestCapability {
+        capability: "screen-capture-output".to_string(),
+        justification: "integration test".to_string(),
+    });
+    let token = match client.read_until("capture capability", |message| {
+        matches!(
+            message,
+            CompositorMessage::CapabilityDecision {
+                capability,
+                ..
+            } if capability == "screen-capture-output"
+        )
+    }) {
+        CompositorMessage::CapabilityDecision {
+            granted: true,
+            token: Some(token),
+            ..
+        } => token,
+        response => panic!("capture was not granted: {response:?}"),
+    };
+
+    // Creating the focused toplevel also publishes a keymap descriptor. It is
+    // unrelated to this assertion, so release it before requesting the frame.
+    for fd in client.fds.drain(..) {
+        unix_socket::close_fd(fd);
+    }
+    client.send(&ClientMessage::RequestCapture {
+        target: CaptureTarget::Output(0),
+        cursor_mode: CursorMode::Exclude,
+        capability_token: token,
+    });
+    let message = client.read_until("CaptureGranted", |message| {
+        matches!(message, CompositorMessage::CaptureGranted { .. })
+    });
+    let (width, height, stride) = match message {
+        CompositorMessage::CaptureGranted {
+            width,
+            height,
+            stride,
+            ..
+        } => (width, height, stride),
+        response => panic!("unexpected capture response: {response:?}"),
+    };
+    assert_eq!((width, height), (OUTPUT_WIDTH as u32, OUTPUT_HEIGHT as u32));
+    assert_eq!(stride, width * 4);
+    assert_eq!(client.fds.len(), 1, "capture must carry one descriptor");
+
+    let fd = client.fds.pop().expect("capture descriptor");
+    let seals = sol_compositor::scp::memfd::seals(fd).expect("capture memfd seals");
+    assert_ne!(seals & sol_compositor::scp::memfd::F_SEAL_WRITE, 0);
+    let mut bytes = Vec::new();
+    // SAFETY: the descriptor was removed from Connection and is now owned here.
+    unsafe { std::fs::File::from_raw_fd(fd) }
+        .read_to_end(&mut bytes)
+        .expect("read capture pixels");
+    assert_eq!(bytes.len(), stride as usize * height as usize);
 }
 
 /// Pull whatever is immediately available into the connection's buffer.

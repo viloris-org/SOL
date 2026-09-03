@@ -1,4 +1,23 @@
 //! Canonical fixed-size durable encodings.
+//!
+//! # DEVELOPMENT SECURITY NOTICE
+//!
+//! The current implementation uses **CRC32 for integrity checking only**.
+//! This is explicitly a development placeholder and provides:
+//!
+//! ✅ Torn-write detection (accidental corruption)
+//! ❌ NO authentication (vulnerable to tampering)
+//! ❌ NO replay protection (old states can be restored)
+//!
+//! **DO NOT deploy to production** until authenticated state storage is
+//! implemented (see `auth.rs` and ADR-0026 Section 5).
+//!
+//! Production requirements:
+//! - HMAC-SHA256 authentication tags
+//! - TPM NV monotonic counters for replay resistance
+//! - Unpredictable attempt nonces
+//!
+//! Track: Phase 7 authenticated state implementation
 
 use super::{
     AttemptId, BootState, BootSuccessReport, DeploymentId, DeploymentRecord, DeploymentSlot,

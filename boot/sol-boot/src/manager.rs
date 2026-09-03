@@ -7,7 +7,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 use sol_boot_core::{
     BOOT_SUCCESS_V1_SIZE, BootAction, BootObservation, BootPlan, BootSuccessReport, CodecError,
-    DeploymentId, DeploymentSlot, DurableStateCopy, SignedDeploymentDescriptor,
+    DeploymentId, DeploymentSlot, DeploymentStatus, DurableStateCopy, SignedDeploymentDescriptor,
     ValidatedDeployments, prepare_boot, select_redundant_state,
 };
 
@@ -97,6 +97,7 @@ pub trait BootStorage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectedBoot {
     action: BootAction,
+    fallback: Option<DeploymentId>,
 }
 
 impl SelectedBoot {
@@ -115,6 +116,13 @@ impl SelectedBoot {
             }
             BootAction::Recovery(_) => None,
         }
+    }
+
+    /// Returns a distinct retained known-good deployment authorized as the
+    /// runtime fallback if firmware rejects or returns from the selected UKI.
+    #[must_use]
+    pub const fn fallback_deployment(self) -> Option<DeploymentId> {
+        self.fallback
     }
 }
 
@@ -184,7 +192,24 @@ impl<S: BootStorage> BootManager<S> {
                 pending.confirm_persisted()
             }
         };
-        Ok(SelectedBoot { action })
+        let selected_deployment = match action {
+            BootAction::BootKnownGood(deployment) | BootAction::BootTrial { deployment, .. } => {
+                Some(deployment)
+            }
+            BootAction::Recovery(_) => None,
+        };
+        let fallback = selected_deployment.and_then(|deployment| {
+            [deployment.slot().other(), deployment.slot()]
+                .into_iter()
+                .filter_map(|slot| selected.envelope().state().record(slot))
+                .find(|record| {
+                    record.id() != deployment
+                        && record.status() == DeploymentStatus::KnownGood
+                        && deployments.contains(record.id())
+                })
+                .map(sol_boot_core::DeploymentRecord::id)
+        });
+        Ok(SelectedBoot { action, fallback })
     }
 
     /// Exposes storage after selection so the adapter can load the selected image.
@@ -209,6 +234,31 @@ impl<S: BootStorage> BootManager<S> {
             }
             BootAction::Recovery(_) => return Err(BootManagerError::NoSelectedUki),
         };
+        self.load_exact_deployment_uki(deployment)
+    }
+
+    /// Re-reads and verifies the exact retained known-good fallback authorized
+    /// by this selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Ok(None)` when no distinct fallback was authorized. Rejects
+    /// storage failure or any descriptor, identity, manifest, UKI, or signature
+    /// change since selection.
+    pub fn load_fallback_uki(
+        &mut self,
+        selected: SelectedBoot,
+    ) -> Result<Option<Vec<u8>>, BootManagerError> {
+        let Some(deployment) = selected.fallback else {
+            return Ok(None);
+        };
+        self.load_exact_deployment_uki(deployment).map(Some)
+    }
+
+    fn load_exact_deployment_uki(
+        &mut self,
+        deployment: DeploymentId,
+    ) -> Result<Vec<u8>, BootManagerError> {
         let Some((verified, uki)) = self.load_verified_slot(deployment.slot())? else {
             return Err(BootManagerError::SelectedArtifactChanged);
         };
@@ -294,6 +344,14 @@ impl<S: BootStorage> BootManager<S> {
         else {
             return Ok(None);
         };
+
+        // OOM protection: reject unreasonably large UKI files before allocation.
+        // Typical UKI: 50-100 MB. Max reasonable: 512 MB (kernel + initrd + cmdline).
+        const MAX_UKI_SIZE: usize = 512 * 1024 * 1024; // 512 MB
+        if uki.len() > MAX_UKI_SIZE {
+            return Err(BootManagerError::UkiTooLarge);
+        }
+
         if !matches_binding(&manifest, descriptor.manifest())
             || !matches_binding(&uki, descriptor.uki())
         {
@@ -345,23 +403,28 @@ pub enum BootManagerError {
     NoSelectedUki,
     /// Selected artifacts no longer match the authenticated selection.
     SelectedArtifactChanged,
+    /// UKI file exceeds reasonable size limits (possible OOM or corruption).
+    UkiTooLarge,
 }
 
 impl fmt::Display for BootManagerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidReleaseKey => formatter.write_str("invalid compiled release key"),
-            Self::Storage => formatter.write_str("firmware storage operation failed"),
-            Self::State(error) => write!(formatter, "durable boot state failed: {error}"),
+            Self::InvalidReleaseKey => formatter.write_str("invalid compiled release key (check SOL_BOOT_PUBLIC_KEY_HEX)"),
+            Self::Storage => formatter.write_str("firmware storage operation failed (ESP may be corrupt or inaccessible)"),
+            Self::State(error) => write!(formatter, "durable boot state failed: {error} (recovery may be required)"),
             Self::StateReadbackMismatch => {
-                formatter.write_str("durable boot state read-back mismatch")
+                formatter.write_str("durable boot state read-back mismatch (ESP corruption detected; enter recovery)")
             }
             Self::InvalidObservation => {
-                formatter.write_str("verified deployments occupy invalid slots")
+                formatter.write_str("verified deployments occupy invalid slots (manifest/slot mismatch)")
             }
-            Self::NoSelectedUki => formatter.write_str("recovery selection has no deployment UKI"),
+            Self::NoSelectedUki => formatter.write_str("recovery selection has no deployment UKI (internal error)"),
             Self::SelectedArtifactChanged => {
-                formatter.write_str("selected deployment artifacts changed before transfer")
+                formatter.write_str("selected deployment artifacts changed before transfer (ESP modified during boot; recovery required)")
+            }
+            Self::UkiTooLarge => {
+                formatter.write_str("UKI file exceeds size limits (possible corruption or OOM risk)")
             }
         }
     }

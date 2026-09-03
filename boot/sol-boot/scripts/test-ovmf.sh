@@ -35,13 +35,23 @@ SOL_BOOT_PUBLIC_KEY_HEX="$release_key" CARGO_TARGET_DIR="$target_dir" cargo buil
   --quiet --manifest-path "$repo_root/Cargo.toml" \
   -p sol-boot \
   --bin sol-boot \
-  --bin sol-boot-test-payload \
-  --features ovmf-test-payload \
   --target x86_64-unknown-uefi \
   --release
 
 bootloader="$target_dir/x86_64-unknown-uefi/release/sol-boot.efi"
-payload="$target_dir/x86_64-unknown-uefi/release/sol-boot-test-payload.efi"
+for marker in A B RECOVERY; do
+  SOL_BOOT_PUBLIC_KEY_HEX="$release_key" \
+    SOL_BOOT_TEST_PAYLOAD_MARKER="$marker" \
+    CARGO_TARGET_DIR="$target_dir" cargo build \
+      --quiet --manifest-path "$repo_root/Cargo.toml" \
+      -p sol-boot \
+      --bin sol-boot-test-payload \
+      --features ovmf-test-payload \
+      --target x86_64-unknown-uefi \
+      --release
+  cp "$target_dir/x86_64-unknown-uefi/release/sol-boot-test-payload.efi" \
+    "$test_root/payload-$marker.efi"
+done
 
 run_ovmf() {
   local esp=$1
@@ -69,14 +79,24 @@ run_ovmf() {
   fi
 }
 
-# A bare ESP must execute sol-boot and fail closed into recovery policy.
+# A bare ESP must execute sol-boot and return silently after exhausting policy.
 empty_esp="$test_root/empty-esp"
 mkdir -p "$empty_esp/EFI/BOOT"
 cp "$bootloader" "$empty_esp/EFI/BOOT/BOOTX64.EFI"
 run_ovmf "$empty_esp" "$test_root/fail-closed.log" "$test_root/fail-closed-vars.fd"
-grep -q "SOL boot 0.1" "$test_root/fail-closed.log"
-grep -q "boot policy failed closed" "$test_root/fail-closed.log"
-grep -q "no bootable image remained" "$test_root/fail-closed.log"
+if grep -Eq "SOL boot|boot policy failed|no bootable image" "$test_root/fail-closed.log"; then
+  printf '%s\n' "sol-boot emitted display/console diagnostics in silent mode" >&2
+  exit 1
+fi
+
+# A policy failure with a recovery image must transfer there without rendering.
+recovery_esp="$test_root/recovery-esp"
+mkdir -p "$recovery_esp/EFI/BOOT" "$recovery_esp/EFI/SOL/recovery"
+cp "$bootloader" "$recovery_esp/EFI/BOOT/BOOTX64.EFI"
+cp "$test_root/payload-RECOVERY.efi" \
+  "$recovery_esp/EFI/SOL/recovery/recovery-a.efi"
+run_ovmf "$recovery_esp" "$test_root/recovery.log" "$test_root/recovery-vars.fd"
+grep -q "SOL_BOOT_TEST_PAYLOAD_STARTED_RECOVERY" "$test_root/recovery.log"
 
 # Build two signed slots, stage B as a trial, and execute the selected child image.
 esp="$test_root/trial-esp"
@@ -96,7 +116,7 @@ for slot_generation in A:1 B:2; do
   slot=${slot_generation%%:*}
   generation=${slot_generation##*:}
   slot_dir="$esp/EFI/SOL/slots/$slot"
-  cp "$payload" "$slot_dir/system.efi"
+  cp "$test_root/payload-$slot.efi" "$slot_dir/system.efi"
   CARGO_TARGET_DIR="$target_dir" cargo run \
     --quiet --manifest-path "$repo_root/Cargo.toml" -p sol-image -- \
     manifest \
@@ -140,9 +160,46 @@ CARGO_TARGET_DIR="$target_dir" cargo run \
   --state-a "$esp/EFI/SOL/state/state-a.bin" \
   --state-b "$esp/EFI/SOL/state/state-b.bin"
 
+# A signed trial whose bytes are authentic but not a loadable PE image must
+# fall through to the exact retained known-good A deployment without UI.
+fallback_esp="$test_root/fallback-esp"
+cp -a "$esp" "$fallback_esp"
+fallback_b="$fallback_esp/EFI/SOL/slots/B"
+printf '%s\n' 'authenticated but unloadable UKI fixture' >"$fallback_b/system.efi"
+CARGO_TARGET_DIR="$target_dir" cargo run \
+  --quiet --manifest-path "$repo_root/Cargo.toml" -p sol-image -- \
+  manifest \
+  --slot B \
+  --generation 2 \
+  --version ovmf-2-unloadable \
+  --kernel "$test_root/kernel" \
+  --initrd "$test_root/initrd" \
+  --root-image "$test_root/root.img" \
+  --uki "$fallback_b/system.efi" \
+  --kernel-component kernel-x86_64:ovmf-2-unloadable \
+  --initrd-component initrd-base:ovmf-2-unloadable \
+  --dm-verity-root-hash "$root_hash" \
+  --dm-verity-slot-root slot-b-ovmf-2-unloadable \
+  --runtime sol-runtime-1:1:ovmf-test \
+  --output "$fallback_b/manifest.json"
+CARGO_TARGET_DIR="$target_dir" cargo run \
+  --quiet --manifest-path "$repo_root/Cargo.toml" -p sol-image -- \
+  boot-descriptor \
+  --slot B \
+  --generation 2 \
+  --manifest "$fallback_b/manifest.json" \
+  --uki "$fallback_b/system.efi" \
+  --signing-key "$signing_key" \
+  --output "$fallback_b/deployment.bin"
+run_ovmf "$fallback_esp" "$test_root/fallback.log" "$test_root/fallback-vars.fd"
+grep -q "SOL_BOOT_TEST_PAYLOAD_STARTED_A" "$test_root/fallback.log"
+if grep -q "SOL_BOOT_TEST_PAYLOAD_STARTED_B" "$test_root/fallback.log"; then
+  printf '%s\n' "unloadable trial unexpectedly reached its payload" >&2
+  exit 1
+fi
+
 run_ovmf "$esp" "$test_root/trial.log" "$test_root/trial-vars.fd"
-grep -q "booting trial slot B generation 2 attempt 1" "$test_root/trial.log"
-grep -q "SOL_BOOT_TEST_PAYLOAD_STARTED" "$test_root/trial.log"
+grep -q "SOL_BOOT_TEST_PAYLOAD_STARTED_B" "$test_root/trial.log"
 
 CARGO_TARGET_DIR="$target_dir" cargo run \
   --quiet --manifest-path "$repo_root/Cargo.toml" -p sol-image -- \
@@ -156,11 +213,10 @@ cp "$esp/EFI/SOL/state/current.bin" "$esp/EFI/SOL/state/success.bin"
 
 # The exact health report must promote B before the second transfer.
 run_ovmf "$esp" "$test_root/promoted.log" "$test_root/promoted-vars.fd"
-grep -q "booting known-good slot B generation 2" "$test_root/promoted.log"
-grep -q "SOL_BOOT_TEST_PAYLOAD_STARTED" "$test_root/promoted.log"
+grep -q "SOL_BOOT_TEST_PAYLOAD_STARTED_B" "$test_root/promoted.log"
 # QEMU's vvfat directory backend does not reliably mirror guest-side deletion
 # back to the host directory. The manager's host test covers report removal;
 # reaching known-good B here proves that OVMF accepted and applied the report.
 
 printf '%s\n' \
-  "OVMF verified fail-closed recovery, durable trial boot, UKI transfer, and exact-report promotion"
+  "OVMF verified silent failure, recovery, A/B runtime fallback, durable trial boot, UKI transfer, and exact-report promotion"

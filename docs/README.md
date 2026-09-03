@@ -40,7 +40,7 @@ of truth.
 | Services | Mixed S1–S3 foundations — `sol-ime` has protocol/frontend seams and an fcitx5 transport slice; candidate rendering and end-to-end desktop input remain open |
 | Apps | Scaffolds — Files/Terminal/Settings in Phase 3 |
 | Protocols / packaging | Early — Rust SCP messages work internally; no stable language-neutral SCP schema yet |
-| OS boot / image | Foundations — UKI-aware deployment manifests and deterministic A/B trial policy are implemented; signed UEFI execution, redundant boot/recovery authorities, durable state, and graphics handoff remain Phase 7 work |
+| OS boot / image | Foundations — development manifests and a deterministic deployment selector exist; stable Stage-0, independent recovery, content/placement separation, authenticated health, anti-rollback, data barriers, and complete production UKIs remain Phase 7 work |
 | Native app platform | Planned — `.app`, `sol-pkg`, sandbox enforcement, and major/revision/feature runtime compatibility are Phases 8–9 |
 | Accounts | Planned — `sol-securityd`-coordinated account grants, system-owned metadata, encrypted credentials, and generation-fenced leases |
 | Material | Token foundation implemented — compositor-backed adaptive glass and hardware QA remain |

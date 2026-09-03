@@ -1,16 +1,21 @@
 use zbus::interface;
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::profile::{Profile, ProfileType};
+use crate::manager::NetworkManager;
+use crate::profile::ProfileId;
 
 /// D-Bus Profile interface implementation
 pub struct ProfileInterface {
-    profile: Profile,
+    profile_id: ProfileId,
+    manager: NetworkManager,
 }
 
 impl ProfileInterface {
-    pub fn new(profile: Profile) -> Self {
-        Self { profile }
+    pub fn new(profile_id: ProfileId, manager: NetworkManager) -> Self {
+        Self {
+            profile_id,
+            manager,
+        }
     }
 }
 
@@ -18,68 +23,109 @@ impl ProfileInterface {
 impl ProfileInterface {
     /// Profile ID
     async fn id(&self) -> String {
-        self.profile.id.0.clone()
+        self.profile_id.0.clone()
     }
 
     /// Profile name
     async fn name(&self) -> String {
-        self.profile.name.clone()
+        if let Ok(Some(profile)) = self.manager.get_profile(&self.profile_id).await {
+            profile.name
+        } else {
+            self.profile_id.0.clone()
+        }
     }
 
     /// Profile type (wifi, ethernet, vpn)
     async fn profile_type(&self) -> String {
-        match &self.profile.profile_type {
-            ProfileType::WiFi(_) => "wifi".to_string(),
-            ProfileType::Ethernet(_) => "ethernet".to_string(),
-            ProfileType::Vpn(_) => "vpn".to_string(),
+        if let Ok(Some(profile)) = self.manager.get_profile(&self.profile_id).await {
+            match profile.profile_type {
+                crate::profile::ProfileType::WiFi(_) => "wifi".to_string(),
+                crate::profile::ProfileType::Ethernet(_) => "ethernet".to_string(),
+                crate::profile::ProfileType::Vpn(_) => "vpn".to_string(),
+            }
+        } else {
+            "unknown".to_string()
         }
     }
 
     /// Auto-connect enabled
-    #[dbus_interface(property)]
+    #[zbus(property)]
     async fn auto_connect(&self) -> bool {
-        self.profile.auto_connect
+        if let Ok(Some(profile)) = self.manager.get_profile(&self.profile_id).await {
+            profile.auto_connect
+        } else {
+            false
+        }
     }
 
-    #[dbus_interface(property)]
-    async fn set_auto_connect(&mut self, value: bool) {
-        self.profile.auto_connect = value;
-        // TODO: Persist to disk
+    #[zbus(property)]
+    async fn set_auto_connect(&self, value: bool) -> zbus::Result<()> {
+        self.manager
+            .set_auto_connect(&self.profile_id, value)
+            .await
+            .map_err(|e| zbus::Error::Failure(e.to_string()))
     }
 
     /// Metered connection
-    #[dbus_interface(property)]
+    #[zbus(property)]
     async fn metered(&self) -> bool {
-        self.profile.metered
+        if let Ok(Some(profile)) = self.manager.get_profile(&self.profile_id).await {
+            profile.metered
+        } else {
+            false
+        }
     }
 
-    #[dbus_interface(property)]
-    async fn set_metered(&mut self, value: bool) {
-        self.profile.metered = value;
-        // TODO: Persist to disk
+    #[zbus(property)]
+    async fn set_metered(&self, _value: bool) -> zbus::Result<()> {
+        // TODO: Implement metered flag persistence
+        Err(zbus::Error::Failure(
+            "Setting metered flag not yet implemented".into(),
+        ))
     }
 
     /// Connect using this profile
     async fn connect(&self) -> zbus::fdo::Result<OwnedObjectPath> {
-        // TODO: Trigger connection
-        Err(zbus::fdo::Error::NotSupported(
-            "Connect not yet implemented".into(),
-        ))
+        self.manager
+            .connect_to_profile(&self.profile_id)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+
+        let path = format!(
+            "/org/sol/Network1/Connection/{}",
+            sanitize_path_component(&self.profile_id.0)
+        );
+        zbus::zvariant::ObjectPath::try_from(path)
+            .map(|p| p.into())
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
     /// Disconnect this profile
     async fn disconnect(&self) -> zbus::fdo::Result<()> {
-        // TODO: Trigger disconnection
-        Err(zbus::fdo::Error::NotSupported(
-            "Disconnect not yet implemented".into(),
-        ))
+        self.manager
+            .disconnect_profile(&self.profile_id)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
     /// Delete this profile
     async fn delete(&self) -> zbus::fdo::Result<()> {
-        // TODO: Delete profile
-        Err(zbus::fdo::Error::NotSupported(
-            "Delete not yet implemented".into(),
-        ))
+        self.manager
+            .delete_profile(&self.profile_id)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
+}
+
+fn sanitize_path_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }

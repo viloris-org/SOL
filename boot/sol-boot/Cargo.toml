@@ -28,7 +28,7 @@ sha2 = { version = "0.10", default-features = false }
 sol-boot-core = { path = "../sol-boot-core" }
 
 [target.'cfg(target_os = "uefi")'.dependencies]
-uefi = { version = "0.39", features = ["alloc", "global_allocator", "logger", "panic_handler"] }
+uefi = { version = "0.39", features = ["alloc", "global_allocator"] }
 
 [lints]
 workspace = true

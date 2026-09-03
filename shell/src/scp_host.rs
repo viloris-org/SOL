@@ -18,12 +18,7 @@
 //! mapping, which is what allows a surface to be created lazily on its first
 //! present, re-placed when its geometry changes, and withdrawn by name.
 
-use std::{
-    collections::BTreeMap,
-    fmt, io,
-    os::unix::net::UnixStream,
-    time::Duration,
-};
+use std::{collections::BTreeMap, fmt, io, os::unix::net::UnixStream, time::Duration};
 
 use sol_compositor::scp::{
     memfd,
@@ -424,7 +419,10 @@ impl ScpDesktopHost {
         let surface_id = self.next_surface_id;
         self.next_surface_id = self.next_surface_id.saturating_add(1);
 
-        write_frame(&mut self.stream, &ClientMessage::CreateSurface { surface_id })?;
+        write_frame(
+            &mut self.stream,
+            &ClientMessage::CreateSurface { surface_id },
+        )?;
         write_frame(
             &mut self.stream,
             &ClientMessage::CreateLayerSurface {
@@ -601,7 +599,9 @@ impl ScpDesktopHost {
 
     /// Block until the compositor configures a layer surface, deferring
     /// anything else it sends in the meantime.
-    fn await_layer_configure(&mut self) -> Result<(LayerSurfaceId, u32, i32, i32), DesktopHostError> {
+    fn await_layer_configure(
+        &mut self,
+    ) -> Result<(LayerSurfaceId, u32, i32, i32), DesktopHostError> {
         loop {
             match read_frame::<CompositorMessage>(&mut self.stream)? {
                 CompositorMessage::ConfigureLayerSurface {
@@ -768,9 +768,11 @@ fn request_layer_capability(stream: &mut UnixStream) -> Result<Vec<u8>, DesktopH
             token: Some(token),
             ..
         } => Ok(token),
-        CompositorMessage::CapabilityDecision { reason, .. } => Err(DesktopHostError::Refused(
-            reason.unwrap_or_else(|| "layer-shell capability denied".to_string()),
-        )),
+        CompositorMessage::CapabilityDecision { reason, .. } => {
+            Err(DesktopHostError::Refused(reason.unwrap_or_else(|| {
+                "layer-shell capability denied".to_string()
+            })))
+        }
         other => Err(unexpected("layer capability", &other)),
     }
 }
