@@ -34,7 +34,22 @@ impl Builtin for Echo {
             .join(" ");
 
         println!("{}", output);
-        Ok(Value::Null)
+        Ok(Value::String(format!("{output}\n")))
+    }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let output = args.iter().map(value_to_text).collect::<Vec<_>>().join(" ");
+        if emit {
+            println!("{output}");
+        }
+        let _ = flags;
+        Ok(Value::String(format!("{output}\n")))
     }
 }
 
@@ -60,6 +75,45 @@ impl Builtin for Pwd {
         println!("{}", path);
         Ok(Value::String(path))
     }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let cwd = std::env::current_dir()?;
+        let path = cwd.to_string_lossy().to_string();
+        if emit {
+            println!("{path}");
+        }
+        let _ = (args, flags);
+        Ok(Value::String(format!("{path}\n")))
+    }
+}
+
+fn value_to_text(value: &Value) -> String {
+    match value {
+        Value::String(value) => value.clone(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null => "null".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+fn expand_path(path: &str) -> std::path::PathBuf {
+    if path == "~" {
+        return std::env::var_os("HOME")
+            .map_or_else(|| std::path::PathBuf::from(path), std::path::PathBuf::from);
+    }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return std::path::PathBuf::from(home).join(rest);
+    }
+    std::path::PathBuf::from(path)
 }
 
 pub struct Cd;
@@ -84,7 +138,7 @@ impl Builtin for Cd {
             std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
         } else {
             match &args[0] {
-                Value::String(s) => s.clone(),
+                Value::String(s) => expand_path(s).to_string_lossy().into_owned(),
                 _ => {
                     return Err(RuntimeError::TypeError {
                         expected: "string".to_string(),
@@ -121,6 +175,7 @@ impl Builtin for Exit {
         } else {
             match &args[0] {
                 Value::Number(n) => *n as i32,
+                Value::String(value) => value.parse::<i32>().unwrap_or(0),
                 _ => 0,
             }
         };
@@ -150,7 +205,7 @@ impl Builtin for Ls {
             std::env::current_dir()?
         } else {
             match &args[0] {
-                Value::String(s) => std::path::PathBuf::from(s),
+                Value::String(s) => expand_path(s),
                 _ => std::env::current_dir()?,
             }
         };
@@ -186,7 +241,7 @@ impl Builtin for Ls {
                     continue;
                 }
 
-                let metadata = entry.metadata()?;
+                let metadata = std::fs::symlink_metadata(entry.path())?;
                 let is_dir = metadata.is_dir();
                 let is_symlink = metadata.is_symlink();
                 let size = metadata.len();
@@ -225,7 +280,7 @@ impl Builtin for Ls {
                     continue;
                 }
 
-                let metadata = entry.metadata()?;
+                let metadata = std::fs::symlink_metadata(entry.path())?;
                 let is_dir = metadata.is_dir();
                 let is_symlink = metadata.is_symlink();
 
@@ -233,7 +288,7 @@ impl Builtin for Ls {
             }
 
             // Sort alphabetically (case-insensitive)
-            entries.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+            entries.sort_by_key(|entry| entry.0.to_lowercase());
 
             // Get terminal width (fallback to 80 if detection fails)
             let term_width = term_size::dimensions().map(|(w, _)| w).unwrap_or(80);
@@ -263,12 +318,42 @@ impl Builtin for Ls {
             }
 
             // Add final newline if needed
-            if !entries.is_empty() && entries.len() % num_cols != 0 {
+            if !entries.is_empty() && !entries.len().is_multiple_of(num_cols) {
                 println!();
             }
 
             Ok(Value::Null)
         }
+    }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let path = if let Some(Value::String(path)) = args.first() {
+            expand_path(path)
+        } else {
+            std::env::current_dir()?
+        };
+        let show_hidden = flags.get("all").or_else(|| flags.get("a")).is_some();
+        let mut entries = std::fs::read_dir(path)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| show_hidden || !name.starts_with('.'))
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|name| name.to_lowercase());
+        let output = if entries.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", entries.join("\n"))
+        };
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
     }
 }
 
@@ -289,47 +374,76 @@ impl Builtin for Which {
         args: Vec<Value>,
         _flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        if args.is_empty() {
-            eprintln!("which: missing command name");
-            return Ok(Value::Null);
-        }
-
-        let command_name = match &args[0] {
-            Value::String(s) => s.clone(),
-            _ => {
-                return Err(RuntimeError::TypeError {
-                    expected: "string".to_string(),
-                    got: args[0].type_name().to_string(),
-                });
+        let command_name = string_argument(&args, "which: missing command name")?;
+        match locate_command(command_name) {
+            Some(path) => {
+                println!("{path}");
+                Ok(Value::String(path))
             }
-        };
-
-        // Check if it's a builtin command
-        let builtins = vec![
-            "echo", "pwd", "cd", "exit", "ls", "which", "clear", "reset", "cat", "cp", "mv", "rm",
-            "mkdir", "touch", "grep", "head", "tail", "wc", "sort", "uniq", "env", "basename",
-            "dirname", "sleep", "date", "true", "false", "whoami", "uname",
-        ];
-        if builtins.contains(&command_name.as_str()) {
-            println!("{}: shell built-in command", command_name);
-            return Ok(Value::String(format!("{}: built-in", command_name)));
-        }
-
-        // Search in PATH
-        if let Ok(path_var) = std::env::var("PATH") {
-            for dir in path_var.split(':') {
-                let full_path = std::path::Path::new(dir).join(&command_name);
-                if full_path.exists() && full_path.is_file() {
-                    let path_str = full_path.to_string_lossy().to_string();
-                    println!("{}", path_str);
-                    return Ok(Value::String(path_str));
-                }
+            None => {
+                eprintln!("{command_name} not found");
+                Ok(Value::Null)
             }
         }
-
-        eprintln!("{} not found", command_name);
-        Ok(Value::Null)
     }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        _flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let command_name = string_argument(&args, "which: missing command name")?;
+        let output = locate_command(command_name)
+            .map(|path| format!("{path}\n"))
+            .unwrap_or_default();
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
+    }
+}
+
+fn string_argument<'a>(args: &'a [Value], missing: &str) -> RuntimeResult<&'a str> {
+    match args.first() {
+        Some(Value::String(value)) => Ok(value),
+        Some(value) => Err(RuntimeError::TypeError {
+            expected: "string".to_string(),
+            got: value.type_name().to_string(),
+        }),
+        None => Err(RuntimeError::Custom(missing.to_string())),
+    }
+}
+
+fn locate_command(command_name: &str) -> Option<String> {
+    const BUILTINS: &[&str] = &[
+        "echo", "pwd", "cd", "exit", "ls", "which", "clear", "reset", "help", "cat", "cp", "mv",
+        "rm", "mkdir", "touch", "grep", "head", "tail", "wc", "sort", "uniq", "env", "basename",
+        "dirname", "sleep", "date", "true", "false", "whoami", "uname",
+    ];
+    if BUILTINS.contains(&command_name) {
+        return Some(format!("{command_name}: shell built-in command"));
+    }
+
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|directory| directory.join(command_name))
+        .find(|path| is_executable(path))
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.is_file()
+        && path
+            .metadata()
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &std::path::Path) -> bool {
+    path.is_file()
 }
 
 pub struct Clear;

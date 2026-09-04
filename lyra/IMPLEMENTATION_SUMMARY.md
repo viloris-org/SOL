@@ -75,21 +75,14 @@
   - Real-time syntax highlighting as you type
 
 #### 5.3 History Management
-- ✅ **History manager** (`history/manager.rs`)
-  - Persistent history storage in JSONL format
-  - Rich metadata tracking:
-    - Command text
-    - Timestamp
-    - Exit status
-    - Working directory
-  - Search functionality with case-insensitive matching
-  - Recent entries retrieval
-  - History size management (10,000 entry limit)
-  - Clear history functionality
 - ✅ **Reedline integration**
+  - Single persistent history store with a 10,000-entry limit
   - Ctrl+R history search
   - Up/Down arrow navigation
   - Persistent across sessions
+- ✅ **Auxiliary history manager** (`history/manager.rs`)
+  - JSONL metadata storage for library consumers
+  - Rewrites the file when trimming, so the on-disk limit is enforced
 
 ### 6. UI/UX
 - ✅ **Prompt system** - `λ ~/path (git-branch)` format
@@ -180,35 +173,8 @@ members = [
 ## Test Results
 
 ```bash
-$ cargo test -p lyra --lib
-running 25 tests
-test completion::command::tests::test_builtin_commands ... ok
-test completion::command::tests::test_discover_path_commands ... ok
-test completion::completer::tests::test_completion_context_command ... ok
-test completion::completer::tests::test_completion_context_git ... ok
-test completion::completer::tests::test_completion_context_path ... ok
-test completion::file::tests::test_format_file_size ... ok
-test completion::file::tests::test_parse_partial_path_empty ... ok
-test completion::file::tests::test_parse_partial_path_relative ... ok
-test completion::git::tests::test_git_subcommands ... ok
-test highlighter::tests::test_highlight_builtin ... ok
-test highlighter::tests::test_highlight_simple_command ... ok
-test history::manager::tests::test_history_entry_creation ... ok
-test history::manager::tests::test_history_search ... ok
-test history::manager::tests::test_recent_entries ... ok
-test lexer::tests::test_tokenize_number ... ok
-test lexer::tests::test_tokenize_pipeline ... ok
-test lexer::tests::test_tokenize_simple_command ... ok
-test lexer::tests::test_tokenize_string ... ok
-test parser::tests::test_parse_binary_expr ... ok
-test parser::tests::test_parse_let ... ok
-test parser::tests::test_parse_pipeline ... ok
-test parser::tests::test_parse_simple_command ... ok
-test runtime::eval::tests::test_eval_binary_op ... ok
-test runtime::eval::tests::test_eval_let ... ok
-test runtime::eval::tests::test_eval_literal ... ok
-
-test result: ok. 25 passed; 0 failed; 0 ignored
+$ cargo test --all-targets
+test result: ok. 47 passed; 0 failed; 0 ignored
 ```
 
 ## Example Demo
@@ -352,7 +318,7 @@ The complete design docs live in `docs/lyra/`:
 Phase 2 has successfully delivered:
 - **Intelligent completion**: Context-aware completion for commands, files, and Git
 - **Syntax highlighting**: Real-time highlighting with semantic colors
-- **History management**: Persistent, searchable history with rich metadata
+- **History management**: One bounded, persistent, searchable Reedline history store
 
 The shell now provides a modern, intelligent command-line experience with:
 - Tab completion that understands context

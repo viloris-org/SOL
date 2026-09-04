@@ -89,27 +89,29 @@ impl Evaluator {
                     };
 
                     self.env.push_scope();
-
-                    for item in items {
-                        self.env.set(var.clone(), item);
-                        self.eval_stmts(body).await?;
+                    let result = async {
+                        for item in items {
+                            self.env.set(var.clone(), item);
+                            self.eval_stmts(body).await?;
+                        }
+                        Ok(Value::Null)
                     }
-
+                    .await;
                     self.env.pop_scope();
-
-                    Ok(Value::Null)
+                    result
                 }
 
                 Stmt::While { condition, body } => {
                     self.env.push_scope();
-
-                    while self.eval_expr(condition).await?.is_truthy() {
-                        self.eval_stmts(body).await?;
+                    let result = async {
+                        while self.eval_expr(condition).await?.is_truthy() {
+                            self.eval_stmts(body).await?;
+                        }
+                        Ok(Value::Null)
                     }
-
+                    .await;
                     self.env.pop_scope();
-
-                    Ok(Value::Null)
+                    result
                 }
 
                 Stmt::Return(expr) => {
@@ -136,18 +138,43 @@ impl Evaluator {
                     .get(name)
                     .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
 
-                Expr::Binary { left, op, right } => {
-                    let left_val = self.eval_expr(left).await?;
-                    let right_val = self.eval_expr(right).await?;
-                    self.eval_binary_op(&left_val, op, &right_val)
-                }
+                Expr::Binary { left, op, right } => match op {
+                    crate::parser::BinaryOp::And => {
+                        let left_val = self.eval_expr(left).await?;
+                        if !Self::condition_truthy(left, &left_val) {
+                            Ok(Value::Bool(false))
+                        } else {
+                            let right_val = self.eval_expr(right).await?;
+                            Ok(Value::Bool(Self::condition_truthy(right, &right_val)))
+                        }
+                    }
+                    crate::parser::BinaryOp::Or => {
+                        let left_val = self.eval_expr(left).await?;
+                        if Self::condition_truthy(left, &left_val) {
+                            Ok(Value::Bool(true))
+                        } else {
+                            let right_val = self.eval_expr(right).await?;
+                            Ok(Value::Bool(Self::condition_truthy(right, &right_val)))
+                        }
+                    }
+                    _ => {
+                        let left_val = self.eval_expr(left).await?;
+                        let right_val = self.eval_expr(right).await?;
+                        self.eval_binary_op(&left_val, op, &right_val)
+                    }
+                },
 
                 Expr::Unary { op, expr } => {
                     let val = self.eval_expr(expr).await?;
                     self.eval_unary_op(op, &val)
                 }
 
-                Expr::Call { name, args, flags } => self.eval_call(name, args, flags).await,
+                Expr::Call {
+                    name,
+                    args,
+                    flags,
+                    argv,
+                } => self.eval_call(name, args, flags, argv).await,
 
                 Expr::Pipeline { stages } => self.eval_pipeline(stages).await,
 
@@ -248,14 +275,19 @@ impl Evaluator {
             (Value::Bool(l), BinaryOp::Eq, Value::Bool(r)) => Ok(Value::Bool(l == r)),
             (Value::Bool(l), BinaryOp::NotEq, Value::Bool(r)) => Ok(Value::Bool(l != r)),
 
-            // 逻辑运算
-            (l, BinaryOp::And, r) => Ok(Value::Bool(l.is_truthy() && r.is_truthy())),
-            (l, BinaryOp::Or, r) => Ok(Value::Bool(l.is_truthy() || r.is_truthy())),
-
             _ => Err(RuntimeError::TypeError {
                 expected: "compatible types for operation".to_string(),
                 got: format!("{} {:?} {}", left.type_name(), op, right.type_name()),
             }),
+        }
+    }
+
+    fn condition_truthy(expr: &Expr, value: &Value) -> bool {
+        if matches!(expr, Expr::Call { .. } | Expr::Pipeline { .. }) && matches!(value, Value::Null)
+        {
+            true
+        } else {
+            value.is_truthy()
         }
     }
 
@@ -277,6 +309,7 @@ impl Evaluator {
         name: &'a str,
         args: &'a [Expr],
         flags: &'a HashMap<String, Expr>,
+        argv: &'a [Expr],
     ) -> Pin<Box<dyn Future<Output = RuntimeResult<Value>> + 'a>> {
         Box::pin(async move {
             // 求值参数
@@ -291,8 +324,15 @@ impl Evaluator {
                 flag_values.insert(key.clone(), self.eval_expr(value).await?);
             }
 
+            let mut argv_values = Vec::new();
+            for arg in argv {
+                argv_values.push(self.eval_expr(arg).await?);
+            }
+
             // 执行内建命令
-            self.builtins.execute(name, arg_values, flag_values).await
+            self.builtins
+                .execute(name, arg_values, flag_values, argv_values)
+                .await
         })
     }
 
@@ -305,19 +345,54 @@ impl Evaluator {
                 return Ok(Value::Null);
             }
 
-            // 第一阶段：没有输入
-            let mut value = self.eval_expr(&stages[0]).await?;
-
-            // 后续阶段：管道输入
-            for stage in &stages[1..] {
-                // 设置 $in 变量为上一阶段的输出
-                self.env.set("in".to_string(), value.clone());
-
-                // 执行当前阶段
-                value = self.eval_expr(stage).await?;
+            let mut value = Value::Null;
+            for (index, stage) in stages.iter().enumerate() {
+                let input = (index > 0).then(|| value.clone());
+                let emit = index + 1 == stages.len();
+                value = self.eval_pipeline_stage(stage, input, emit).await?;
             }
 
             Ok(value)
+        })
+    }
+
+    fn eval_pipeline_stage<'a>(
+        &'a mut self,
+        stage: &'a Expr,
+        input: Option<Value>,
+        emit: bool,
+    ) -> Pin<Box<dyn Future<Output = RuntimeResult<Value>> + 'a>> {
+        Box::pin(async move {
+            if let Some(value) = &input {
+                self.env.set("in".to_string(), value.clone());
+            }
+
+            let Expr::Call {
+                name,
+                args,
+                flags,
+                argv,
+            } = stage
+            else {
+                return self.eval_expr(stage).await;
+            };
+
+            let mut arg_values = Vec::new();
+            for arg in args {
+                arg_values.push(self.eval_expr(arg).await?);
+            }
+            let mut flag_values = HashMap::new();
+            for (key, value) in flags {
+                flag_values.insert(key.clone(), self.eval_expr(value).await?);
+            }
+            let mut argv_values = Vec::new();
+            for arg in argv {
+                argv_values.push(self.eval_expr(arg).await?);
+            }
+
+            self.builtins
+                .execute_piped(name, arg_values, flag_values, argv_values, input, emit)
+                .await
         })
     }
 }

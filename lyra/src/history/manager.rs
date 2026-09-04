@@ -55,12 +55,16 @@ impl HistoryManager {
         self.entries.push(entry.clone());
 
         // Trim if exceeds max
-        if self.entries.len() > self.max_entries {
+        let trimmed = self.entries.len() > self.max_entries;
+        if trimmed {
             self.entries.drain(0..self.entries.len() - self.max_entries);
         }
 
-        // Append to file
-        self.append_to_file(&entry)?;
+        if trimmed {
+            self.save()?;
+        } else {
+            self.append_to_file(&entry)?;
+        }
 
         Ok(())
     }
@@ -114,11 +118,9 @@ impl HistoryManager {
         let reader = BufReader::new(file);
         let mut entries = Vec::new();
 
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                if let Ok(entry) = serde_json::from_str::<HistoryEntry>(&line) {
-                    entries.push(entry);
-                }
+        for line in reader.lines().map_while(|line| line.ok()) {
+            if let Ok(entry) = serde_json::from_str::<HistoryEntry>(&line) {
+                entries.push(entry);
             }
         }
 
@@ -236,5 +238,27 @@ mod tests {
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].command, "cmd3");
         assert_eq!(recent[1].command, "cmd2");
+    }
+
+    #[test]
+    fn test_trimming_rewrites_the_history_file() {
+        let path = std::env::temp_dir().join(format!(
+            "lyra-history-{}-{}.jsonl",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let mut manager = HistoryManager {
+            history_file: path.clone(),
+            entries: Vec::new(),
+            max_entries: 1,
+        };
+
+        manager.add("first".to_string(), Some(0)).unwrap();
+        manager.add("second".to_string(), Some(0)).unwrap();
+        let persisted = HistoryManager::load_history(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].command, "second");
     }
 }

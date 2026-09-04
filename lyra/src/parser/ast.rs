@@ -26,6 +26,9 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
         flags: HashMap<String, Expr>,
+        /// Arguments in source order, including options. External commands use
+        /// this representation because option ordering and repetition matter.
+        argv: Vec<Expr>,
     },
 
     // 管道

@@ -112,7 +112,7 @@ impl CommandCompleter {
         }
 
         // Sort by score (descending) and take top 20
-        scored_suggestions.sort_by(|a, b| b.0.cmp(&a.0));
+        scored_suggestions.sort_by_key(|entry| std::cmp::Reverse(entry.0));
         scored_suggestions
             .into_iter()
             .take(20)
@@ -138,10 +138,11 @@ impl CommandCompleter {
                             use std::os::unix::fs::PermissionsExt;
                             let is_executable = metadata.permissions().mode() & 0o111 != 0;
 
-                            if metadata.is_file() && is_executable {
-                                if let Some(name) = entry.file_name().to_str() {
-                                    commands.insert(name.to_string());
-                                }
+                            if metadata.is_file()
+                                && is_executable
+                                && let Some(name) = entry.file_name().to_str()
+                            {
+                                commands.insert(name.to_string());
                             }
                         }
 
