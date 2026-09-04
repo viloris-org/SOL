@@ -10,7 +10,6 @@ pub mod runtime;
 use anyhow::Result;
 use completion::{HorizontalCompleter, LyraCompleter};
 use highlighter::LyraHighlighter;
-use history::HistoryManager;
 use parser::Parser;
 use prompt::PromptRenderer;
 use reedline::{
@@ -24,7 +23,6 @@ const COMPLETION_COLUMNS: u16 = 4;
 pub struct Lyra {
     evaluator: Evaluator,
     prompt: PromptRenderer,
-    history: HistoryManager,
 }
 
 impl Lyra {
@@ -32,7 +30,6 @@ impl Lyra {
         Self {
             evaluator: Evaluator::new(),
             prompt: PromptRenderer::new(),
-            history: HistoryManager::new().expect("Failed to initialize history"),
         }
     }
 
@@ -43,13 +40,10 @@ impl Lyra {
             .unwrap_or_else(|| std::path::PathBuf::from(".lyra_history"));
 
         if let Some(parent) = history_file.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent)?;
         }
 
-        let history = Box::new(
-            FileBackedHistory::with_file(1000, history_file)
-                .expect("Failed to create history backend"),
-        );
+        let history = Box::new(FileBackedHistory::with_file(10_000, history_file)?);
 
         // Create a columnar menu for completions
         let completion_menu = Box::new(
@@ -105,11 +99,6 @@ impl Lyra {
                     }
 
                     let result = self.execute(line).await;
-                    let exit_status = if result.is_ok() { Some(0) } else { Some(1) };
-
-                    // Add to our internal history manager
-                    let _ = self.history.add(line.to_string(), exit_status);
-
                     match result {
                         Ok(_) => {}
                         Err(e) => {

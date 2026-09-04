@@ -25,6 +25,10 @@ impl GitCompleter {
         let before_cursor = &line[..pos];
         let tokens: Vec<&str> = before_cursor.split_whitespace().collect();
 
+        if tokens.len() == 1 && before_cursor.ends_with(char::is_whitespace) {
+            return self.complete_subcommands(before_cursor, "", pos);
+        }
+
         if tokens.len() < 2 {
             return Vec::new();
         }
@@ -70,7 +74,11 @@ impl GitCompleter {
         let branches = self.get_git_branches();
 
         let tokens: Vec<&str> = line.split_whitespace().collect();
-        let partial = tokens.last().unwrap_or(&"");
+        let partial = if line.ends_with(char::is_whitespace) {
+            ""
+        } else {
+            tokens.last().copied().unwrap_or("")
+        };
 
         let start = line.rfind(partial).unwrap_or(pos);
         let span = Span::new(start, pos);
@@ -94,7 +102,11 @@ impl GitCompleter {
         let remotes = self.get_git_remotes();
 
         let tokens: Vec<&str> = line.split_whitespace().collect();
-        let partial = tokens.last().unwrap_or(&"");
+        let partial = if line.ends_with(char::is_whitespace) {
+            ""
+        } else {
+            tokens.last().copied().unwrap_or("")
+        };
 
         let start = line.rfind(partial).unwrap_or(pos);
         let span = Span::new(start, pos);

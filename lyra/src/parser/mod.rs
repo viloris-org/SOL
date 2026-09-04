@@ -23,7 +23,7 @@ impl Parser {
 
         while !self.lexer.is_at_end() {
             // 跳过换行符
-            if matches!(self.lexer.peek(), Some(Token::Newline)) {
+            if matches!(self.lexer.peek(), Some(Token::Newline | Token::Semicolon)) {
                 self.lexer.advance();
                 continue;
             }
@@ -42,6 +42,15 @@ impl Parser {
             Some(Token::For) => self.parse_for(),
             Some(Token::While) => self.parse_while(),
             Some(Token::Return) => self.parse_return(),
+            // At statement position these names are shell commands. They remain
+            // boolean literals inside expressions such as `if true { ... }`.
+            Some(Token::Bool(_)) => {
+                let first = self.parse_call()?;
+                let first = self.parse_and_tail(first)?;
+                let first = self.parse_or_tail(first)?;
+                let expr = self.finish_pipeline(first)?;
+                Ok(Stmt::Expr(expr))
+            }
             _ => {
                 let expr = self.parse_pipeline()?;
                 Ok(Stmt::Expr(expr))
@@ -109,7 +118,7 @@ impl Parser {
 
         let mut body = Vec::new();
         while !matches!(self.lexer.peek(), Some(Token::RBrace)) {
-            if matches!(self.lexer.peek(), Some(Token::Newline)) {
+            if matches!(self.lexer.peek(), Some(Token::Newline | Token::Semicolon)) {
                 self.lexer.advance();
                 continue;
             }
@@ -130,7 +139,7 @@ impl Parser {
 
         let mut then_branch = Vec::new();
         while !matches!(self.lexer.peek(), Some(Token::RBrace)) {
-            if matches!(self.lexer.peek(), Some(Token::Newline)) {
+            if matches!(self.lexer.peek(), Some(Token::Newline | Token::Semicolon)) {
                 self.lexer.advance();
                 continue;
             }
@@ -145,7 +154,7 @@ impl Parser {
 
             let mut branch = Vec::new();
             while !matches!(self.lexer.peek(), Some(Token::RBrace)) {
-                if matches!(self.lexer.peek(), Some(Token::Newline)) {
+                if matches!(self.lexer.peek(), Some(Token::Newline | Token::Semicolon)) {
                     self.lexer.advance();
                     continue;
                 }
@@ -187,7 +196,7 @@ impl Parser {
 
         let mut body = Vec::new();
         while !matches!(self.lexer.peek(), Some(Token::RBrace)) {
-            if matches!(self.lexer.peek(), Some(Token::Newline)) {
+            if matches!(self.lexer.peek(), Some(Token::Newline | Token::Semicolon)) {
                 self.lexer.advance();
                 continue;
             }
@@ -208,7 +217,7 @@ impl Parser {
 
         let mut body = Vec::new();
         while !matches!(self.lexer.peek(), Some(Token::RBrace)) {
-            if matches!(self.lexer.peek(), Some(Token::Newline)) {
+            if matches!(self.lexer.peek(), Some(Token::Newline | Token::Semicolon)) {
                 self.lexer.advance();
                 continue;
             }
@@ -223,7 +232,10 @@ impl Parser {
     fn parse_return(&mut self) -> ParseResult<Stmt> {
         self.expect_token(Token::Return)?;
 
-        if matches!(self.lexer.peek(), Some(Token::Newline) | None) {
+        if matches!(
+            self.lexer.peek(),
+            Some(Token::Newline | Token::Semicolon | Token::RBrace) | None
+        ) {
             Ok(Stmt::Return(None))
         } else {
             let expr = self.parse_expr()?;
@@ -232,11 +244,21 @@ impl Parser {
     }
 
     fn parse_pipeline(&mut self) -> ParseResult<Expr> {
-        let mut stages = vec![self.parse_expr()?];
+        let first = self.parse_expr()?;
+        self.finish_pipeline(first)
+    }
+
+    fn finish_pipeline(&mut self, first: Expr) -> ParseResult<Expr> {
+        let mut stages = vec![first];
 
         while matches!(self.lexer.peek(), Some(Token::Pipe)) {
             self.lexer.advance();
-            stages.push(self.parse_expr()?);
+            let stage = if matches!(self.lexer.peek(), Some(Token::Bool(_))) {
+                self.parse_call()?
+            } else {
+                self.parse_expr()?
+            };
+            stages.push(stage);
         }
 
         if stages.len() == 1 {
@@ -251,8 +273,11 @@ impl Parser {
     }
 
     fn parse_or(&mut self) -> ParseResult<Expr> {
-        let mut left = self.parse_and()?;
+        let left = self.parse_and()?;
+        self.parse_or_tail(left)
+    }
 
+    fn parse_or_tail(&mut self, mut left: Expr) -> ParseResult<Expr> {
         while matches!(self.lexer.peek(), Some(Token::Or)) {
             self.lexer.advance();
             let right = self.parse_and()?;
@@ -267,8 +292,11 @@ impl Parser {
     }
 
     fn parse_and(&mut self) -> ParseResult<Expr> {
-        let mut left = self.parse_comparison()?;
+        let left = self.parse_comparison()?;
+        self.parse_and_tail(left)
+    }
 
+    fn parse_and_tail(&mut self, mut left: Expr) -> ParseResult<Expr> {
         while matches!(self.lexer.peek(), Some(Token::And)) {
             self.lexer.advance();
             let right = self.parse_comparison()?;
@@ -446,7 +474,7 @@ impl Parser {
                     None => Err(ParseError::UnexpectedEof),
                 }
             }
-            Some(Token::Ident(_)) => self.parse_call(),
+            Some(Token::Ident(_) | Token::Slash | Token::Dot | Token::DotDot) => self.parse_call(),
             Some(Token::LBracket) => self.parse_list(),
             Some(Token::LBrace) => self.parse_record(),
             Some(Token::LParen) => {
@@ -463,6 +491,36 @@ impl Parser {
     fn parse_call(&mut self) -> ParseResult<Expr> {
         let name = match self.lexer.advance() {
             Some(Token::Ident(s)) => s,
+            Some(Token::Bool(value)) => value.to_string(),
+            Some(Token::Slash | Token::Dot | Token::DotDot) => {
+                // Put the first token back conceptually by using its span and
+                // consume the complete adjacent command word.
+                let first_index = self.lexer.current_index() - 1;
+                let (_, first_span) = self
+                    .lexer
+                    .token_at(first_index)
+                    .ok_or(ParseError::UnexpectedEof)?;
+                let mut end = first_span.end;
+                while let Some((token, span)) = self.lexer.token_at(self.lexer.current_index()) {
+                    if span.start != end
+                        || matches!(
+                            token,
+                            Token::Pipe
+                                | Token::And
+                                | Token::Or
+                                | Token::Newline
+                                | Token::Semicolon
+                                | Token::RBrace
+                                | Token::RParen
+                        )
+                    {
+                        break;
+                    }
+                    end = span.end;
+                    self.lexer.advance();
+                }
+                self.lexer.source(first_span.start..end).to_string()
+            }
             Some(tok) => {
                 return Err(ParseError::ExpectedToken {
                     expected: "command name".to_string(),
@@ -474,154 +532,196 @@ impl Parser {
 
         let mut args = Vec::new();
         let mut flags = HashMap::new();
+        let mut argv = Vec::new();
+        let mut parse_options = true;
 
         loop {
             match self.lexer.peek() {
-                Some(Token::Pipe) | Some(Token::Newline) | None => break,
+                Some(Token::Pipe | Token::And | Token::Or | Token::Newline) | None => break,
                 Some(Token::Semicolon) | Some(Token::RBrace) | Some(Token::RParen) => break,
-                Some(Token::DoubleDash) => {
-                    self.lexer.advance();
-                    // 后面的都是参数
-                    while let Some(token) = self.lexer.peek() {
-                        match token {
-                            Token::Pipe | Token::Newline | Token::Semicolon => break,
-                            _ => {
-                                args.push(self.parse_arg()?);
-                            }
-                        }
-                    }
-                    break;
-                }
-                Some(Token::Minus) => {
-                    // 可能是 flag 或负数
-                    self.lexer.advance();
-                    match self.lexer.peek() {
-                        Some(Token::Minus) => {
-                            // --flag
-                            self.lexer.advance();
-                            match self.lexer.advance() {
-                                Some(Token::Ident(flag_name)) => {
-                                    // 检查是否有值
-                                    if matches!(self.lexer.peek(), Some(Token::Assign)) {
-                                        self.lexer.advance();
-                                        let value = self.parse_arg()?;
-                                        flags.insert(flag_name, value);
-                                    } else {
-                                        flags.insert(flag_name, Expr::Literal(Value::Bool(true)));
-                                    }
-                                }
-                                Some(tok) => {
-                                    return Err(ParseError::ExpectedToken {
-                                        expected: "flag name".to_string(),
-                                        found: tok.to_string(),
-                                    });
-                                }
-                                None => return Err(ParseError::UnexpectedEof),
-                            }
-                        }
-                        Some(Token::Number(_)) => {
-                            // 负数
-                            let num_expr = self.parse_arg()?;
-                            args.push(Expr::Unary {
-                                op: UnaryOp::Neg,
-                                expr: Box::new(num_expr),
-                            });
-                        }
-                        Some(Token::Ident(flag_name)) => {
-                            // -f 短 flag
-                            let flag_name = flag_name.clone();
-                            self.lexer.advance();
-                            flags.insert(flag_name, Expr::Literal(Value::Bool(true)));
-                        }
-                        _ => {
-                            return Err(ParseError::InvalidSyntax(
-                                "Invalid flag syntax".to_string(),
-                            ));
-                        }
-                    }
-                }
                 _ => {
-                    args.push(self.parse_arg()?);
+                    if parse_options {
+                        let raw = self.peek_word().ok_or_else(|| {
+                            ParseError::InvalidSyntax("Unable to read command argument".to_string())
+                        })?;
+
+                        if raw == "--" {
+                            self.consume_word();
+                            argv.push(Expr::Literal(Value::String(raw)));
+                            parse_options = false;
+                            continue;
+                        }
+
+                        if let Some(option) = raw.strip_prefix("--")
+                            && !option.is_empty()
+                        {
+                            self.consume_word();
+                            let (name, value) = Self::parse_long_option(option)?;
+                            flags.insert(name, value);
+                            argv.push(Expr::Literal(Value::String(raw)));
+                            continue;
+                        }
+
+                        if raw.starts_with('-') && raw != "-" && raw.parse::<f64>().is_err() {
+                            self.consume_word();
+                            Self::parse_short_options(&raw, &mut flags)?;
+                            argv.push(Expr::Literal(Value::String(raw)));
+                            continue;
+                        }
+                    }
+
+                    let arg = self.parse_arg()?;
+                    argv.push(arg.clone());
+                    args.push(arg);
                 }
             }
         }
 
-        Ok(Expr::Call { name, args, flags })
+        Ok(Expr::Call {
+            name,
+            args,
+            flags,
+            argv,
+        })
     }
 
-    // 解析命令参数 - 与 parse_primary 类似，但标识符直接作为字符串参数
-    // 支持路径参数（如 /home/user 会被组合成一个字符串）
+    fn parse_long_option(option: &str) -> ParseResult<(String, Expr)> {
+        let (name, value) = option
+            .split_once('=')
+            .map_or((option, None), |(name, value)| (name, Some(value)));
+
+        if name.is_empty() {
+            return Err(ParseError::InvalidSyntax("Empty long option".to_string()));
+        }
+
+        Ok((
+            name.to_string(),
+            value.map_or(Expr::Literal(Value::Bool(true)), Self::option_value_to_expr),
+        ))
+    }
+
+    fn parse_short_options(raw: &str, flags: &mut HashMap<String, Expr>) -> ParseResult<()> {
+        let option = raw
+            .strip_prefix('-')
+            .ok_or_else(|| ParseError::InvalidSyntax("Invalid short option".to_string()))?;
+        let (names, value) = option
+            .split_once('=')
+            .map_or((option, None), |(names, value)| (names, Some(value)));
+
+        if names.is_empty() {
+            return Err(ParseError::InvalidSyntax("Empty short option".to_string()));
+        }
+
+        if let Some(value) = value {
+            if names.chars().count() != 1 {
+                return Err(ParseError::InvalidSyntax(format!(
+                    "Option value requires a single short option: {raw}"
+                )));
+            }
+            flags.insert(names.to_string(), Self::option_value_to_expr(value));
+        } else {
+            for name in names.chars() {
+                flags.insert(name.to_string(), Expr::Literal(Value::Bool(true)));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn option_value_to_expr(word: &str) -> Expr {
+        if let Ok(number) = word.parse::<f64>() {
+            Expr::Literal(Value::Number(number))
+        } else if word == "true" {
+            Expr::Literal(Value::Bool(true))
+        } else if word == "false" {
+            Expr::Literal(Value::Bool(false))
+        } else if word == "null" {
+            Expr::Literal(Value::Null)
+        } else {
+            Expr::Literal(Value::String(word.to_string()))
+        }
+    }
+
+    /// Return the exact source text for the current whitespace-delimited word.
+    fn peek_word(&self) -> Option<String> {
+        let start = self.lexer.peek_span()?.start;
+        let mut end = start;
+        let mut index = self.lexer.current_index();
+
+        while let Some((token, span)) = self.lexer.token_at(index) {
+            if span.start != end && end != start {
+                break;
+            }
+            if matches!(
+                token,
+                Token::Pipe
+                    | Token::And
+                    | Token::Or
+                    | Token::Newline
+                    | Token::Semicolon
+                    | Token::RBrace
+                    | Token::RParen
+            ) {
+                break;
+            }
+            end = span.end;
+            index += 1;
+        }
+
+        (end > start).then(|| self.lexer.source(start..end).to_string())
+    }
+
+    fn consume_word(&mut self) {
+        let Some(first) = self.lexer.peek_span() else {
+            return;
+        };
+        let mut end = first.start;
+
+        while let Some(span) = self.lexer.peek_span() {
+            if span.start != end && end != first.start {
+                break;
+            }
+            if matches!(
+                self.lexer.peek(),
+                Some(
+                    Token::Pipe
+                        | Token::And
+                        | Token::Or
+                        | Token::Newline
+                        | Token::Semicolon
+                        | Token::RBrace
+                        | Token::RParen
+                )
+            ) {
+                break;
+            }
+            end = span.end;
+            self.lexer.advance();
+        }
+    }
+
+    // Parse a command argument while preserving the exact unquoted word.
     fn parse_arg(&mut self) -> ParseResult<Expr> {
         match self.lexer.peek() {
-            Some(Token::Number(n)) => {
-                let n = *n;
-                self.lexer.advance();
-                Ok(Expr::Literal(Value::Number(n)))
-            }
             Some(Token::String(s)) => {
                 let s = s.clone();
                 self.lexer.advance();
                 Ok(Expr::Literal(Value::String(s)))
             }
-            Some(Token::Bool(b)) => {
-                let b = *b;
-                self.lexer.advance();
-                Ok(Expr::Literal(Value::Bool(b)))
-            }
-            Some(Token::Null) => {
-                self.lexer.advance();
-                Ok(Expr::Literal(Value::Null))
-            }
             Some(Token::Dollar) => {
-                self.lexer.advance();
-                match self.lexer.advance() {
-                    Some(Token::Ident(name)) => Ok(Expr::Variable(name)),
-                    Some(tok) => Err(ParseError::ExpectedToken {
-                        expected: "variable name".to_string(),
-                        found: tok.to_string(),
-                    }),
-                    None => Err(ParseError::UnexpectedEof),
+                let raw = self.peek_word().ok_or(ParseError::UnexpectedEof)?;
+                if let Some(name) = raw.strip_prefix('$')
+                    && !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                {
+                    self.consume_word();
+                    Ok(Expr::Variable(name.to_string()))
+                } else {
+                    self.consume_word();
+                    Ok(Expr::Literal(Value::String(raw)))
                 }
-            }
-            Some(Token::Slash) | Some(Token::Ident(_)) | Some(Token::Dot) | Some(Token::DotDot) => {
-                // 可能是路径或标识符 - 组合所有连续的路径相关token
-                let mut path = String::new();
-
-                loop {
-                    match self.lexer.peek() {
-                        Some(Token::Slash) => {
-                            self.lexer.advance();
-                            path.push('/');
-                        }
-                        Some(Token::Ident(s)) => {
-                            let s = s.clone();
-                            self.lexer.advance();
-                            path.push_str(&s);
-                        }
-                        Some(Token::Dot) => {
-                            self.lexer.advance();
-                            path.push('.');
-                        }
-                        Some(Token::DotDot) => {
-                            self.lexer.advance();
-                            path.push_str("..");
-                        }
-                        Some(Token::Minus) => {
-                            // 支持文件名中的连字符
-                            self.lexer.advance();
-                            path.push('-');
-                        }
-                        Some(Token::Number(n)) => {
-                            // 支持路径中的数字
-                            let n = *n;
-                            self.lexer.advance();
-                            path.push_str(&n.to_string());
-                        }
-                        _ => break,
-                    }
-                }
-
-                Ok(Expr::Literal(Value::String(path)))
             }
             Some(Token::LBracket) => self.parse_list(),
             Some(Token::LBrace) => self.parse_record(),
@@ -631,7 +731,11 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 Ok(expr)
             }
-            Some(tok) => Err(ParseError::UnexpectedToken(tok.to_string())),
+            Some(_) => {
+                let raw = self.peek_word().ok_or(ParseError::UnexpectedEof)?;
+                self.consume_word();
+                Ok(Expr::Literal(Value::String(raw)))
+            }
             None => Err(ParseError::UnexpectedEof),
         }
     }

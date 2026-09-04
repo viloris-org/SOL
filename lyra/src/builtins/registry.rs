@@ -14,6 +14,16 @@ pub trait Builtin: Send + Sync {
         args: Vec<Value>,
         flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value>;
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        _emit: bool,
+    ) -> RuntimeResult<Value> {
+        self.execute(args, flags).await
+    }
 }
 
 pub struct BuiltinRegistry {
@@ -76,12 +86,28 @@ impl BuiltinRegistry {
         name: &str,
         args: Vec<Value>,
         flags: HashMap<String, Value>,
+        argv: Vec<Value>,
     ) -> RuntimeResult<Value> {
         if let Some(cmd) = self.commands.get(name) {
             cmd.execute(args, flags).await
         } else {
-            // 尝试执行外部命令
-            crate::builtins::external::execute_external(name, args, flags).await
+            crate::builtins::external::execute_external(name, argv).await
+        }
+    }
+
+    pub async fn execute_piped(
+        &self,
+        name: &str,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        argv: Vec<Value>,
+        input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        if let Some(cmd) = self.commands.get(name) {
+            cmd.execute_piped(args, flags, input, emit).await
+        } else {
+            crate::builtins::external::execute_external_piped(name, argv, input, emit).await
         }
     }
 

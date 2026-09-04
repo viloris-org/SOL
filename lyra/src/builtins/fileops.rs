@@ -25,54 +25,84 @@ impl Builtin for Cat {
         args: Vec<Value>,
         flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        let show_line_numbers = flags.get("n").or(flags.get("number")).is_some();
-        let show_ends = flags.get("E").or(flags.get("show-ends")).is_some();
+        let output = cat_output(args, &flags, None)?;
+        print!("{output}");
+        Ok(Value::String(output))
+    }
 
-        if args.is_empty() {
-            // Read from stdin
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let output = cat_output(args, &flags, input)?;
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
+    }
+}
+
+fn cat_output(
+    args: Vec<Value>,
+    flags: &HashMap<String, Value>,
+    input: Option<Value>,
+) -> RuntimeResult<String> {
+    let show_line_numbers = flags.get("n").or(flags.get("number")).is_some();
+    let show_ends = flags.get("E").or(flags.get("show-ends")).is_some();
+
+    let contents = if args.is_empty() {
+        vec![if let Some(value) = input {
+            value_as_text(value)
+        } else {
             let mut buffer = String::new();
             io::stdin().read_to_string(&mut buffer)?;
-            print!("{}", buffer);
-            return Ok(Value::String(buffer));
-        }
-
-        let mut all_content = String::new();
-
-        for arg in args {
-            let path = match arg {
-                Value::String(s) => s,
-                _ => {
+            buffer
+        }]
+    } else {
+        args.into_iter()
+            .map(|arg| {
+                let Value::String(path) = arg else {
                     return Err(RuntimeError::TypeError {
                         expected: "string".to_string(),
                         got: arg.type_name().to_string(),
                     });
-                }
-            };
+                };
+                fs::read_to_string(expand_path(&path))
+                    .map_err(|error| RuntimeError::Custom(format!("cat: {path}: {error}")))
+            })
+            .collect::<RuntimeResult<Vec<_>>>()?
+    };
 
-            let content = fs::read_to_string(&path)
-                .map_err(|e| RuntimeError::Custom(format!("cat: {}: {}", path, e)))?;
-
-            if show_line_numbers {
-                for (i, line) in content.lines().enumerate() {
-                    let line_str = if show_ends {
-                        format!("{}$", line)
-                    } else {
-                        line.to_string()
-                    };
-                    println!("{:6}\t{}", i + 1, line_str);
+    let mut output = String::new();
+    for content in contents {
+        if show_line_numbers || show_ends {
+            for (index, line) in content.lines().enumerate() {
+                if show_line_numbers {
+                    output.push_str(&format!("{:6}\t", index + 1));
                 }
-            } else if show_ends {
-                for line in content.lines() {
-                    println!("{}$", line);
+                output.push_str(line);
+                if show_ends {
+                    output.push('$');
                 }
-            } else {
-                print!("{}", content);
+                output.push('\n');
             }
-
-            all_content.push_str(&content);
+        } else {
+            output.push_str(&content);
         }
+    }
+    Ok(output)
+}
 
-        Ok(Value::String(all_content))
+fn value_as_text(value: Value) -> String {
+    match value {
+        Value::String(value) => value,
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null => String::new(),
+        other => format!("{other:?}"),
     }
 }
 
@@ -112,11 +142,11 @@ impl Builtin for Cp {
             }
         };
 
-        let dest = PathBuf::from(&dest_str);
+        let dest = expand_path(&dest_str);
         let sources: Vec<PathBuf> = args[..args.len() - 1]
             .iter()
             .map(|v| match v {
-                Value::String(s) => Ok(PathBuf::from(s)),
+                Value::String(s) => Ok(expand_path(s)),
                 _ => Err(RuntimeError::TypeError {
                     expected: "string".to_string(),
                     got: v.type_name().to_string(),
@@ -137,12 +167,23 @@ impl Builtin for Cp {
 
         for source in sources {
             let target = if dest_is_dir {
-                dest.join(source.file_name().unwrap())
+                let file_name = source.file_name().ok_or_else(|| {
+                    RuntimeError::Custom(format!(
+                        "cp: cannot derive a target name for '{}'",
+                        source.display()
+                    ))
+                })?;
+                dest.join(file_name)
             } else {
                 dest.clone()
             };
 
-            if source.is_dir() {
+            let metadata = fs::symlink_metadata(&source).map_err(|error| {
+                RuntimeError::Custom(format!("cp: cannot stat '{}': {error}", source.display()))
+            })?;
+            if metadata.file_type().is_symlink() {
+                copy_symlink(&source, &target, force)?;
+            } else if metadata.is_dir() {
                 if !recursive {
                     eprintln!(
                         "cp: -r not specified; omitting directory '{}'",
@@ -150,6 +191,7 @@ impl Builtin for Cp {
                     );
                     continue;
                 }
+                ensure_copy_target_outside_source(&source, &target)?;
                 copy_dir_recursive(&source, &target, force, verbose)?;
             } else {
                 if !force && target.exists() {
@@ -184,7 +226,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, verbose: bool) -> Run
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
-        if src_path.is_dir() {
+        let metadata = fs::symlink_metadata(&src_path)?;
+        if metadata.file_type().is_symlink() {
+            copy_symlink(&src_path, &dst_path, force)?;
+        } else if metadata.is_dir() {
             copy_dir_recursive(&src_path, &dst_path, force, verbose)?;
         } else {
             if !force && dst_path.exists() {
@@ -196,6 +241,87 @@ fn copy_dir_recursive(src: &Path, dst: &Path, force: bool, verbose: bool) -> Run
             }
         }
     }
+    Ok(())
+}
+
+fn ensure_copy_target_outside_source(src: &Path, dst: &Path) -> RuntimeResult<()> {
+    let source = fs::canonicalize(src)?;
+    let target = resolve_path_for_comparison(dst)?;
+
+    if target.starts_with(&source) {
+        return Err(RuntimeError::Custom(format!(
+            "cp: cannot copy '{}' into itself ('{}')",
+            src.display(),
+            dst.display()
+        )));
+    }
+    Ok(())
+}
+
+fn resolve_path_for_comparison(path: &Path) -> RuntimeResult<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let normalized = normalize_path(&absolute);
+    let mut cursor = normalized.as_path();
+    let mut missing = Vec::new();
+
+    while fs::symlink_metadata(cursor).is_err() {
+        if let Some(name) = cursor.file_name() {
+            missing.push(name.to_os_string());
+        }
+        cursor = cursor.parent().ok_or_else(|| {
+            RuntimeError::Custom(format!("cannot resolve path '{}'", path.display()))
+        })?;
+    }
+
+    let mut resolved = fs::canonicalize(cursor)?;
+    for component in missing.iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+#[cfg(unix)]
+fn copy_symlink(src: &Path, dst: &Path, force: bool) -> RuntimeResult<()> {
+    use std::os::unix::fs::symlink;
+
+    if dst.symlink_metadata().is_ok() {
+        if !force {
+            return Ok(());
+        }
+        if dst.is_dir() && !dst.is_symlink() {
+            fs::remove_dir_all(dst)?;
+        } else {
+            fs::remove_file(dst)?;
+        }
+    }
+    symlink(fs::read_link(src)?, dst)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn copy_symlink(src: &Path, dst: &Path, force: bool) -> RuntimeResult<()> {
+    if !force && dst.exists() {
+        return Ok(());
+    }
+    fs::copy(src, dst)?;
     Ok(())
 }
 
@@ -234,11 +360,11 @@ impl Builtin for Mv {
             }
         };
 
-        let dest = PathBuf::from(&dest_str);
+        let dest = expand_path(&dest_str);
         let sources: Vec<PathBuf> = args[..args.len() - 1]
             .iter()
             .map(|v| match v {
-                Value::String(s) => Ok(PathBuf::from(s)),
+                Value::String(s) => Ok(expand_path(s)),
                 _ => Err(RuntimeError::TypeError {
                     expected: "string".to_string(),
                     got: v.type_name().to_string(),
@@ -258,7 +384,13 @@ impl Builtin for Mv {
 
         for source in sources {
             let target = if dest_is_dir {
-                dest.join(source.file_name().unwrap())
+                let file_name = source.file_name().ok_or_else(|| {
+                    RuntimeError::Custom(format!(
+                        "mv: cannot derive a target name for '{}'",
+                        source.display()
+                    ))
+                })?;
+                dest.join(file_name)
             } else {
                 dest.clone()
             };
@@ -323,9 +455,9 @@ impl Builtin for Rm {
                 }
             };
 
-            let path = PathBuf::from(&path_str);
+            let path = expand_path(&path_str);
 
-            if !path.exists() {
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
                 if !force {
                     eprintln!(
                         "rm: cannot remove '{}': No such file or directory",
@@ -333,9 +465,9 @@ impl Builtin for Rm {
                     );
                 }
                 continue;
-            }
+            };
 
-            if path.is_dir() {
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
                 if !recursive {
                     eprintln!("rm: cannot remove '{}': Is a directory", path_str);
                     continue;
@@ -394,7 +526,7 @@ impl Builtin for Mkdir {
                 }
             };
 
-            let path = PathBuf::from(&path_str);
+            let path = expand_path(&path_str);
 
             let result = if parents {
                 fs::create_dir_all(&path)
@@ -453,7 +585,7 @@ impl Builtin for Touch {
                 }
             };
 
-            let path = PathBuf::from(&path_str);
+            let path = expand_path(&path_str);
 
             if path.exists() {
                 // Update timestamp by setting access/modification times
@@ -471,4 +603,16 @@ impl Builtin for Touch {
 
         Ok(Value::Null)
     }
+}
+
+fn expand_path(path: &str) -> PathBuf {
+    if path == "~" {
+        return std::env::var_os("HOME").map_or_else(|| PathBuf::from(path), PathBuf::from);
+    }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(path)
 }

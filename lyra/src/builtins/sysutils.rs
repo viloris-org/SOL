@@ -32,6 +32,32 @@ impl Builtin for Env {
 
         Ok(Value::Null)
     }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let mut vars: Vec<_> = std::env::vars().collect();
+        vars.sort();
+        let output = vars
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let output = if output.is_empty() {
+            output
+        } else {
+            format!("{output}\n")
+        };
+        if emit {
+            print!("{output}");
+        }
+        let _ = (args, flags);
+        Ok(Value::String(output))
+    }
 }
 
 /// basename - strip directory from filenames
@@ -52,46 +78,53 @@ impl Builtin for Basename {
         args: Vec<Value>,
         _flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        if args.is_empty() {
-            return Err(RuntimeError::Custom(
-                "basename: missing operand".to_string(),
-            ));
-        }
-
-        let path_str = match &args[0] {
-            Value::String(s) => s,
-            _ => {
-                return Err(RuntimeError::TypeError {
-                    expected: "string".to_string(),
-                    got: args[0].type_name().to_string(),
-                });
-            }
-        };
-
-        let path = PathBuf::from(path_str);
-        let basename = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-
-        // If second arg provided, remove that suffix
-        let result = if args.len() > 1 {
-            if let Value::String(suffix) = &args[1] {
-                basename
-                    .strip_suffix(suffix)
-                    .unwrap_or(&basename)
-                    .to_string()
-            } else {
-                basename
-            }
-        } else {
-            basename
-        };
-
-        println!("{}", result);
+        let result = basename_result(&args)?;
+        println!("{result}");
         Ok(Value::String(result))
     }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        _flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let result = basename_result(&args)?;
+        let output = format!("{result}\n");
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
+    }
+}
+
+fn basename_result(args: &[Value]) -> RuntimeResult<String> {
+    let Some(Value::String(path_str)) = args.first() else {
+        return match args.first() {
+            None => Err(RuntimeError::Custom(
+                "basename: missing operand".to_string(),
+            )),
+            Some(value) => Err(RuntimeError::TypeError {
+                expected: "string".to_string(),
+                got: value.type_name().to_string(),
+            }),
+        };
+    };
+
+    let path = PathBuf::from(path_str);
+    let basename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(match args.get(1) {
+        Some(Value::String(suffix)) => basename
+            .strip_suffix(suffix)
+            .unwrap_or(&basename)
+            .to_string(),
+        _ => basename,
+    })
 }
 
 /// dirname - strip last component from file name
@@ -112,30 +145,42 @@ impl Builtin for Dirname {
         args: Vec<Value>,
         _flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        if args.is_empty() {
-            return Err(RuntimeError::Custom("dirname: missing operand".to_string()));
-        }
-
-        let path_str = match &args[0] {
-            Value::String(s) => s,
-            _ => {
-                return Err(RuntimeError::TypeError {
-                    expected: "string".to_string(),
-                    got: args[0].type_name().to_string(),
-                });
-            }
-        };
-
-        let path = PathBuf::from(path_str);
-        let dirname = path
-            .parent()
-            .and_then(|p| p.to_str())
-            .unwrap_or(".")
-            .to_string();
-
-        println!("{}", dirname);
+        let dirname = dirname_result(&args)?;
+        println!("{dirname}");
         Ok(Value::String(dirname))
     }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        _flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let dirname = dirname_result(&args)?;
+        let output = format!("{dirname}\n");
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
+    }
+}
+
+fn dirname_result(args: &[Value]) -> RuntimeResult<String> {
+    let Some(Value::String(path_str)) = args.first() else {
+        return match args.first() {
+            None => Err(RuntimeError::Custom("dirname: missing operand".to_string())),
+            Some(value) => Err(RuntimeError::TypeError {
+                expected: "string".to_string(),
+                got: value.type_name().to_string(),
+            }),
+        };
+    };
+    Ok(PathBuf::from(path_str)
+        .parent()
+        .and_then(|path| path.to_str())
+        .unwrap_or(".")
+        .to_string())
 }
 
 /// sleep - delay for a specified amount of time
@@ -201,31 +246,55 @@ impl Builtin for Date {
 
     async fn execute(
         &self,
-        _args: Vec<Value>,
+        args: Vec<Value>,
         flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        use chrono::Local;
-
-        let format = flags
-            .get("format")
-            .or(flags.get("f"))
-            .and_then(|v| match v {
-                Value::String(s) => Some(s.as_str()),
-                _ => None,
-            });
-
-        let now = Local::now();
-
-        let output = if let Some(fmt) = format {
-            now.format(fmt).to_string()
-        } else {
-            // Default format: "Fri Aug 29 12:34:56 PDT 2026"
-            now.format("%a %b %d %H:%M:%S %Z %Y").to_string()
-        };
-
-        println!("{}", output);
+        let output = date_output(&args, &flags);
+        println!("{output}");
         Ok(Value::String(output))
     }
+
+    async fn execute_piped(
+        &self,
+        args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let output = format!("{}\n", date_output(&args, &flags));
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
+    }
+}
+
+fn date_output(args: &[Value], flags: &HashMap<String, Value>) -> String {
+    use chrono::Local;
+
+    let format = flags
+        .get("format")
+        .or(flags.get("f"))
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .or_else(|| {
+            flags
+                .get("format")
+                .or(flags.get("f"))
+                .filter(|value| matches!(value, Value::Bool(true)))
+                .and_then(|_| args.first())
+                .and_then(|value| match value {
+                    Value::String(value) => Some(value.as_str()),
+                    _ => None,
+                })
+        });
+    let now = Local::now();
+    format.map_or_else(
+        || now.format("%a %b %d %H:%M:%S %Z %Y").to_string(),
+        |value| now.format(value).to_string(),
+    )
 }
 
 /// true - do nothing, successfully
@@ -268,7 +337,7 @@ impl Builtin for False {
         _args: Vec<Value>,
         _flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        Err(RuntimeError::Custom("false".to_string()))
+        Ok(Value::Bool(false))
     }
 }
 
@@ -290,13 +359,31 @@ impl Builtin for Whoami {
         _args: Vec<Value>,
         _flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        let username = std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        println!("{}", username);
+        let username = effective_username()?;
+        println!("{username}");
         Ok(Value::String(username))
     }
+
+    async fn execute_piped(
+        &self,
+        _args: Vec<Value>,
+        _flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let output = format!("{}\n", effective_username()?);
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
+    }
+}
+
+fn effective_username() -> RuntimeResult<String> {
+    let uid = nix::unistd::geteuid();
+    Ok(nix::unistd::User::from_uid(uid)
+        .map_err(|error| RuntimeError::Custom(format!("whoami: {error}")))?
+        .map_or_else(|| uid.as_raw().to_string(), |user| user.name))
 }
 
 /// uname - print system information
@@ -317,46 +404,62 @@ impl Builtin for Uname {
         _args: Vec<Value>,
         flags: HashMap<String, Value>,
     ) -> RuntimeResult<Value> {
-        let all = flags.get("a").or(flags.get("all")).is_some();
-        let kernel_name = all || flags.get("s").or(flags.get("kernel-name")).is_some();
-        let nodename = all || flags.get("n").or(flags.get("nodename")).is_some();
-        let kernel_release = all || flags.get("r").or(flags.get("kernel-release")).is_some();
-        let kernel_version = all || flags.get("v").or(flags.get("kernel-version")).is_some();
-        let machine = all || flags.get("m").or(flags.get("machine")).is_some();
-
-        // Default: show kernel name only
-        let show_default =
-            !all && !kernel_name && !nodename && !kernel_release && !kernel_version && !machine;
-
-        let mut parts = Vec::new();
-
-        if show_default || kernel_name {
-            parts.push(std::env::consts::OS.to_string());
-        }
-
-        if nodename {
-            let hostname = hostname::get()
-                .ok()
-                .and_then(|h| h.into_string().ok())
-                .unwrap_or_else(|| "unknown".to_string());
-            parts.push(hostname);
-        }
-
-        if kernel_release {
-            // Simplified: use OS version string
-            parts.push("6.0.0".to_string());
-        }
-
-        if kernel_version {
-            parts.push("#1 SMP".to_string());
-        }
-
-        if machine {
-            parts.push(std::env::consts::ARCH.to_string());
-        }
-
-        let output = parts.join(" ");
-        println!("{}", output);
+        let output = uname_output(&flags);
+        println!("{output}");
         Ok(Value::String(output))
     }
+
+    async fn execute_piped(
+        &self,
+        _args: Vec<Value>,
+        flags: HashMap<String, Value>,
+        _input: Option<Value>,
+        emit: bool,
+    ) -> RuntimeResult<Value> {
+        let output = format!("{}\n", uname_output(&flags));
+        if emit {
+            print!("{output}");
+        }
+        Ok(Value::String(output))
+    }
+}
+
+fn uname_output(flags: &HashMap<String, Value>) -> String {
+    let all = flags.get("a").or(flags.get("all")).is_some();
+    let kernel_name = all || flags.get("s").or(flags.get("kernel-name")).is_some();
+    let nodename = all || flags.get("n").or(flags.get("nodename")).is_some();
+    let kernel_release = all || flags.get("r").or(flags.get("kernel-release")).is_some();
+    let kernel_version = all || flags.get("v").or(flags.get("kernel-version")).is_some();
+    let machine = all || flags.get("m").or(flags.get("machine")).is_some();
+    let show_default =
+        !all && !kernel_name && !nodename && !kernel_release && !kernel_version && !machine;
+    let mut parts = Vec::new();
+
+    if show_default || kernel_name {
+        parts.push("Linux".to_string());
+    }
+    if nodename {
+        parts.push(
+            hostname::get()
+                .ok()
+                .and_then(|name| name.into_string().ok())
+                .unwrap_or_else(|| "unknown".to_string()),
+        );
+    }
+    if kernel_release {
+        parts.push(read_kernel_field("/proc/sys/kernel/osrelease", "unknown"));
+    }
+    if kernel_version {
+        parts.push(read_kernel_field("/proc/sys/kernel/version", "unknown"));
+    }
+    if machine {
+        parts.push(std::env::consts::ARCH.to_string());
+    }
+    parts.join(" ")
+}
+
+fn read_kernel_field(path: &str, fallback: &str) -> String {
+    std::fs::read_to_string(path)
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|_| fallback.to_string())
 }

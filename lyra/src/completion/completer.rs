@@ -36,7 +36,9 @@ impl LyraCompleter {
         let first_token = tokens[0];
 
         // Git command context
-        if first_token == "git" && tokens.len() > 1 {
+        if first_token == "git"
+            && (tokens.len() > 1 || before_cursor.ends_with(char::is_whitespace))
+        {
             return CompletionContext::Git;
         }
 
@@ -46,7 +48,7 @@ impl LyraCompleter {
         }
 
         // After the first token, complete files/paths
-        if tokens.len() > 1 {
+        if tokens.len() > 1 || before_cursor.ends_with(char::is_whitespace) {
             return CompletionContext::Path;
         }
 

@@ -1,29 +1,38 @@
 pub mod token;
 
 use logos::Logos;
+use std::ops::Range;
 pub use token::Token;
 
 pub struct Lexer {
+    input: String,
     tokens: Vec<Token>,
+    spans: Vec<Range<usize>>,
     current: usize,
 }
 
 impl Lexer {
     pub fn new(input: &str) -> Self {
         let mut tokens = Vec::new();
+        let mut spans = Vec::new();
         let mut lex = Token::lexer(input);
 
         while let Some(token) = lex.next() {
             match token {
-                Ok(tok) => tokens.push(tok),
-                Err(_) => {
-                    // 跳过无法识别的字符
-                    eprintln!("Lexer error at position {}", lex.span().start);
+                Ok(tok) => {
+                    tokens.push(tok);
+                    spans.push(lex.span());
                 }
+                Err(_) => unreachable!("the Unknown token must cover non-whitespace input"),
             }
         }
 
-        Self { tokens, current: 0 }
+        Self {
+            input: input.to_string(),
+            tokens,
+            spans,
+            current: 0,
+        }
     }
 
     pub fn tokens(&self) -> &[Token] {
@@ -32,6 +41,22 @@ impl Lexer {
 
     pub fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.current)
+    }
+
+    pub fn peek_span(&self) -> Option<Range<usize>> {
+        self.spans.get(self.current).cloned()
+    }
+
+    pub fn source(&self, span: Range<usize>) -> &str {
+        &self.input[span]
+    }
+
+    pub fn current_index(&self) -> usize {
+        self.current
+    }
+
+    pub fn token_at(&self, index: usize) -> Option<(&Token, Range<usize>)> {
+        Some((self.tokens.get(index)?, self.spans.get(index)?.clone()))
     }
 
     pub fn advance(&mut self) -> Option<Token> {

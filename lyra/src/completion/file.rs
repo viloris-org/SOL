@@ -3,65 +3,53 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// File and directory path completer
-pub struct FileCompleter {
-    current_dir: PathBuf,
-}
+pub struct FileCompleter;
 
 impl FileCompleter {
     pub fn new() -> Self {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-        Self { current_dir }
+        Self
     }
 
     pub fn complete(&self, line: &str, pos: usize) -> Vec<Suggestion> {
         let before_cursor = &line[..pos];
 
-        // Extract the partial path being typed
-        // Split by whitespace and take everything after the last space
-        let partial = if let Some(last_space) = before_cursor.rfind(char::is_whitespace) {
-            &before_cursor[last_space + 1..]
+        // Find the last token (the partial path being completed)
+        let tokens: Vec<&str> = before_cursor.split_whitespace().collect();
+        let partial = if before_cursor.ends_with(char::is_whitespace) {
+            ""
         } else {
-            // No space found, complete from the beginning (shouldn't happen in path context)
-            before_cursor
+            tokens.last().copied().unwrap_or("")
         };
 
         // Determine the directory to search and the prefix to match
-        let (search_dir, prefix) = self.parse_partial_path(partial);
+        let (search_dir, prefix, display_prefix) = self.parse_partial_path(partial);
 
         // Get the span for replacement - start from where the partial begins
         let start = pos - partial.len();
         let span = Span::new(start, pos);
 
-        // Calculate the directory prefix to prepend to completions
-        let dir_prefix = if partial.contains('/') {
-            // Keep everything up to and including the last slash
-            let last_slash = partial.rfind('/').unwrap();
-            &partial[..=last_slash]
-        } else {
-            ""
-        };
-
         // List directory entries and filter
-        self.list_completions(&search_dir, &prefix, span, dir_prefix)
+        self.list_completions(&search_dir, &prefix, &display_prefix, span)
     }
 
     /// Parse a partial path into (directory to search, filename prefix)
-    fn parse_partial_path(&self, partial: &str) -> (PathBuf, String) {
+    fn parse_partial_path(&self, partial: &str) -> (PathBuf, String, String) {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         if partial.is_empty() {
-            return (self.current_dir.clone(), String::new());
+            return (current_dir, String::new(), String::new());
         }
 
         let path = if partial.starts_with('/') {
             PathBuf::from(partial)
-        } else if partial.starts_with("~/") {
+        } else if let Some(rest) = partial.strip_prefix("~/") {
             let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/"));
-            PathBuf::from(home).join(&partial[2..])
+            PathBuf::from(home).join(rest)
         } else {
-            self.current_dir.join(partial)
+            current_dir.join(partial)
         };
 
         if partial.ends_with('/') {
-            (path, String::new())
+            (path, String::new(), partial.to_string())
         } else {
             let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
             let prefix = path
@@ -69,7 +57,10 @@ impl FileCompleter {
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_string();
-            (dir, prefix)
+            let display_prefix = partial
+                .rfind('/')
+                .map_or_else(String::new, |index| partial[..=index].to_string());
+            (dir, prefix, display_prefix)
         }
     }
 
@@ -78,8 +69,8 @@ impl FileCompleter {
         &self,
         dir: &Path,
         prefix: &str,
+        display_prefix: &str,
         span: Span,
-        dir_prefix: &str,
     ) -> Vec<Suggestion> {
         let Ok(entries) = fs::read_dir(dir) else {
             return Vec::new();
@@ -101,8 +92,7 @@ impl FileCompleter {
                 continue;
             }
 
-            // Prepend directory prefix to the completion value
-            let mut value = format!("{}{}", dir_prefix, name);
+            let mut value = format!("{display_prefix}{name}");
             let mut description = None;
 
             // Add trailing slash for directories
@@ -179,16 +169,18 @@ mod tests {
     #[test]
     fn test_parse_partial_path_empty() {
         let completer = FileCompleter::new();
-        let (dir, prefix) = completer.parse_partial_path("");
+        let (dir, prefix, display_prefix) = completer.parse_partial_path("");
         assert_eq!(prefix, "");
-        assert!(dir.is_absolute() || dir == PathBuf::from("."));
+        assert_eq!(display_prefix, "");
+        assert!(dir.is_absolute() || dir == Path::new("."));
     }
 
     #[test]
     fn test_parse_partial_path_relative() {
         let completer = FileCompleter::new();
-        let (dir, prefix) = completer.parse_partial_path("src/ma");
+        let (dir, prefix, display_prefix) = completer.parse_partial_path("src/ma");
         assert_eq!(prefix, "ma");
+        assert_eq!(display_prefix, "src/");
         assert!(dir.ends_with("src"));
     }
 }

@@ -5,6 +5,7 @@ use logos::Logos;
 pub enum Token {
     // 字面量
     #[regex(r#""([^"\\]|\\["\\bnfrt])*""#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
+    #[regex(r"'[^']*'", |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
     String(String),
 
     #[regex(r"-?[0-9]+\.?[0-9]*", |lex| lex.slice().parse().ok())]
@@ -142,6 +143,12 @@ pub enum Token {
 
     #[token("--")]
     DoubleDash,
+
+    // Keep otherwise valid shell-word characters so command arguments can be
+    // reconstructed exactly. In expression position these are rejected by the
+    // parser instead of being silently discarded.
+    #[regex(r"[^\s]", |lex| lex.slice().to_string(), priority = 0)]
+    Unknown(String),
 }
 
 impl std::fmt::Display for Token {
@@ -151,6 +158,7 @@ impl std::fmt::Display for Token {
             Token::Number(n) => write!(f, "{}", n),
             Token::Bool(b) => write!(f, "{}", b),
             Token::Ident(s) => write!(f, "{}", s),
+            Token::Unknown(s) => write!(f, "{}", s),
             _ => write!(f, "{:?}", self),
         }
     }

@@ -5,7 +5,7 @@ Lyra is the default command-line shell of SOL, providing an intelligent, consist
 ## Current Status
 
 ✅ **Phase 2 (Intelligence) complete**
-✅ **Phase 3 (Core Commands) complete** - 31 builtin commands
+✅ **Phase 3 (Core Commands) complete** - 30 builtin commands
 
 Implemented features:
 
@@ -46,7 +46,7 @@ Implemented features:
   - `whoami` - show current user
   - `uname` - show system information
 - ✅ External command execution - can run system commands
-- ✅ Pipeline support - `cmd1 | cmd2 | cmd3`
+- ✅ Materialized text pipeline support - `cmd1 | cmd2 | cmd3`
 - ✅ Variable system - `let x = 42`, `$x`
 - ✅ Control flow - `if`, `for`, `while`
 - ✅ Structured data - List, Record, Table
@@ -68,12 +68,9 @@ Implemented features:
   - ✅ Flag highlighting (cyan)
   - ✅ Number highlighting (magenta)
 - ✅ **History management**
-  - ✅ Persistent history with metadata
-  - ✅ Search functionality
-  - ✅ Timestamp and working directory tracking
-  - ✅ Exit status tracking
-  - ✅ Reedline history integration (Ctrl+R search)
-- ✅ Test coverage - 25 unit tests passing
+  - ✅ One bounded, persistent Reedline history store (10,000 entries)
+  - ✅ Ctrl+R search and Up/Down navigation
+- ✅ Test coverage - 47 tests passing
 
 ## Quick Start
 
@@ -188,35 +185,12 @@ lyra/
 ## Test Results
 
 ```bash
-running 25 tests
-test completion::command::tests::test_builtin_commands ... ok
-test completion::command::tests::test_discover_path_commands ... ok
-test completion::completer::tests::test_completion_context_command ... ok
-test completion::completer::tests::test_completion_context_git ... ok
-test completion::completer::tests::test_completion_context_path ... ok
-test completion::file::tests::test_format_file_size ... ok
-test completion::file::tests::test_parse_partial_path_empty ... ok
-test completion::file::tests::test_parse_partial_path_relative ... ok
-test completion::git::tests::test_git_subcommands ... ok
-test highlighter::tests::test_highlight_builtin ... ok
-test highlighter::tests::test_highlight_simple_command ... ok
-test history::manager::tests::test_history_entry_creation ... ok
-test history::manager::tests::test_history_search ... ok
-test history::manager::tests::test_recent_entries ... ok
-test lexer::tests::test_tokenize_number ... ok
-test lexer::tests::test_tokenize_pipeline ... ok
-test lexer::tests::test_tokenize_simple_command ... ok
-test lexer::tests::test_tokenize_string ... ok
-test parser::tests::test_parse_binary_expr ... ok
-test parser::tests::test_parse_let ... ok
-test parser::tests::test_parse_pipeline ... ok
-test parser::tests::test_parse_simple_command ... ok
-test runtime::eval::tests::test_eval_binary_op ... ok
-test runtime::eval::tests::test_eval_let ... ok
-test runtime::eval::tests::test_eval_literal ... ok
-
-test result: ok. 25 passed; 0 failed; 0 ignored
+$ cargo test --all-targets
+test result: ok. 47 passed; 0 failed; 0 ignored
 ```
+
+Pipelines currently materialize text between stages. This keeps builtin and external
+commands interoperable, but is not intended for binary streams or unbounded producers.
 
 ## Design Documentation
 
