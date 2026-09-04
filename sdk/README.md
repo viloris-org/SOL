@@ -55,9 +55,9 @@ that lower-level requirement; a runtime-major name alone is not sufficient.
 
 Planned `sol-gtk` and `sol-qt` adapters are bundled with the app version that
 matches its private toolkit runtime. They map supported toolkit APIs to stable
-SOL portals, accounts, accessibility, lifecycle, appearance, and semantic
-material contracts. SOL does not inject a host theme engine, Qt platform
-plugin, or preload library into unrelated applications. See ADR-0024.
+SOL portals, accounts, accessibility, lifecycle, and appearance contracts. SOL
+does not inject a host theme engine, Qt platform plugin, or preload library into
+unrelated applications. See ADR-0024.
 
 ## See also
 

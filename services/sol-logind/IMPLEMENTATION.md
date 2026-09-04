@@ -151,7 +151,7 @@ The UI follows macOS login screen characteristics:
 - **Clear hierarchy** - Avatar → Name → Password → Action
 - **Minimalist** - No unnecessary chrome
 - **Professional** - Clean, modern, trustworthy appearance
-- **Frosted glass effect** - Uses `Color::Elevated` (will use `Material::Floating` when renderer supports it)
+- **Solid elevated panel** - Uses `Color::Elevated` for clear contrast
 
 ## Phase 1 Complete ✓
 
@@ -178,7 +178,6 @@ What's working:
 - [ ] Create Slint rendering adapter for login UI
 - [ ] Implement avatar grid rendering
 - [ ] Add password field with eye icon toggle
-- [ ] Implement Material::Floating backdrop blur
 - [ ] Add entrance animations (Motion::Window)
 - [ ] Keyboard navigation support
 

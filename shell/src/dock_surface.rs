@@ -3,7 +3,7 @@
 //! [`crate::launcher::ShellLauncher`] owns the Dock's *state* — which
 //! applications are pinned, which are observed running, and what a typed launch
 //! or activate request has to pass through. This module owns its *presentation*
-//! and its geometry: a bottom-centered `Material::Dock` panel with one tile per
+//! and its geometry: a bottom-centered panel with one tile per
 //! entry, plus the hit test that turns a pointer position back into the entry
 //! the user aimed at.
 //!
@@ -26,8 +26,8 @@
 
 use sol_app::AppId;
 use sol_design::{
-    accessibility::TokenMode, color::Color, material::Material, metrics::ControlMetric,
-    radius::Radius, spacing::Spacing, typography::FontStyle,
+    accessibility::TokenMode, color::Color, metrics::ControlMetric, radius::Radius,
+    spacing::Spacing, typography::FontStyle,
 };
 use sol_ui::{AccessibilityNode, AccessibilityState, LogicalSize, SemanticId, SemanticRole};
 
@@ -87,7 +87,6 @@ pub struct DockSurfaceContract {
     pub physical_size: (u32, u32),
     pub placement: LayerPlacement,
     /// Token-resolved surface roles.
-    pub material: Material,
     pub background: Color,
     pub border: Color,
     pub accent: Color,
@@ -284,7 +283,6 @@ impl DockSurface {
                 exclusive_zone: 0,
                 keyboard: LayerKeyboard::None,
             },
-            material: Material::Dock,
             background: Color::Elevated,
             border: Color::Border,
             accent: Color::Accent,
@@ -368,22 +366,12 @@ fn rasterize(
         Canvas::new(width, height).ok_or(DockSurfaceError::UnpaintableExtent((width, height)))?;
     let mode = contract.token_mode;
     let scale = contract.output.scale;
-    let material = mode.material_spec(contract.material);
-
-    // The Dock's translucency comes from the material token, not from a
-    // hand-picked alpha: reduced transparency and high contrast resolve the same
-    // token to a solid surface with the same geometry.
-    let mut background = mode.color(contract.background);
-    background.3 *= material.tint_opacity;
     let panel = PixelRect::new(0.0, 0.0, width as f32, height as f32);
-    canvas.fill_rounded_rect(panel, contract.radius.px() * scale, background);
-    if material.explicit_boundary {
-        canvas.fill_rounded_rect(
-            panel.inset(scale),
-            contract.radius.px() * scale,
-            mode.color(contract.background),
-        );
-    }
+    canvas.fill_rounded_rect(
+        panel,
+        contract.radius.px() * scale,
+        mode.color(contract.background),
+    );
 
     let font = mode.typography(contract.typography);
     let text_scale = text_scale_for_height(font.pixels);
@@ -575,29 +563,6 @@ mod tests {
         );
         // A rounded panel leaves its outermost corner uncovered.
         assert_eq!(pixels[3], 0, "the Dock's corner is rounded, not square");
-    }
-
-    #[test]
-    fn reduced_transparency_keeps_the_geometry_and_drops_the_translucency() {
-        let fluid = surface();
-        let mut solid = surface();
-        solid.set_token_mode(TokenMode::dark().reduced_transparency());
-
-        let fluid_contract = fluid.contract().expect("contract");
-        let solid_contract = solid.contract().expect("contract");
-        assert_eq!(fluid_contract.placement.size, solid_contract.placement.size);
-        assert_eq!(fluid_contract.tiles, solid_contract.tiles);
-
-        let center = |contract: &DockSurfaceContract| {
-            let pixels = rasterize(contract, None).expect("paint");
-            let (width, height) = contract.physical_size;
-            let index = ((height / 2) as usize * width as usize + 1) * 4;
-            pixels[index + 3]
-        };
-        assert!(
-            center(&solid_contract) > center(&fluid_contract),
-            "reduced transparency must resolve the Dock material to a solid surface"
-        );
     }
 
     #[test]

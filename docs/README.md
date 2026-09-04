@@ -5,7 +5,7 @@ Documentation is organized by audience and lifecycle:
 | Doc | Audience | What it is |
 |---|---|---|
 | [PRD](PRD.md) | Product / everybody | Product requirements: vision, principles, architecture, MVP, phases (§1–42) |
-| [OS Platform Definition](os-platform.md) | OS / security / application engineering | Normative boot, `.app`, atomic permissions, accounts, materials, and shared-runtime contracts |
+| [OS Platform Definition](os-platform.md) | OS / security / application engineering | Normative boot, `.app`, atomic permissions, accounts, and shared-runtime contracts |
 | [Shell Spatial and Live Activity Contract](shell-experience.md) | Product / Shell / application engineering | Dock, Launcher, global menu, window controls, right-side status, tray, and Live Capsule |
 | [Contextual IME PRD](contextual-ime-prd.md) | Product / IME engineering | Proposal and staged requirements for local contextual candidate ranking over fcitx5 |
 | [ROADMAP](ROADMAP.md) | Engineering / product | Execution view of the PRD phases split into milestones, deliverables, and acceptance points |
@@ -43,7 +43,6 @@ of truth.
 | OS boot / image | Foundations — development manifests and a deterministic deployment selector exist; stable Stage-0, independent recovery, content/placement separation, authenticated health, anti-rollback, data barriers, and complete production UKIs remain Phase 7 work |
 | Native app platform | Planned — `.app`, `sol-pkg`, sandbox enforcement, and major/revision/feature runtime compatibility are Phases 8–9 |
 | Accounts | Planned — `sol-securityd`-coordinated account grants, system-owned metadata, encrypted credentials, and generation-fenced leases |
-| Material | Token foundation implemented — compositor-backed adaptive glass and hardware QA remain |
 | GTK/Qt adapters | Architecture accepted — private bundled runtimes, explicit SOL adapters, equal capability/security contracts |
 | Shell spatial model | Accepted — bottom Dock, upper-left foreground menu, upper-right status/Live Capsule; native surfaces pending |
 

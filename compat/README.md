@@ -10,7 +10,6 @@ compat/
 ├── gtk/            toolkit-matching bundled GTK adapter
 ├── qt/             toolkit-matching bundled Qt adapter
 ├── portal/         SOL portal/runtime adapter contracts
-├── material/       semantic SCP material-role bindings
 ├── recipes/        SDL, Electron, Flutter, and other .app packaging recipes
 └── tests/          version coexistence, denial parity, a11y, fallback fixtures
 ```
@@ -25,7 +24,6 @@ Boundary rules:
 - That equality includes grant continuity: verified same-lineage updates may
   retain durable grants but receive fresh handles; publisher discontinuity and
   uninstall/reinstall inherit nothing.
-- Material requests carry semantic roles only and never return backdrop pixels.
 - Visual integration is best-effort outside SolUI; system capability access is
   not best-effort and must satisfy the same conformance tests.
 

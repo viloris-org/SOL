@@ -68,8 +68,7 @@ barrier or uses a compatible snapshot/versioning contract.
 | App release → grants | App ID + verified publisher lineage is durable; bundle/process generations bind live handles; uninstall or lineage discontinuity inherits nothing | ADR-0021 |
 | App → resources | Authenticated identity + declaration + explicit minimum-scope grant produces a fresh sandbox/lease; `sol-securityd` coordinates grant + audit + participant commit | ADR-0021 |
 | App → accounts | Apps receive opaque handles and generation-fenced leases; account/vault prepared state is unusable without `sol-securityd` commit proof | ADR-0022 |
-| UI → material | Components select semantic material roles; `sol-design` resolves tokens and the compositor owns protected backdrop effects/fallbacks | ADR-0023 |
-| GTK/Qt → SOL | Toolkit/runtime/plugins stay private in `.app`; bundled adapters use stable SOL ABI/IPC and cannot inject host libraries or access backdrop pixels | ADR-0024 |
+| GTK/Qt → SOL | Toolkit/runtime/plugins stay private in `.app`; bundled adapters use stable SOL ABI/IPC and cannot inject host libraries | ADR-0024 |
 | App → global chrome | Menus, tray/status, badges, and live activities are authenticated declarative records; Shell owns rendering/input and brokers own privacy truth | ADR-0025 |
 | Compositor ↔ backend | `ScpState` owns client protocol state; native renderer/input/output backends only drive it | ADR-0028, ADR-0032 |
 | Compositor ↔ Shell | Separate processes over typed IPC; a shell crash never kills the compositor | PRD §11, ADR-0006 |
@@ -158,9 +157,9 @@ private toolkit runtime + toolkit-matching bundled SOL adapter
    ↓
 stable portals / accounts / accessibility / lifecycle ABI or IPC
    ↓
-SCP surface + optional semantic material-role request
+SCP surface
    ↓
-SOL Compositor (renders or safely falls back; returns no backdrop pixels)
+SOL Compositor
 ```
 
 Adapter absence or failure makes the application unavailable; SOL does not

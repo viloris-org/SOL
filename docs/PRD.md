@@ -27,7 +27,6 @@ SOL will own its own:
 - Desktop shell
 - Application SDK
 - Design system
-- Adaptive SOL fluid material language
 - System services
 - First-party applications
 - Application-distribution experience
@@ -60,7 +59,6 @@ Key goals include:
 - Dependency-isolated, self-contained application bundles
 - A coherent, default-deny application permission model
 - System-managed account and credential lifecycle
-- A coherent, accessible fluid-glass material system
 - A curated application ecosystem through explicit SOL adapters
 - Remaining open to power users while preserving core Linux flexibility
 - Hiding unnecessary Linux system complexity from casual users
@@ -240,13 +238,6 @@ The OS owns local users, connected accounts, provider scopes, credentials,
 recovery, and revocation. Applications receive opaque account handles and
 short-lived scoped leases only after explicit authorization; they do not own
 durable passwords, refresh tokens, or the system account database.
-
-## 4.10 Fluid Material, Accessible by Construction
-
-SOL uses its own adaptive translucent material language for functional chrome,
-navigation, controls, and elevated surfaces. Dense content remains solid.
-Material hierarchy, contrast, motion, and degradation are system-resolved;
-reduced transparency and high contrast always have solid alternatives.
 
 ---
 
@@ -513,8 +504,8 @@ bottom       centered SOL Dock + Application Launcher entry
 window left  Close + Minimize + Maximize/Restore controls
 ```
 
-Application navigation sidebars use the SOL `Sidebar` fluid material while
-dense application content remains solid. The complete placement, trust,
+Application navigation sidebars use a solid surface beside dense application
+content. The complete placement, trust,
 multi-display, and accessibility rules live in the
 [Shell Spatial and Live Activity Contract](shell-experience.md).
 
@@ -769,14 +760,6 @@ Motion
 Iconography
 ```
 
-SOL's material tokens define semantic `Content`, `Chrome`, `Panel`, `Floating`,
-`Control`, `Sidebar`, `Dock`, and `Capsule` roles. Apps never choose raw blur,
-translucency, refraction, saturation, or specular values. The
-renderer/compositor resolves materials for theme, backdrop, accessibility,
-power, and GPU capability without exposing backdrop pixels to the app.
-Repeated light-on-light glass nesting is forbidden; surfaces consolidate or
-become solid before legibility degrades.
-
 First-party apps must not copy hard-coded visual parameters.
 
 Preferred:
@@ -903,16 +886,15 @@ SOL treats the two consistency goals separately:
 ```text
 SolKit apps                   → architecturally enforced component consistency
 GTK/Qt with SOL adapter       → mapped appearance, accessibility, windowing,
-                                portals, accounts, and semantic materials
+                                portals, and accounts
 Other adapted toolkit app     → declared adapter capabilities and SOL portals
 ```
 
 Official `sol-gtk` and `sol-qt` adapters are bundled with the application at a
 toolkit-compatible version and talk to stable SOL ABI/IPC. They may map tokens
 through supported GTK/Qt theme and style APIs, but must not patch private
-toolkit internals or inject process-global modules. A constrained compositor
-protocol may accept semantic material roles without returning backdrop pixels
-to the client. Pixel-identical SolUI widgets are not promised outside SolUI.
+toolkit internals or inject process-global modules. Pixel-identical SolUI
+widgets are not promised outside SolUI.
 
 The design phase must make clear: SOL does not demand that third-party
 GTK/Qt apps "look like SOL" — that is outside the platform's controllable
@@ -1656,7 +1638,6 @@ SolApp
 Basic commands
 Basic system API
 Design tokens
-Fluid material roles with solid accessibility fallbacks
 sol-runtime-1 major + minimum contract revision + feature descriptor
 ```
 
@@ -1910,7 +1891,6 @@ SolKit bindings, templates, and .app packaging pipeline
 Explicit SOL adapters for selected non-native toolkits
 Software catalog client over sol-packaged
 Runtime side-by-side, compatibility resolution, fallback, and retention policy
-Compositor-backed SOL fluid material rendering and fallbacks
 Bundled sol-gtk / sol-qt adapters over stable ABI/IPC
 ```
 
@@ -1919,7 +1899,7 @@ Success criterion:
 > An external developer builds and signs a small `.app` that vendors only its
 > non-SOL dependencies, installs through `sol-pkg`, and uses protected system
 > capabilities and accounts solely through explicitly granted SOL framework
-> APIs, while system materials preserve accessibility and frame budgets; OS
+> APIs; OS
 > rollback resolves a compatible retained app version or an explicit unavailable
 > state without blocking boot or rewinding app data.
 
@@ -2016,7 +1996,6 @@ Currently settled:
 | App isolation | Default-deny sandbox + typed portals/brokers |
 | Permission grants | App ID/publisher-lineage durable identity; coordinator-atomic grant/audit/lease; defined update/uninstall inheritance |
 | Accounts | `sol-securityd` coordination + prepared `sol-accountsd`/encrypted `sol-vaultd` participants; apps receive generation-fenced handles |
-| System material | Semantic SOL fluid material with solid accessibility fallbacks |
 | Shared runtime | Side-by-side major + monotonic contract revision + named-feature ABI/IPC descriptors |
 | Non-native toolkits | Private bundled runtime + optional bundled SOL adapter |
 | Application levels | Native / Integrated / Adapted; equal security and system capabilities |
@@ -2070,8 +2049,7 @@ open and must be decided during prototyping.
     trial semantics, and best-effort graphics settled by ADR-0019/0026)
 23. System-image filesystem and delta-update encoding
 24. Account vault database and hardware-sealing implementation
-25. Fluid-material compositor sampling/refraction path and fallback thresholds
-26. Toolkit-adapter implementation matrix and semantic-material SCP schema
+26. Toolkit-adapter implementation matrix and SCP schema
 27. Live Activity registration/menu/status-item IPC schema and persistence
 
 ---

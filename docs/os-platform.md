@@ -6,7 +6,7 @@
 This document defines the product boundary introduced by the OS rebaseline. If
 an older document describes SOL as a desktop layer for another Linux distribution, names
 a third-party package manager as the native application backend, or conflicts with the security,
-account, material, compatibility, or Shell contracts below, this document and
+account, compatibility, or Shell contracts below, this document and
 ADR-0019 through ADR-0025 take precedence. The narrower accepted ADR controls
 when this overview and an ADR differ in detail.
 
@@ -416,42 +416,7 @@ recovery-key path is required; hardware loss must not silently weaken storage
 encryption. Account removal transactionally revokes outstanding leases and app
 associations before deleting or tombstoning credentials.
 
-## 9. SOL fluid material system
-
-SOL uses an adaptive translucent material language inspired by the physical
-depth and continuity associated with liquid-glass interfaces, while retaining
-its own visual identity. Glass is functional system chrome, not decoration.
-
-Semantic material roles are `Content`, `Chrome`, `Panel`, `Floating`,
-`Control`, `Sidebar`, `Dock`, and `Capsule`. Applications select a role through
-SolUI; only `sol-design` supplies blur, tint, saturation, edge light, shadow,
-grain, and refraction tokens.
-Backdrop sampling and distortion are compositor/renderer effects and never
-expose another window's pixels to an application.
-
-Hard rules:
-
-- dense app content is solid by default; translucency communicates navigation,
-  controls, separation, or transient elevation;
-- large surfaces read thicker through stronger blur/tint and depth, while small
-  controls remain lighter and more responsive;
-- light glass is not stacked repeatedly on glass; nested layers consolidate or
-  fall back to a solid material before legibility degrades;
-- text and icons maintain contrast over every allowed backdrop, with system-
-  resolved vibrancy rather than app-selected gray values;
-- material arrival combines blur, edge response, and scale from the current
-  presentation state; it remains interruptible and avoids ornamental looping;
-- reduced transparency removes backdrop blur/refraction, high contrast uses
-  solid bounded surfaces, and reduced motion replaces spatial materialization
-  with a short/static transition;
-- low-power, remote-session, unsupported-GPU, and frame-pressure modes preserve
-  hierarchy with progressively simpler materials.
-
-The token foundation is implemented in `sol-design`; compositor-backed
-sampling, adaptive luminance, refraction, and performance validation remain
-Phase 4/9 work.
-
-## 10. Installation layout
+## 9. Installation layout
 
 The exact on-disk layout may evolve, but its ownership model is fixed:
 
@@ -471,14 +436,14 @@ The exact on-disk layout may evolve, but its ownership model is fixed:
 `/Applications/*.app` entries are projections or handles into the managed
 store, not mutable copies managed by each application.
 
-## 11. Toolkit adapter policy
+## 10. Toolkit adapter policy
 
 SOL distinguishes native, integrated, and explicitly adapted applications:
 
 | Level | UI stack | Guarantee |
 |---|---|---|
-| Native | SolKit/SolUI | Full SOL components, motion, material, accessibility, and system framework |
-| Integrated | GTK/Qt with an official SOL adapter | Full system capabilities plus mapped appearance/accessibility/windowing and constrained materials |
+| Native | SolKit/SolUI | Full SOL components, motion, accessibility, and system framework |
+| Integrated | GTK/Qt with an official SOL adapter | Full system capabilities plus mapped appearance/accessibility/windowing |
 | Adapted | Other toolkit with a reviewed SOL adapter | Declared adapter capabilities over SCP and stable SOL Runtime APIs |
 
 Security, permissions, accounts, installation, updates, and rollback are equal
@@ -494,9 +459,6 @@ across all three levels. Non-SolKit code never receives more authority.
   notifications, accounts, accessibility, appearance, windowing, and system
   actions. SOL does not inject global themes, preload libraries, or private
   toolkit modules into application processes.
-- A constrained compositor protocol may accept semantic `Chrome`, `Panel`,
-  `Floating`, or `Control` material requests. The compositor decides rendering
-  and fallback; clients never receive backdrop pixels or capture authority.
 - Integrated apps should match system appearance and functional hierarchy, but
   pixel-identical SolUI widgets are guaranteed only to native applications.
 - Flatpak may be offered through a compatibility subsystem, but it is not the
@@ -506,7 +468,7 @@ across all three levels. Non-SolKit code never receives more authority.
 - SOL exposes no Wayland, X11, or XWayland compatibility socket. Adding one
   would require a new product and security ADR.
 
-## 12. Required acceptance tests
+## 11. Required acceptance tests
 
 The OS platform cannot be called production-ready until automated fault-
 injection and integration tests prove:
@@ -541,26 +503,22 @@ injection and integration tests prove:
 16. recovery can repair Stage-0, managers, or deployments at its defined
     authority without requiring the desktop or the manager being repaired;
 17. permission decisions are attributable, inspectable, and revocable;
-18. fluid materials meet contrast and frame-budget gates and become solid under
-    reduced-transparency/high-contrast modes without changing hierarchy;
-19. GTK/Qt apps carrying incompatible toolkit versions run together without
+18. GTK/Qt apps carrying incompatible toolkit versions run together without
     host-library or plugin resolution;
-20. native, integrated, and adapted apps receive identical permission and
+19. native, integrated, and adapted apps receive identical permission and
     account denial semantics;
-21. toolkit material requests expose no backdrop data and preserve hierarchy
-    when reduced to solid fallback;
-22. foreground menus/status/capsules cannot be spoofed by another App ID, and
+20. foreground menus/status/capsules cannot be spoofed by another App ID, and
     focus changes replace menu snapshots atomically;
-23. broker-authoritative microphone/camera/capture indicators cannot be hidden,
+21. broker-authoritative microphone/camera/capture indicators cannot be hidden,
     and their Stop/Revoke actions terminate the underlying session.
-24. copied, stale, or unauthenticated boot state and health observations cannot
+22. copied, stale, or unauthenticated boot state and health observations cannot
     authorize a deployment or lower the accepted security epoch;
-25. a rollback index advances only after promotion, while a failed unpromoted
+23. a rollback index advances only after promotion, while a failed unpromoted
     trial can still reach the retained successful deployment;
-26. a failed trial leaves shared mutable data readable by the retained
+24. a failed trial leaves shared mutable data readable by the retained
     deployment through compatibility, snapshot, or a deferred migration.
 
-## 13. Naming and component map
+## 12. Naming and component map
 
 | Component | Responsibility |
 |---|---|
@@ -577,7 +535,6 @@ injection and integration tests prove:
 | `sol-shell` | Trusted Dock, global menu, status zones, consent, and Live Capsule |
 | `sol-runtime-*` | Side-by-side framework majors with signed contract-revision/feature descriptors |
 | SolKit | Source SDK, language bindings, templates, and developer tools |
-| `sol-design::material` | Semantic fluid material roles and solid fallbacks |
 | `sol-gtk` / `sol-qt` | Bundled toolkit adapters over stable SOL ABI/IPC |
 | Live Activity service | Attributed, leased registrations for Shell Live Capsule |
 

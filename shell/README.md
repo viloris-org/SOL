@@ -47,7 +47,7 @@ display mapping remain incomplete.
 - Screen upper-left: compositor-authenticated foreground app menu.
 - Screen upper-right: Live Capsule, typed app status items, Notification Center,
   and system status/Quick Settings.
-- Application navigation: `Material::Sidebar`; dense content stays solid.
+- Application navigation uses a solid sidebar beside dense content.
 
 Live Capsule is Shell-rendered from attributed declarative registrations.
 Microphone, camera, capture, location, and remote-control indicators come from

@@ -8,7 +8,7 @@ SOL is a **complete operating system**, not a desktop layer installed on an
 arbitrary host distribution. It owns the boot experience, system image and
 updates, package manager, application bundle format, atomic permission policy,
 system-managed accounts, native SCP compositor, shell, system services,
-application framework, and visual material language.
+application framework, and visual language.
 
 SOL still reuses proven Linux components where they are implementation
 building blocks. Owning an OS boundary does not mean rewriting the kernel,
@@ -51,8 +51,6 @@ The OS rebaseline adds these system foundations:
 - SOL Framework Runtime: major + minimum contract revision + named-feature
   descriptors, with compatible app resolution across OS rollback, so third-party
   apps vendor non-SOL dependencies without bundling the whole platform runtime.
-- SOL Fluid Material: typed adaptive glass roles with compositor-owned effects
-  and solid accessibility/performance fallbacks.
 - `sol-gtk` / `sol-qt`: planned bundled adapters that give non-native toolkits
   the same portals, accounts, permissions, accessibility, and lifecycle APIs
   without injecting host libraries.
@@ -100,7 +98,7 @@ assistive-technology validation remain open.
 | Doc | What it is |
 |---|---|
 | [Product Requirements Document](docs/PRD.md) | What SOL is and why (§1–42); core principles, architecture, MVP, phases |
-| [OS Platform Definition](docs/os-platform.md) | Normative OS boundary, `.app`, atomic permissions, accounts, materials, and runtime contracts |
+| [OS Platform Definition](docs/os-platform.md) | Normative OS boundary, `.app`, atomic permissions, accounts, and runtime contracts |
 | [Shell Experience](docs/shell-experience.md) | Dock, Launcher, global menu, window controls, status zone, tray, and Live Capsule contracts |
 | [Roadmap](docs/ROADMAP.md) | Engineering execution view of the PRD phases, with deliverables & acceptance |
 | [Historical Wayland protocol matrix](docs/status/wayland-protocol-matrix.md) | Retired frontend evidence retained for migration history |
@@ -167,8 +165,6 @@ setup.
   animation as part of the interaction model, not decoration (§4.4).
 - **Explicit Adaptation** — non-native toolkits require a SOL adapter and do
   not receive an implicit compatibility socket.
-- **Fluid Material** — adaptive translucent system chrome communicates depth,
-  with solid reduced-transparency/high-contrast fallbacks.
 - **Stable Shell Geography** — Dock at the bottom, foreground app menu at the
   upper-left, and trusted information/status/Live Capsule surfaces at the
   upper-right.

@@ -24,7 +24,7 @@ SOL adopts a **Server-Side Decoration (SSD) + Compositor Rendering** model, simi
 The compositor owns and renders all window decorations:
 - Title bars (height, typography, color from `sol-design`)
 - Window control buttons (close, minimize, maximize)
-- Shadows and backdrop blur effects
+- Shadows
 - Corner rounding
 - Focus indicators
 

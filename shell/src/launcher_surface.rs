@@ -23,7 +23,6 @@ use sol_app::AppId;
 use sol_design::{
     accessibility::TokenMode,
     color::Color,
-    material::Material,
     metrics::ControlMetric,
     motion::{Motion, MotionSpec},
     radius::Radius,
@@ -109,7 +108,6 @@ pub struct LauncherSurfaceContract {
     pub origin_anchor: LogicalPoint,
     pub transition: MotionSpec,
     /// Token-resolved surface roles.
-    pub material: Material,
     pub background: Color,
     pub border: Color,
     pub accent: Color,
@@ -398,7 +396,6 @@ impl LauncherSurface {
                 y: logical_output.height,
             },
             transition: self.mode.motion_spec(Motion::Panel),
-            material: Material::Floating,
             background: Color::Elevated,
             border: Color::Border,
             accent: Color::Accent,
@@ -506,19 +503,12 @@ fn rasterize(contract: &LauncherSurfaceContract) -> Result<Vec<u8>, LauncherSurf
         .ok_or(LauncherSurfaceError::UnpaintableExtent((width, height)))?;
     let mode = contract.token_mode;
     let scale = contract.output.scale;
-    let material = mode.material_spec(contract.material);
-
-    let mut background = mode.color(contract.background);
-    background.3 *= material.tint_opacity;
     let panel = PixelRect::new(0.0, 0.0, width as f32, height as f32);
-    canvas.fill_rounded_rect(panel, contract.radius.px() * scale, background);
-    if material.explicit_boundary {
-        canvas.fill_rounded_rect(
-            panel.inset(scale),
-            contract.radius.px() * scale,
-            mode.color(contract.background),
-        );
-    }
+    canvas.fill_rounded_rect(
+        panel,
+        contract.radius.px() * scale,
+        mode.color(contract.background),
+    );
 
     let label_scale = text_scale_for_height(mode.typography(contract.typography).pixels) * scale;
     let search = PixelRect::new(

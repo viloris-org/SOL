@@ -43,7 +43,6 @@ decisions in their own right.
 | 20 | SOL package manager, `.app`, and shared runtime | Accepted (architecture) | Phases 8–9 | [0020](0020-sol-package-app-runtime.md) |
 | 21 | Default-deny application security and permissions | Accepted (policy) | Phase 8 | [0021](0021-application-security-permissions.md) |
 | 22 | System-managed accounts and credential vault | Accepted (architecture) | Phase 8 | [0022](0022-system-managed-accounts.md) |
-| 23 | SOL fluid material system | Accepted (design contract) | Phases 2/4/9 | [0023](0023-sol-fluid-material.md) |
 | 24 | GTK, Qt, and non-native toolkit adapters | Partially superseded by ADR-0028; explicit adapters remain | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
 | 25 | Shell spatial grammar, global menu, and Live Capsule | Accepted (product/architecture) | Phases 4/9 | [0025](0025-shell-spatial-menu-live-capsule.md) |
 | 26 | SOL boot execution, recovery topology, and best-effort graphics | Accepted (revised architecture) | Phase 7 | [0026](0026-sol-boot-uki-and-graphics-handoff.md) |
@@ -90,8 +89,7 @@ accepted decision remain open implementation or product work.
 | 22 | Boot measurement, key enrollment, and EFI encoding | **Partially accepted (Phase 7)** | [ADR-0026](0026-sol-boot-uki-and-graphics-handoff.md) fixes Stage-0/manager/recovery separation, complete-UKI execution, promotion-gated anti-rollback, and best-effort current-GOP presentation; concrete Stage-0, TPM, key-enrollment, and EFI encodings remain open |
 | 23 | System-image filesystem and delta encoding | Phase 7 | Read-only signed images and atomic slot activation are fixed by ADR-0019 |
 | 24 | Account vault storage and hardware sealing | Phase 8 | System ownership and scoped handles are fixed by ADR-0022; backend/TPM API remains open |
-| 25 | Fluid-material compositor path | Phase 4/9 | Roles/fallbacks are fixed by ADR-0023; sampling/refraction implementation remains open |
-| 26 | Toolkit adapter/protocol matrix | Phase 9 | ADR-0028 removes generic compatibility; explicit adapter coverage and SCP material schema remain open |
+| 26 | Toolkit adapter/protocol matrix | Phase 9 | ADR-0028 removes generic compatibility; explicit adapter coverage and SCP schema remain open |
 | 27 | Live Activity/menu/status IPC | Phase 4/9 | Placement, attribution, leasing, privacy priority, and trusted rendering fixed by ADR-0025 |
 | 28 | Device control plane and hotplug lifecycle | **Proposed (Phase 5)** | [ADR-0031](0031-device-control-plane-and-hotplug.md): normalized device graph, stable identity, subsystem authority, reconciliation, safe removal, and attachment-fenced leases |
 | 29 | Protected media capture boundary | **Accepted (Phase 5 foundation)** | [ADR-0035](0035-protected-media-capture.md): compositor-owned capture redaction, capture-only audio mix, and transport-after-policy ordering; native protected GPU/KMS and PipeWire adapters remain open |

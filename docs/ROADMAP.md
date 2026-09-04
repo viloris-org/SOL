@@ -47,7 +47,7 @@ normative acceptance gate.
 | 6 | Developer Platform | Ecosystem & SDK stability | Third-party devs build high-quality native apps without knowing SOL internals | ⏳ In progress |
 | 7 | OS Foundation | Bootable and recoverable SOL system | Failed manager/deployment trials retain a boot path, and recovery does not depend on the manager it repairs | 🔲 Planned |
 | 8 | Native App Platform | Transactional `.app`, explicit permission, and managed account platform | Compatible app resolution and coordinator-atomic grants survive rollback/crash without authority or data rollback | 🔲 Planned |
-| 9 | Runtime & Ecosystem | Compact apps and coherent adaptive materials | External apps use major/revision/feature runtime contracts without weakening isolation or accessibility | 🔲 Planned |
+| 9 | Runtime & Ecosystem | Compact apps and coherent system integration | External apps use major/revision/feature runtime contracts without weakening isolation or accessibility | 🔲 Planned |
 | 10 | Professional Applications | Hyperion, Phoebe, and Iapetus | Production-scale AI development and creative workflows meet professional quality, safety, and performance gates | 🔲 Planned |
 
 > **OS rebaseline (2026-08-22):** Phases 0–6 describe the desktop substrate and
@@ -118,7 +118,7 @@ removes every inherited completion claim outside the explicitly audited Phase
 | 6 | Published/versioned SDK, external consumer build, migration/API docs, debugger and native `.app` packaging path | Independent third-party development claim |
 | 7 | Reproducible signed image plus deterministic and OVMF fault-injected Stage-0/manager/deployment/recovery trials | Recoverable OS image |
 | 8 | Transactional `.app` activation plus kernel/broker enforcement and coordinator-atomic permission/account tests | Native application trust boundary |
-| 9 | Stable runtime descriptor/ABI/IPC, external signed app proof, compatibility conformance, and material frame/accessibility gates | Runtime/ecosystem release |
+| 9 | Stable runtime descriptor/ABI/IPC, external signed app proof, and compatibility conformance | Runtime/ecosystem release |
 | 10 | Shared pro-app foundations plus production-scale Hyperion/Phoebe/Iapetus workflow, recovery, performance, color, AI, extension, and interchange validation | Professional first-party application release |
 
 ### Delivery tracks and dependency gates
@@ -132,7 +132,7 @@ named gate.
 | Desktop closure | Phase 2 → Phases 3/4 → Phase 5 → Phase 6 external proof | Phase 3/4 native surfaces use the same platform-validated SolKit and Shell contracts |
 | OS trust | M7.1 trust/formats → M7.2 deployment state machine → M7.3 Stage-0/recovery → M7.4 release evidence | No artifact is called known-good before authenticated health, data compatibility, and rollback-index gates |
 | App trust | M8.1 bundle/store → M8.2 activation → M8.3 security → M8.4 accounts → M8.5 hardening | App ID, publisher, bundle hash, process generation, grants, and leases remain correlated end to end |
-| Runtime/ecosystem | M9.1 runtime contract → M9.2 SDK delivery → M9.3 compatibility; M9.4 material may proceed in parallel | M9.1 descriptor schema is required by M8.2 resolution; M8 security/package services are required by the external-app release proof |
+| Runtime/ecosystem | M9.1 runtime contract → M9.2 SDK delivery → M9.3 compatibility | M9.1 descriptor schema is required by M8.2 resolution; M8 security/package services are required by the external-app release proof |
 | Professional apps | M10.1 shared foundations → M10.2 Hyperion / M10.3 Phoebe / M10.4 Iapetus in parallel → M10.5 release gate | Phase 10 consumes the released runtime, sandbox, GPU/media, account, background-task, and extension contracts from Phases 5–9 |
 
 The OS MVP is the first integrated release slice. It joins the Phase 5 desktop
@@ -147,7 +147,7 @@ the phases in numeric order.
 | [PRD](PRD.md) §33, §38, §41 | Hardware themes, Phase goals/success criteria, and open decision gates across all phases |
 | [OS Platform Definition](os-platform.md) §3–4 | M7 boot, recovery, image, and transaction milestones |
 | [OS Platform Definition](os-platform.md) §5, §7–8 | M8 bundle, package, sandbox, atomic permission, account, and vault milestones |
-| [OS Platform Definition](os-platform.md) §6, §9, §11–12 | M9 runtime, compatibility, material, and integrated acceptance gates |
+| [OS Platform Definition](os-platform.md) §6, §9–11 | M9 runtime, compatibility, and integrated acceptance gates |
 | [Shell contract](shell-experience.md) §1–10 | Phase 4 native Shell surfaces and M9.3 stable external menu/status/Live Activity integration |
 | [ADR-0019–0025](decisions/README.md) | Accepted invariants and the remaining implementation/non-claim boundaries for M7–M9 |
 | [Architecture](architecture.md) | Repository ownership and dependency-direction checks for every implementation slice |
@@ -272,11 +272,6 @@ to Phase 5 solely to preserve a completed Phase 1 label.
 - [S2] Layout engine (`HStack` / `VStack` semantic layout, PRD §18) — Implemented
 - [S2] `sol-design` full token convergence: typography, spacing, radius,
       material, motion, shadows, color (PRD §19, §19.1)
-- [S2] **SOL Fluid Material token foundation (ADR-0023):** semantic
-      `Content/Chrome/Panel/Floating/Control/Sidebar/Dock/Capsule` roles resolve
-      to bounded blur, tint, saturation, edge, shadow, grain, and refraction tokens; reduced
-      transparency and high contrast resolve to solid, non-refractive specs.
-      Real compositor backdrop sampling/refraction remains Phase 4/9 work.
 - [S2] Consistency testing: golden-snapshot asserts component-tree output
       contains only token values (tests in sol-design) (§19.1)
 
@@ -439,12 +434,12 @@ claim that the unavailable SCP display and assistive-technology environment pass
       deterministic app catalog, typed launch / activate / close requests, and
       SolUI keyboard/accessibility navigation. Real compositor activation and
       close adapters remain unimplemented and explicitly report unavailable.
-  - [S0] **Native SOL Dock surface:** bottom-centered `Material::Dock`, Launcher
+  - [S0] **Native SOL Dock surface:** bottom-centered solid panel, Launcher
         entry, pinned/running/focused state, badges, drag ordering, optional
         auto-hide, active-output behavior, and compositor activation/minimize.
   - [S0] **Application Launcher surface:** authenticated `.app` grid/library,
         Dock-anchored interruptible presentation, `Super+A`, keyboard/a11y,
-        fractional scaling, and reduced-motion/transparency behavior.
+        fractional scaling, and reduced-motion behavior.
   - [S0] **Left-side window controls:** native and server-side decorations use
         Close / Minimize / Maximize-Restore; GTK/Qt adapter conformance must
         preserve compositor-owned chrome without a generic CSD fallback.
@@ -478,7 +473,7 @@ claim that the unavailable SCP display and assistive-technology environment pass
 - [S0] **Live Capsule service and surface:** one upper-right anchor multiplexing
       leased declarative live activities; typed Open/Pause/Resume/Stop/End
       actions; privacy-first ordering; crash/expiry cleanup; keyboard/a11y;
-      `Material::Capsule` and anchored interruptible expansion.
+      solid surface and anchored interruptible expansion.
   - [S0] **Broker-authoritative privacy capsules:** microphone, camera, screen
         capture, location, and remote-control state comes from real capability
         leases, cannot be hidden/replaced by apps, and Stop/Revoke terminates
@@ -738,7 +733,7 @@ claim that the unavailable SCP display and assistive-technology environment pass
 > share/record available.
 
 > **Historical gate:** the former package-repository installation target is
-> retained as a transitional build check only. ADR-0019 through ADR-0023 move
+> retained as a transitional build check only. ADR-0019 through ADR-0022 move
 > production boot, packages, and sandbox enforcement into Phases 7–9.
 
 ---
@@ -1078,7 +1073,7 @@ and repeat the update/rollback/revocation paths with crash injection.
 - [S0] `sol-gtk` and `sol-qt` adapters map public toolkit APIs to lifecycle,
       documents, notifications, atomic permissions, accounts, appearance,
       accessibility, windowing/decorations, global menus, status items, Live
-      Capsule registration, and semantic material roles where representable.
+      Capsule registration.
 - [S0] Shell integrations are authenticated, declarative, leased/rate-limited,
       removed on crash/replacement/expiry, and never grant their underlying
       media, capture, device, or background authority.
@@ -1087,23 +1082,7 @@ and repeat the update/rollback/revocation paths with crash injection.
       load no mutable host toolkit/plugin and fail explicitly when the SCP/SOL
       Runtime adapter is unavailable.
 
-### M9.4 — Compositor-backed Fluid Material
-
-- [S0] Close PRD §41 decision #25 and prototype a constrained semantic-material
-      SCP capability: clients request bounded roles/regions only; the
-      compositor returns no pixels and may consolidate, reject, or render solid.
-- [S0] Implement secure backdrop groups, adaptive contrast, bounded refraction/
-      grain/blur, interruptible materialization from live state, and nested-glass
-      depth limits for `Chrome/Panel/Floating/Control/Sidebar/Dock/Capsule`.
-- [S0] Reduced transparency and high contrast perform no backdrop sampling or
-      refraction; reduced motion, remote sessions, battery saving, unsupported
-      GPUs, and frame pressure preserve hierarchy and interaction through
-      deterministic fallbacks.
-- [S0] Adversarial-backdrop contrast, protected-content isolation, multi-output,
-      fractional-scale, GPU frame-time, memory, and power tests pass on the
-      supported hardware matrix.
-
-### M9.5 — Runtime and adapter conformance release gate
+### M9.4 — Runtime and adapter conformance release gate
 
 - [S0] Side-by-side runtime-major and system-rollback tests prove first-compatible
       non-revoked hash selection, explicit unavailable state, protected
@@ -1111,8 +1090,7 @@ and repeat the update/rollback/revocation paths with crash injection.
 - [S0] Two GTK/Qt apps with incompatible private toolkit versions coexist with a
       Native sample and receive equivalent system-capability/security behavior.
 - [S0] Publish signed runtime descriptors, SDK/tool versions, conformance results,
-      compatibility matrix, material performance evidence, and known limitations
-      as one release-evidence set.
+      compatibility matrix, and known limitations as one release-evidence set.
 
 ### M9 dependencies and non-claims
 
@@ -1128,8 +1106,7 @@ and repeat the update/rollback/revocation paths with crash injection.
 > An external developer builds, signs, installs, runs, updates, and rolls back
 > a `.app` that carries only app-specific/non-SOL dependencies and accesses
 > protected resources/accounts solely through explicitly granted SOL framework
-> capabilities, while system materials preserve hierarchy, accessibility, and
-> frame budgets on supported and fallback render paths. GTK/Qt apps with
+> capabilities. GTK/Qt apps with
 > incompatible private runtimes coexist and retain the same security/system-
 > capability guarantees as SolKit apps. Rolling the OS back deterministically
 > selects the first non-revoked retained runtime-compatible hash from the
@@ -1138,8 +1115,7 @@ and repeat the update/rollback/revocation paths with crash injection.
 
 **Required closure evidence:** repeat the external sample lifecycle against the
 current and retained known-good deployments, then run Native/Integrated/
-Adapted security and accessibility conformance on supported and fallback
-material render paths.
+Adapted security and accessibility conformance.
 
 ---
 
@@ -1228,7 +1204,6 @@ readiness.
 | Security model | Phase 4–8 | Typed action foundation evolves into ADR-0021 kernel/broker enforcement |
 | Atomic permissions | Phase 8 | Each grant is one user/app/capability/resource/duration; grant + audit + lease is one commit |
 | Managed accounts | Phase 8 | `sol-accountsd`/`sol-vaultd`; apps receive scoped handles, not durable credentials |
-| Fluid material | Phase 2/4/9 | Semantic tokens now; protected compositor effects and fallback QA later |
 | Shell spatial grammar | Phase 4 | ADR-0025 fixes Dock/menu/window-control/right-zone placement and Live Capsule trust |
 | Toolkit adapters | Phase 9 | Bundled private runtime + explicit SOL adapter; capability equality, not pixel-identical widgets |
 | Boot / deployment trust | Phase 7 | Stage-0, manager trials, independent recovery, deployment placement, authenticated health, anti-rollback, and data barriers have separate state joined by explicit commits |
@@ -1298,8 +1273,7 @@ SOL Applications → Third-party Applications
   permissions, and side-by-side SOL Runtime majors.
 
 - **2026-08-22** — Tightened the OS contract to minimum, explicit, atomic
-  permission grants; added system-managed accounts/credential vaults and the
-  SOL Fluid Material design contract with accessible solid fallbacks.
+  permission grants and added system-managed accounts/credential vaults.
 
 - **2026-08-22** — Defined runtime major/revision/feature compatibility and
   per-deployment app fallback, same-publisher grant continuity with fresh

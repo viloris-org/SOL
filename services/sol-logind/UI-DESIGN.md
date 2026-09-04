@@ -211,19 +211,8 @@ Duration: 160ms; no spatial transform or spring
 - Avatar images use @2x assets
 - Crisp rendering at any scale
 
-## Material Specifications
+## Panel Specifications
 
-When renderer supports `Material::Floating`:
-```rust
-Material::Floating.spec(MaterialMode::Fluid)
-- backdrop_blur: 60px
-- saturation: 1.3x
-- tint_opacity: 0.7
-- edge_highlight: subtle
-- shadow: Elevation::Floating (blur 22px, offset 6px)
-```
-
-Fallback (current Phase 1):
 ```rust
 Color::Elevated (solid white/light gray)
 - Clean, professional appearance
@@ -243,7 +232,6 @@ Color::Elevated (solid white/light gray)
 - Slint adapter for actual rendering
 - Avatar image loading from disk
 - Password field with eye icon
-- Material backdrop effects
 
 **Phase 3** (Polish):
 - Entrance animations
