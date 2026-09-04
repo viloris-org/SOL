@@ -24,6 +24,9 @@ impl LyraCompleter {
     /// Determine the context and route to appropriate completer
     fn get_completion_context(&self, line: &str, pos: usize) -> CompletionContext {
         let before_cursor = &line[..pos];
+
+        // Check if we're after a space (argument position)
+        // This handles "ls " correctly - we want path completion, not command
         let tokens: Vec<&str> = before_cursor.split_whitespace().collect();
 
         if tokens.is_empty() {
@@ -35,6 +38,11 @@ impl LyraCompleter {
         // Git command context
         if first_token == "git" && tokens.len() > 1 {
             return CompletionContext::Git;
+        }
+
+        // If line ends with whitespace, we're starting a new argument (path completion)
+        if before_cursor.ends_with(char::is_whitespace) {
+            return CompletionContext::Path;
         }
 
         // After the first token, complete files/paths

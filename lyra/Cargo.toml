@@ -24,6 +24,7 @@ async-trait = "0.1"
 
 # Process management
 nix = { version = "0.29", features = ["process", "signal"] }
+shell-words = "1.1"
 
 # Fuzzy search
 nucleo-matcher = "0.3"

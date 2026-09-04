@@ -3213,6 +3213,7 @@ dependencies = [
  "reedline",
  "serde",
  "serde_json",
+ "shell-words",
  "sol-design",
  "sol-system",
  "term_size",

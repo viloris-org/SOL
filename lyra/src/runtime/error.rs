@@ -8,6 +8,9 @@ pub enum RuntimeError {
     #[error("Undefined command: {0}")]
     UndefinedCommand(String),
 
+    #[error("Command '{command}' failed ({status})")]
+    CommandFailed { command: String, status: String },
+
     #[error("Type error: expected {expected}, got {got}")]
     TypeError { expected: String, got: String },
 

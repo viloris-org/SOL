@@ -43,6 +43,28 @@ impl Environment {
             self.scopes.pop();
         }
     }
+
+    /// Return scalar Lyra variables in a form suitable for a child process.
+    /// Inner scopes overwrite outer ones, matching normal variable lookup.
+    pub fn process_variables(&self) -> HashMap<String, String> {
+        let mut variables = HashMap::new();
+
+        for scope in &self.scopes {
+            for (name, value) in scope {
+                let value = match value {
+                    Value::String(value) => value.clone(),
+                    Value::Number(value) => value.to_string(),
+                    Value::Bool(value) => value.to_string(),
+                    Value::Null | Value::List(_) | Value::Record(_) | Value::Table { .. } => {
+                        continue;
+                    }
+                };
+                variables.insert(name.clone(), value);
+            }
+        }
+
+        variables
+    }
 }
 
 impl Default for Environment {

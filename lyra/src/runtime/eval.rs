@@ -17,6 +17,20 @@ impl Evaluator {
         }
     }
 
+    /// Returns whether `name` is implemented by Lyra itself.
+    ///
+    /// The interactive shell uses this to keep Lyra expressions on the
+    /// structured evaluator while forwarding external invocations without
+    /// first tokenizing and rebuilding their command line.
+    pub fn has_builtin(&self, name: &str) -> bool {
+        self.builtins.has_command(name)
+    }
+
+    /// Snapshot Lyra scalar variables for an external child process.
+    pub fn external_environment(&self) -> HashMap<String, String> {
+        self.env.process_variables()
+    }
+
     pub fn eval_stmts<'a>(
         &'a mut self,
         stmts: &'a [crate::parser::Stmt],

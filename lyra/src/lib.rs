@@ -8,7 +8,7 @@ pub mod prompt;
 pub mod runtime;
 
 use anyhow::Result;
-use completion::LyraCompleter;
+use completion::{HorizontalCompleter, LyraCompleter};
 use highlighter::LyraHighlighter;
 use history::HistoryManager;
 use parser::Parser;
@@ -18,6 +18,8 @@ use reedline::{
     ReedlineEvent, ReedlineMenu, Signal,
 };
 use runtime::Evaluator;
+
+const COMPLETION_COLUMNS: u16 = 4;
 
 pub struct Lyra {
     evaluator: Evaluator,
@@ -53,8 +55,8 @@ impl Lyra {
         let completion_menu = Box::new(
             ColumnarMenu::default()
                 .with_name("completion_menu")
-                .with_columns(4)
-                .with_column_width(None)
+                .with_columns(COMPLETION_COLUMNS)
+                .with_column_width(Some(20))
                 .with_column_padding(2),
         );
 
@@ -64,11 +66,22 @@ impl Lyra {
         keybindings.add_binding(
             KeyModifiers::NONE,
             KeyCode::Tab,
-            ReedlineEvent::Menu("completion_menu".to_string()),
+            ReedlineEvent::UntilFound(vec![
+                ReedlineEvent::Menu("completion_menu".to_string()),
+                ReedlineEvent::MenuNext,
+            ]),
+        );
+        keybindings.add_binding(
+            KeyModifiers::SHIFT,
+            KeyCode::BackTab,
+            ReedlineEvent::MenuPrevious,
         );
 
         let mut line_editor = Reedline::create()
-            .with_completer(Box::new(LyraCompleter::new()))
+            .with_completer(Box::new(HorizontalCompleter::new(
+                LyraCompleter::new(),
+                COMPLETION_COLUMNS,
+            )))
             .with_highlighter(Box::new(LyraHighlighter::new()))
             .with_history(history)
             .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
@@ -115,6 +128,22 @@ impl Lyra {
     }
 
     pub async fn execute(&mut self, input: &str) -> Result<()> {
+        if let Some(invocation) = builtins::external::inspect_external_invocation(input)? {
+            // Leading environment assignments are shell syntax even when the
+            // command that follows happens to share a Lyra builtin's name.
+            // Unknown commands must also retain their original command line:
+            // parsing them as Lyra expressions loses common CLI syntax such as
+            // quoted arguments, ordered flags, URLs and redirections.
+            if invocation.has_environment_assignments
+                || (!is_lyra_language_keyword(&invocation.command)
+                    && !self.evaluator.has_builtin(&invocation.command))
+            {
+                let environment = self.evaluator.external_environment();
+                builtins::external::execute_external_line(input, &environment).await?;
+                return Ok(());
+            }
+        }
+
         let mut parser = Parser::new(input);
         let stmts = parser.parse()?;
 
@@ -194,8 +223,40 @@ impl Lyra {
     }
 }
 
+fn is_lyra_language_keyword(word: &str) -> bool {
+    matches!(word, "let" | "def" | "if" | "for" | "while" | "return")
+}
+
 impl Default for Lyra {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn external_cli_keeps_raw_syntax_and_receives_lyra_variables() {
+        let path = std::env::temp_dir().join(format!(
+            "lyra-routing-{}-{}.txt",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let path_string = path.to_string_lossy();
+        let quoted_path = shell_words::quote(&path_string);
+        let mut lyra = Lyra::new();
+
+        lyra.execute(r#"let lyra_cli_value = "space value""#)
+            .await
+            .unwrap();
+        lyra.execute(&format!("printf '%s' \"$lyra_cli_value\" > {quoted_path}"))
+            .await
+            .unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(contents, "space value");
     }
 }

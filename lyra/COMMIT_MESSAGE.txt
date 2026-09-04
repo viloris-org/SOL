@@ -1,0 +1,72 @@
+feat(lyra): implement 23 new builtin commands (Phase 3 complete)
+
+Replicate most common busybox utilities, bringing Lyra from 8 to 31 builtin commands.
+
+## New Commands (23)
+
+### File Operations (6)
+- cat: concatenate and display files (-n, -E flags)
+- cp: copy files/directories (-r, -f, -v flags)
+- mv: move/rename files (-f, -v flags)
+- rm: remove files/directories (-r, -f, -v flags)
+- mkdir: create directories (-p, -v flags)
+- touch: create files or update timestamps
+
+### Text Utilities (6)
+- grep: pattern matching (-i, -v, -n, -c flags)
+- head: show first N lines (default 10)
+- tail: show last N lines (default 10)
+- wc: count lines/words/chars/bytes (-l, -w, -c, -m flags)
+- sort: sort lines (-r, -u, -n flags)
+- uniq: deduplicate lines (-c, -d, -u flags)
+
+### System Utilities (11)
+- env: display environment variables
+- basename: strip directory from path
+- dirname: extract directory from path
+- sleep: delay execution (supports fractional seconds)
+- date: display date/time (custom format support)
+- true: return success
+- false: return failure
+- whoami: show current user
+- uname: system information (-a, -s, -n, -r, -v, -m flags)
+
+## Implementation
+
+New modules:
+- src/builtins/fileops.rs: file operations
+- src/builtins/textutils.rs: text processing
+- src/builtins/sysutils.rs: system utilities
+
+Dependencies added:
+- filetime 0.2: for touch timestamp operations
+- hostname 0.4: for uname hostname lookup
+
+## Testing
+
+✅ All tests pass (28/28)
+✅ Clean build with no warnings
+✅ Demo and test scripts included
+
+## Documentation
+
+- COMMANDS.md: comprehensive command reference
+- PHASE3_COMPLETE.md: implementation summary
+- 实现总结-2026-08-29.md: Chinese summary
+- demo_commands.sh: interactive demonstration
+- test_commands.sh: automated testing
+
+## Reference
+
+Based on busybox-1.38.0 implementation at:
+/home/rownix/Downloads/busybox-1.38.0/
+
+Covers most commonly used commands from:
+- coreutils/
+- findutils/ (grep only)
+- console-tools/ (clear, reset)
+
+## Next Steps (Phase 4)
+
+High priority: find, xargs, cut, tr, tee, ln, chmod, chown
+Medium priority: df, du, stat, seq, mktemp

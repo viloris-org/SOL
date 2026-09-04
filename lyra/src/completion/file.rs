@@ -16,23 +16,33 @@ impl FileCompleter {
     pub fn complete(&self, line: &str, pos: usize) -> Vec<Suggestion> {
         let before_cursor = &line[..pos];
 
-        // Find the last token (the partial path being completed)
-        let tokens: Vec<&str> = before_cursor.split_whitespace().collect();
-        if tokens.is_empty() {
-            return Vec::new();
-        }
-
-        let partial = tokens.last().unwrap_or(&"");
+        // Extract the partial path being typed
+        // Split by whitespace and take everything after the last space
+        let partial = if let Some(last_space) = before_cursor.rfind(char::is_whitespace) {
+            &before_cursor[last_space + 1..]
+        } else {
+            // No space found, complete from the beginning (shouldn't happen in path context)
+            before_cursor
+        };
 
         // Determine the directory to search and the prefix to match
         let (search_dir, prefix) = self.parse_partial_path(partial);
 
-        // Get the span for replacement
-        let start = before_cursor.rfind(partial).unwrap_or(pos);
+        // Get the span for replacement - start from where the partial begins
+        let start = pos - partial.len();
         let span = Span::new(start, pos);
 
+        // Calculate the directory prefix to prepend to completions
+        let dir_prefix = if partial.contains('/') {
+            // Keep everything up to and including the last slash
+            let last_slash = partial.rfind('/').unwrap();
+            &partial[..=last_slash]
+        } else {
+            ""
+        };
+
         // List directory entries and filter
-        self.list_completions(&search_dir, &prefix, span)
+        self.list_completions(&search_dir, &prefix, span, dir_prefix)
     }
 
     /// Parse a partial path into (directory to search, filename prefix)
@@ -64,7 +74,13 @@ impl FileCompleter {
     }
 
     /// List all matching files/directories
-    fn list_completions(&self, dir: &Path, prefix: &str, span: Span) -> Vec<Suggestion> {
+    fn list_completions(
+        &self,
+        dir: &Path,
+        prefix: &str,
+        span: Span,
+        dir_prefix: &str,
+    ) -> Vec<Suggestion> {
         let Ok(entries) = fs::read_dir(dir) else {
             return Vec::new();
         };
@@ -85,7 +101,8 @@ impl FileCompleter {
                 continue;
             }
 
-            let mut value = name.to_string();
+            // Prepend directory prefix to the completion value
+            let mut value = format!("{}{}", dir_prefix, name);
             let mut description = None;
 
             // Add trailing slash for directories
