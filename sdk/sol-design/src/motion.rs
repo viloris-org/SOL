@@ -15,6 +15,12 @@ pub enum Motion {
     Fast,
     /// Panel, menu, popover appearance.
     Panel,
+    /// Glass materialization: blur, edge response and scale arrive together.
+    Material,
+    /// Shape-preserving expansion from a compact trigger into a container.
+    Morph,
+    /// Pointer-release settle that may preserve a small amount of momentum.
+    Rebound,
     /// Window move / resize / snap.
     Window,
     /// Workspace / overview paging.
@@ -24,7 +30,7 @@ pub enum Motion {
 }
 
 /// Duration + spring tuning emitted to the animation runtime.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionSpec {
     /// Milliseconds for the settling duration (0 for `None`/`Fast`).
     pub duration_ms: u32,
@@ -46,6 +52,18 @@ impl Motion {
             Motion::Panel => MotionSpec {
                 duration_ms: 170,
                 spring: None,
+            },
+            Motion::Material => MotionSpec {
+                duration_ms: 220,
+                spring: Some((20.0, 1.0)),
+            },
+            Motion::Morph => MotionSpec {
+                duration_ms: 240,
+                spring: Some((20.0, 1.0)),
+            },
+            Motion::Rebound => MotionSpec {
+                duration_ms: 160,
+                spring: Some((22.0, 0.82)),
             },
             Motion::Window => MotionSpec {
                 duration_ms: 260,

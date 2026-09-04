@@ -267,11 +267,15 @@ to Phase 5 solely to preserve a completed Phase 1 label.
       scale/animation fixtures live in `sdk/sol-ui`; real GPU, accessibility,
       multi-output, popup/input-region, and distribution-license validation
       remain explicitly tracked in ADR-0004 rather than being claimed here.
-- [S2] Semantic component system: `Button`, `TextField`, `Toolbar`, `Tab`, `TabBar`, `HStack`, `VStack`
+- [S2] Semantic component system: `Button`, `TextField`, `Toolbar`, `Tab`, `TabBar`, `HStack`, `VStack`, plus Liquid Glass surface/button/segmented-control/toolbar/slider/shared-container-morph contracts
        (PRD §18); apps write intent, not visuals
 - [S2] Layout engine (`HStack` / `VStack` semantic layout, PRD §18) — Implemented
 - [S2] `sol-design` full token convergence: typography, spacing, radius,
       material, motion, shadows, color (PRD §19, §19.1)
+- [S2] Liquid Glass renderer contract: semantic material roles, one-level
+      backdrop grouping, reduced-transparency/high-contrast fallbacks, and
+      secure capability-aware composition plans (ADR-0023). Native compositor
+      shaders and hardware/visual validation remain open.
 - [S2] Consistency testing: golden-snapshot asserts component-tree output
       contains only token values (tests in sol-design) (§19.1)
 
@@ -279,7 +283,7 @@ to Phase 5 solely to preserve a completed Phase 1 label.
 
 - [S2] Unified animation engine (sol-animation): MotionSpec, AnimationDriver, InterruptibleAnimation (PRD §14): easing / spring / interactive
       progress / velocity / interruption / reversal
-- [S2] Semantic motion tiers: `Motion::None/Fast/Panel/Window/Workspace`
+- [S2] Semantic motion tiers: `Motion::None/Fast/Panel/Material/Morph/Rebound/Window/Workspace`
 - [S2] One set of animation semantics shared by compositor and UI: MotionSpec, Motion tiers via sol-animation/sol-design
 
 **SolApp & lifecycle**

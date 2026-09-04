@@ -20,8 +20,10 @@ Semantic motion tiers (PRD §19 Motion tokens):
 
 ```text
 Motion::Fast
-Motion::Control
 Motion::Panel
+Motion::Material
+Motion::Morph
+Motion::Rebound
 Motion::Window
 Motion::Workspace
 Motion::SessionHandoff
@@ -34,6 +36,8 @@ semantic role**, and duration + curve resolve from `sol-design` tokens.
 
 **Phase 2 semantic-motion foundation implemented.** Motion specifications,
 tiers, animation-driver contracts, and interruptible-animation state are
-present. The compositor animation system (gestures / workspace motion) is
-established early in Phase 1; renderer integration remains part of the SolUI
-spike.
+present. `SpringValue` provides deterministic sub-stepped spring integration,
+live-value retargeting, gesture takeover, and velocity handoff for component
+morph/rebound effects. The compositor animation system (gestures / workspace
+motion) is established early in Phase 1; renderer integration remains part of
+the SolUI spike.

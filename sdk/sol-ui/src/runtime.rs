@@ -12,7 +12,7 @@ use sol_design::{
     typography::FontStyle,
 };
 
-use crate::Button;
+use crate::{Button, GlassComponentFrame};
 
 /// The logical size offered by a host surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -149,6 +149,25 @@ pub trait Renderer {
     fn render_button(&mut self, frame: &ButtonFrame);
 }
 
+/// Renderer adapter for the reusable Liquid Glass component family.
+pub trait GlassRenderer {
+    /// Apply one fully resolved component frame to the backend's retained tree.
+    fn render_glass(&mut self, frame: &GlassComponentFrame);
+}
+
+/// Deterministic Liquid Glass renderer used by component and adapter tests.
+#[derive(Debug, Default)]
+pub struct RecordingGlassRenderer {
+    /// Component frames submitted in order.
+    pub frames: Vec<GlassComponentFrame>,
+}
+
+impl GlassRenderer for RecordingGlassRenderer {
+    fn render_glass(&mut self, frame: &GlassComponentFrame) {
+        self.frames.push(frame.clone());
+    }
+}
+
 /// A deterministic renderer used as the repeatable architecture fixture.
 ///
 /// It records exactly what a native adapter would consume, which lets CI
@@ -280,5 +299,15 @@ mod tests {
         assert_eq!(frame.background, mode.color(Color::Elevated));
         assert!(frame.font_size > TokenMode::light().typography(FontStyle::Label).pixels);
         assert_eq!(controller.motion_spec(mode).duration_ms, 0);
+    }
+
+    #[test]
+    fn glass_renderer_accepts_a_complete_component_frame() {
+        let frame = GlassComponentFrame::Slider(
+            crate::GlassSlider::new("Hue", 62).frame_for(TokenMode::dark()),
+        );
+        let mut renderer = RecordingGlassRenderer::default();
+        renderer.render_glass(&frame);
+        assert_eq!(renderer.frames, vec![frame]);
     }
 }

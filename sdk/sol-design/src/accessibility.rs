@@ -6,6 +6,7 @@
 
 use crate::{
     color::{Color, Rgba},
+    material::{Material, MaterialMode, MaterialNesting, MaterialSpec},
     motion::{Motion, MotionSpec},
     typography::{FontSpec, FontStyle},
 };
@@ -37,6 +38,16 @@ pub enum MotionPreference {
     #[default]
     Full,
     /// Remove non-essential transition time and spring motion.
+    Reduced,
+}
+
+/// Transparency preference selected by the user or accessibility service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransparencyPreference {
+    /// Use Liquid Glass where the semantic material role permits it.
+    #[default]
+    Liquid,
+    /// Replace backdrop-dependent materials with stable solid surfaces.
     Reduced,
 }
 
@@ -78,6 +89,8 @@ pub struct TokenMode {
     pub contrast: Contrast,
     /// Requested full or reduced motion.
     pub motion: MotionPreference,
+    /// Requested Liquid Glass or reduced-transparency materials.
+    pub transparency: TransparencyPreference,
     /// Requested named text scale.
     pub text_scale: TextScale,
 }
@@ -89,6 +102,7 @@ impl TokenMode {
             theme: Theme::Light,
             contrast: Contrast::Standard,
             motion: MotionPreference::Full,
+            transparency: TransparencyPreference::Liquid,
             text_scale: TextScale::Default,
         }
     }
@@ -113,6 +127,12 @@ impl TokenMode {
         self
     }
 
+    /// Replace translucent materials with solid, non-refractive surfaces.
+    pub const fn reduced_transparency(mut self) -> Self {
+        self.transparency = TransparencyPreference::Reduced;
+        self
+    }
+
     /// Select a named text size without allowing a raw multiplier.
     pub const fn with_text_scale(mut self, text_scale: TextScale) -> Self {
         self.text_scale = text_scale;
@@ -130,6 +150,9 @@ impl TokenMode {
             (Theme::Light, Contrast::Standard, Color::TextSecondary) => Rgba(0.42, 0.42, 0.47, 1.0),
             (Theme::Light, Contrast::Standard, Color::Border) => Rgba(0.80, 0.80, 0.83, 1.0),
             (Theme::Light, Contrast::Standard, Color::HoverOverlay) => Rgba(0.0, 0.0, 0.0, 0.06),
+            (Theme::Light, Contrast::Standard, Color::MaterialTint) => Rgba::WHITE,
+            (Theme::Light, Contrast::Standard, Color::MaterialHighlight) => Rgba::WHITE,
+            (Theme::Light, Contrast::Standard, Color::MaterialShadow) => Rgba::BLACK,
             (Theme::Light, Contrast::Standard, Color::Error) => Rgba(0.85, 0.25, 0.25, 1.0),
             (Theme::Dark, Contrast::Standard, Color::Surface) => Rgba(0.10, 0.11, 0.13, 1.0),
             (Theme::Dark, Contrast::Standard, Color::Elevated) => Rgba(0.16, 0.17, 0.20, 1.0),
@@ -139,6 +162,9 @@ impl TokenMode {
             (Theme::Dark, Contrast::Standard, Color::TextSecondary) => Rgba(0.70, 0.72, 0.76, 1.0),
             (Theme::Dark, Contrast::Standard, Color::Border) => Rgba(0.34, 0.36, 0.40, 1.0),
             (Theme::Dark, Contrast::Standard, Color::HoverOverlay) => Rgba(1.0, 1.0, 1.0, 0.10),
+            (Theme::Dark, Contrast::Standard, Color::MaterialTint) => Rgba(0.18, 0.19, 0.22, 1.0),
+            (Theme::Dark, Contrast::Standard, Color::MaterialHighlight) => Rgba::WHITE,
+            (Theme::Dark, Contrast::Standard, Color::MaterialShadow) => Rgba::BLACK,
             (Theme::Dark, Contrast::Standard, Color::Error) => Rgba(1.0, 0.45, 0.45, 1.0),
             (Theme::Light, Contrast::High, Color::Surface) => Rgba::WHITE,
             (Theme::Light, Contrast::High, Color::Elevated) => Rgba::WHITE,
@@ -148,6 +174,9 @@ impl TokenMode {
             (Theme::Light, Contrast::High, Color::TextSecondary) => Rgba::BLACK,
             (Theme::Light, Contrast::High, Color::Border) => Rgba::BLACK,
             (Theme::Light, Contrast::High, Color::HoverOverlay) => Rgba(0.0, 0.0, 0.0, 0.18),
+            (Theme::Light, Contrast::High, Color::MaterialTint) => Rgba::WHITE,
+            (Theme::Light, Contrast::High, Color::MaterialHighlight) => Rgba::BLACK,
+            (Theme::Light, Contrast::High, Color::MaterialShadow) => Rgba::BLACK,
             (Theme::Light, Contrast::High, Color::Error) => Rgba(0.70, 0.0, 0.0, 1.0),
             (Theme::Dark, Contrast::High, Color::Surface) => Rgba::BLACK,
             (Theme::Dark, Contrast::High, Color::Elevated) => Rgba::BLACK,
@@ -157,6 +186,9 @@ impl TokenMode {
             (Theme::Dark, Contrast::High, Color::TextSecondary) => Rgba::WHITE,
             (Theme::Dark, Contrast::High, Color::Border) => Rgba::WHITE,
             (Theme::Dark, Contrast::High, Color::HoverOverlay) => Rgba(1.0, 1.0, 1.0, 0.22),
+            (Theme::Dark, Contrast::High, Color::MaterialTint) => Rgba::BLACK,
+            (Theme::Dark, Contrast::High, Color::MaterialHighlight) => Rgba::WHITE,
+            (Theme::Dark, Contrast::High, Color::MaterialShadow) => Rgba::BLACK,
             (Theme::Dark, Contrast::High, Color::Error) => Rgba(1.0, 0.55, 0.55, 1.0),
         }
     }
@@ -167,7 +199,7 @@ impl TokenMode {
             match motion {
                 // This opacity-only bridge prevents a full-screen flash. It is
                 // functional feedback rather than spatial motion.
-                Motion::SessionHandoff => MotionSpec {
+                Motion::SessionHandoff | Motion::Morph => MotionSpec {
                     duration_ms: 160,
                     spring: None,
                 },
@@ -179,6 +211,25 @@ impl TokenMode {
         } else {
             motion.spec()
         }
+    }
+
+    /// Resolve a semantic material under active accessibility preferences.
+    pub const fn material_spec(self, material: Material) -> MaterialSpec {
+        self.material_spec_for(material, MaterialNesting::Independent)
+    }
+
+    /// Resolve a semantic material and its relationship to a glass parent.
+    pub const fn material_spec_for(
+        self,
+        material: Material,
+        nesting: MaterialNesting,
+    ) -> MaterialSpec {
+        let mode = match (self.contrast, self.transparency) {
+            (Contrast::High, _) => MaterialMode::HighContrast,
+            (_, TransparencyPreference::Reduced) => MaterialMode::ReducedTransparency,
+            _ => MaterialMode::Liquid,
+        };
+        material.spec_for(mode, nesting)
     }
 
     /// Resolve named typography under the selected text-scale preference.
@@ -277,5 +328,26 @@ mod tests {
             .with_text_scale(TextScale::Large)
             .typography(FontStyle::Body);
         assert!(enlarged.pixels > normal.pixels);
+    }
+
+    #[test]
+    fn reduced_transparency_removes_backdrop_effects() {
+        let spec = TokenMode::light()
+            .reduced_transparency()
+            .material_spec(Material::Panel);
+        assert!(!spec.samples_backdrop);
+        assert_eq!(spec.backdrop_blur, 0.0);
+        assert_eq!(spec.refraction, 0.0);
+        assert_eq!(spec.tint_opacity, 1.0);
+    }
+
+    #[test]
+    fn high_contrast_forces_a_solid_bounded_material() {
+        let spec = TokenMode::dark()
+            .high_contrast()
+            .material_spec(Material::Floating);
+        assert!(!spec.samples_backdrop);
+        assert_eq!(spec.backdrop_blur, 0.0);
+        assert!(spec.explicit_boundary);
     }
 }

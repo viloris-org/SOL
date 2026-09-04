@@ -19,6 +19,13 @@
 
 use sol_design::{color::Color, radius::Radius, spacing::Spacing};
 
+pub mod material;
+
+pub use material::{
+    BackdropAccess, MaterialCapabilities, MaterialFallback, MaterialPass, MaterialRenderPlan,
+    plan_material,
+};
+
 /// A render buffer for offscreen rendering.
 #[derive(Debug)]
 pub struct Renderbuffer {

@@ -28,7 +28,9 @@ App code never programs against `.slint` or Slint APIs directly.
 ## Responsibilities
 
 - Layout (`HStack` / `VStack` semantic layout)
-- Components (Button / Toolbar / Dialog / List / MenuItem / TextField / Tab …)
+- Components (Button / Toolbar / TextField / Tab plus Liquid Glass surfaces,
+  buttons, segmented controls, floating toolbars, sliders, and shared-container
+  morph menus)
 - Typography, theme, input, focus, animation (delegated to `sol-animation`)
 - Accessibility (semantic tree, keyboard navigation, reduced motion)
 - Rendering integration (decoupled from the underlying renderer, §19.1)
@@ -41,6 +43,47 @@ and renderer-independent. SCP surface negotiation remains outside SolUI and is
 owned by the application runtime or shell. SolUI owns keyboard focus traversal,
 standard activation/selection/text-editing behavior, and a renderer-neutral
 accessibility semantic tree. Real AT-SPI transport remains integration work.
+
+## Liquid Glass components
+
+The component API mirrors the supplied visual references without exposing raw
+optical values:
+
+```rust
+use sol_ui::{
+    GlassButton, GlassMenuItem, GlassMorphMenu, GlassSegment, GlassSegmentedControl,
+    GlassSlider, GlassToolbar, GlassToolbarItem, MaterializedComponent,
+};
+
+let modes = GlassSegmentedControl::new("Capture type")
+    .segment(GlassSegment::new("video", "Video"))
+    .segment(GlassSegment::new("photo", "Photo"));
+let toolbar = GlassToolbar::new()
+    .item(GlassToolbarItem::Button(GlassButton::new("Previous")))
+    .item(GlassToolbarItem::Button(GlassButton::new("Play")));
+let hue = GlassSlider::new("Hue", 62).hue_track();
+let account = GlassMorphMenu::new("Account", "Open account menu")
+    .item(GlassMenuItem::new("profile", "My Profile"))
+    .item(GlassMenuItem::new("settings", "Settings"))
+    .item(GlassMenuItem::new("logout", "Log Out"));
+
+assert_eq!(modes.selected_id(), Some("video"));
+assert!(toolbar.items.len() == 2);
+assert!(hue.material_tokens().snapshot().contains("material=Control"));
+assert!(account.material_tokens().snapshot().contains("motion=Morph"));
+```
+
+Selected indicators and toolbar buttons automatically consolidate into their
+parent glass backdrop group. Arrow keys switch segmented choices and adjust
+slider percentages through the same semantic/accessibility tree as existing
+SolUI controls.
+
+`GlassMorphMenuController` expands one shared smooth-union surface from its
+circular trigger, supports direct gesture takeover, retargets rapid reversals
+from the live presentation value, and hands release velocity to the rebound
+spring. Pointer-down compression is immediate; keyboard activation does not
+add decorative bounce. Reduced motion snaps geometry and requests a 160ms
+content cross-fade.
 
 ## Consistency iron rules (PRD §19.1)
 

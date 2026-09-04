@@ -97,6 +97,7 @@ fn project_node(
         SemanticRole::Button => Role::Button,
         SemanticRole::TextField => Role::TextInput,
         SemanticRole::Tab => Role::Tab,
+        SemanticRole::Slider => Role::Slider,
     });
     node.set_label(source.label.clone());
     node.set_children(child_ids);

@@ -9,6 +9,7 @@ Renderer
 ├── Texture
 ├── Shadow
 ├── Blur
+├── Liquid Glass composition plan
 ├── Transform
 ├── Color
 └── Present
@@ -27,5 +28,21 @@ long-term role of Vulkan / wgpu is undecided (§41 #4).
 ## Status
 
 **Phase 2 abstraction foundation implemented.** Renderbuffer, Surface,
-GraphicsContext, Brush, and Paint APIs are present. Backend rendering
-integration converges alongside the SolUI spike.
+GraphicsContext, Brush, and Paint APIs are present. `plan_material` turns a
+semantic Liquid Glass role into ordered, renderer-independent composition
+passes and negotiates full, reduced-effects, or solid rendering against backend
+capabilities. Backdrop pixels are explicitly renderer-only and are never
+returned to application code.
+
+```rust
+use sol_design::{accessibility::TokenMode, material::{Material, MaterialNesting}};
+use sol_graphics::{MaterialCapabilities, plan_material};
+
+let plan = plan_material(
+    Material::Control,
+    MaterialNesting::Independent,
+    TokenMode::dark(),
+    MaterialCapabilities::full(),
+);
+assert!(plan.spec.samples_backdrop);
+```

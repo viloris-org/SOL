@@ -768,6 +768,9 @@ Preferred:
 Motion::Fast
 Motion::Control
 Motion::Panel
+Motion::Material
+Motion::Morph
+Motion::Rebound
 Motion::Window
 Motion::Workspace
 ```
@@ -819,9 +822,9 @@ sol-design
 ├── color/      semantic colors (Surface/Elevated/Accent/Text/Border/Error…)
 ├── typography/ named sizes (Body/Title/Label/Display + weight)
 ├── spacing/    spacing scale (Xs/Sm/Md/Lg/Xl)
-├── radius/     corner-radius scale (None/Sm/Md/Full)
-├── material/   surface hierarchy (Base/Panel/Floating → shadow/blur)
-├── motion/     motion tiers (Fast/Panel/Window/Workspace → duration+curve)
+├── radius/     corner-radius scale (None/Sm/Md/Lg/Xl/Full)
+├── material/   Liquid Glass roles, optics, nesting and solid fallbacks
+├── motion/     Fast/Panel/Material/Morph/Rebound/Window/Workspace springs
 └── shadows/    shadow specs
 ```
 

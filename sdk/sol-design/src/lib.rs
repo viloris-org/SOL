@@ -45,6 +45,9 @@ mod consistency_tests {
             color::Color::TextSecondary,
             color::Color::Border,
             color::Color::HoverOverlay,
+            color::Color::MaterialTint,
+            color::Color::MaterialHighlight,
+            color::Color::MaterialShadow,
             color::Color::Error,
         ];
 
@@ -80,6 +83,8 @@ mod consistency_tests {
             radius::Radius::None,
             radius::Radius::Sm,
             radius::Radius::Md,
+            radius::Radius::Lg,
+            radius::Radius::Xl,
             radius::Radius::Full,
         ];
 
@@ -95,6 +100,9 @@ mod consistency_tests {
             motion::Motion::None,
             motion::Motion::Fast,
             motion::Motion::Panel,
+            motion::Motion::Material,
+            motion::Motion::Morph,
+            motion::Motion::Rebound,
             motion::Motion::Window,
             motion::Motion::Workspace,
             motion::Motion::SessionHandoff,
@@ -124,6 +132,41 @@ mod consistency_tests {
             assert!(shadow.blur >= 0.0);
             assert!(shadow.offset_y >= 0.0);
             assert!(shadow.opacity >= 0.0 && shadow.opacity <= 1.0);
+        }
+    }
+
+    /// Liquid Glass tokens stay bounded and accessibility variants never
+    /// depend on a captured backdrop.
+    #[test]
+    fn material_tokens_are_bounded_and_have_solid_fallbacks() {
+        let materials = [
+            material::Material::Content,
+            material::Material::Chrome,
+            material::Material::Panel,
+            material::Material::Floating,
+            material::Material::Control,
+            material::Material::Sidebar,
+            material::Material::Dock,
+            material::Material::Capsule,
+        ];
+
+        for material in materials {
+            let liquid = material.spec(material::MaterialMode::Liquid);
+            assert!(liquid.backdrop_blur >= 0.0);
+            assert!(liquid.saturation >= 1.0);
+            assert!((0.0..=1.0).contains(&liquid.tint_opacity));
+            assert!((0.0..=1.0).contains(&liquid.edge_highlight_opacity));
+            assert!((0.0..=1.0).contains(&liquid.inner_shadow_opacity));
+            assert!((0.0..=1.0).contains(&liquid.shadow_opacity));
+            assert!((0.0..=1.0).contains(&liquid.refraction));
+            assert!((0.0..=1.0).contains(&liquid.chromatic_aberration));
+            assert!((0.0..=1.0).contains(&liquid.grain_opacity));
+
+            let reduced = material.spec(material::MaterialMode::ReducedTransparency);
+            assert!(!reduced.samples_backdrop);
+            assert_eq!(reduced.backdrop_blur, 0.0);
+            assert_eq!(reduced.refraction, 0.0);
+            assert_eq!(reduced.tint_opacity, 1.0);
         }
     }
 

@@ -21,9 +21,9 @@ sol-design
 ├── color/       semantic colors (Surface/Elevated/Accent/Text/Border/Error…)
 ├── typography/  named sizes (Body/Title/Label/Display + weight)
 ├── spacing/     spacing scale (Xs/Sm/Md/Lg/Xl)
-├── radius/      corner-radius scale (None/Sm/Md/Full)
-├── material/    surface hierarchy (Base/Panel/Floating → shadow/blur)
-├── motion/      motion tiers (Fast/Panel/Window/Workspace → duration+curve)
+├── radius/      corner-radius scale (None/Sm/Md/Lg/Xl/Full)
+├── material/    Liquid Glass roles, optical specs, nesting + solid fallbacks
+├── motion/      Fast/Panel/Material/Morph/Rebound/Window/Workspace springs
 └── shadows/     shadow specs
 ```
 
@@ -36,7 +36,13 @@ sol-design
 
 ## Status
 
-**Phase 0 seed present.** `color.rs` / `motion.rs` / `spacing.rs` / `radius.rs`
-/ `material.rs` / `typography.rs` provide placeholder-but-constrained tokens;
-theme colors are not finished design work. `sol-files` remains the dogfooding
-baseline.
+**Liquid Glass token foundation present.** Components select `Content`,
+`Chrome`, `Panel`, `Floating`, `Control`, `Sidebar`, `Dock`, or `Capsule`.
+`TokenMode` resolves theme, high-contrast, reduced-motion, text-scale, and
+reduced-transparency variants. Nested glass consolidates into one backdrop
+group instead of recursively blurring; unsupported rendering paths use the
+same solid fallback without changing component layout or behavior.
+
+The optical values are renderer-neutral contracts. Native compositor sampling,
+adaptive luminance and hardware performance validation remain explicit work.
+See [ADR-0023](../../docs/decisions/0023-sol-liquid-glass-material.md).

@@ -43,6 +43,7 @@ decisions in their own right.
 | 20 | SOL package manager, `.app`, and shared runtime | Accepted (architecture) | Phases 8–9 | [0020](0020-sol-package-app-runtime.md) |
 | 21 | Default-deny application security and permissions | Accepted (policy) | Phase 8 | [0021](0021-application-security-permissions.md) |
 | 22 | System-managed accounts and credential vault | Accepted (architecture) | Phase 8 | [0022](0022-system-managed-accounts.md) |
+| 23 | SOL Liquid Glass material and component contract | Accepted (renderer contract implemented) | Phases 2/4 | [0023](0023-sol-liquid-glass-material.md) |
 | 24 | GTK, Qt, and non-native toolkit adapters | Partially superseded by ADR-0028; explicit adapters remain | Phase 9 | [0024](0024-non-native-toolkit-compatibility.md) |
 | 25 | Shell spatial grammar, global menu, and Live Capsule | Accepted (product/architecture) | Phases 4/9 | [0025](0025-shell-spatial-menu-live-capsule.md) |
 | 26 | SOL boot execution, recovery topology, and best-effort graphics | Accepted (revised architecture) | Phase 7 | [0026](0026-sol-boot-uki-and-graphics-handoff.md) |

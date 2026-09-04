@@ -9,7 +9,7 @@ use sol_design::{
     typography::FontStyle,
 };
 
-use crate::{Button, Tab, TextField};
+use crate::{Button, GlassSlider, Tab, TextField};
 
 /// Stable identifier for a semantic control.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -38,6 +38,8 @@ pub enum SemanticRole {
     TextField,
     /// Selectable tab.
     Tab,
+    /// Adjustable bounded numeric value.
+    Slider,
 }
 
 /// State exposed for a semantic accessibility node.
@@ -186,6 +188,8 @@ pub enum KeyboardOutcome {
     SelectionChanged(SemanticId),
     /// Text content was edited.
     TextChanged(SemanticId),
+    /// A slider value changed to the returned percentage.
+    ValueChanged(SemanticId, u8),
 }
 
 /// A semantic control retained by the interaction tree.
@@ -222,6 +226,19 @@ pub enum SemanticControl {
         /// Current selection state.
         selected: bool,
     },
+    /// An adjustable value represented as an integer percentage.
+    Slider {
+        /// Stable ID.
+        id: SemanticId,
+        /// Accessible label.
+        label: String,
+        /// Current percentage.
+        value: u8,
+        /// Keyboard adjustment step in percentage points.
+        step: u8,
+        /// Whether keyboard adjustment is allowed.
+        enabled: bool,
+    },
 }
 
 impl SemanticControl {
@@ -254,15 +271,31 @@ impl SemanticControl {
         }
     }
 
+    /// Build a semantic slider from a Liquid Glass slider component.
+    pub fn slider(id: impl Into<String>, slider: &GlassSlider) -> Self {
+        Self::Slider {
+            id: SemanticId::new(id),
+            label: slider.label.clone(),
+            value: slider.value,
+            step: slider.step,
+            enabled: slider.enabled,
+        }
+    }
+
     fn id(&self) -> &SemanticId {
         match self {
-            Self::Button { id, .. } | Self::TextField { id, .. } | Self::Tab { id, .. } => id,
+            Self::Button { id, .. }
+            | Self::TextField { id, .. }
+            | Self::Tab { id, .. }
+            | Self::Slider { id, .. } => id,
         }
     }
 
     fn is_focusable(&self) -> bool {
         match self {
-            Self::Button { enabled, .. } | Self::Tab { enabled, .. } => *enabled,
+            Self::Button { enabled, .. }
+            | Self::Tab { enabled, .. }
+            | Self::Slider { enabled, .. } => *enabled,
             Self::TextField { .. } => true,
         }
     }
@@ -312,6 +345,24 @@ impl SemanticControl {
                     focused,
                     disabled: !enabled,
                     selected: *selected,
+                    ..AccessibilityState::default()
+                },
+                children: Vec::new(),
+            },
+            Self::Slider {
+                id,
+                label,
+                value,
+                enabled,
+                ..
+            } => AccessibilityNode {
+                id: id.clone(),
+                role: SemanticRole::Slider,
+                label: label.clone(),
+                value: Some(format!("{value}%")),
+                state: AccessibilityState {
+                    focused,
+                    disabled: !enabled,
                     ..AccessibilityState::default()
                 },
                 children: Vec::new(),
@@ -368,8 +419,8 @@ impl InteractionTree {
             Key::Tab => self.move_focus(false),
             Key::ShiftTab => self.move_focus(true),
             Key::Enter | Key::Space => self.activate_focused(),
-            Key::ArrowLeft => self.select_adjacent_tab(true),
-            Key::ArrowRight => self.select_adjacent_tab(false),
+            Key::ArrowLeft => self.adjust_or_select(true),
+            Key::ArrowRight => self.adjust_or_select(false),
             Key::Character(character) => self.edit_text(Some(character)),
             Key::Backspace => self.edit_text(None),
         }
@@ -453,6 +504,42 @@ impl InteractionTree {
         self.select_tab(index)
     }
 
+    fn adjust_or_select(&mut self, reverse: bool) -> KeyboardOutcome {
+        let Some(index) = self.focused else {
+            return KeyboardOutcome::Ignored;
+        };
+        if matches!(self.controls[index], SemanticControl::Slider { .. }) {
+            return self.adjust_slider(index, reverse);
+        }
+        self.select_adjacent_tab(reverse)
+    }
+
+    fn adjust_slider(&mut self, index: usize, decrement: bool) -> KeyboardOutcome {
+        let SemanticControl::Slider {
+            id,
+            value,
+            step,
+            enabled,
+            ..
+        } = &mut self.controls[index]
+        else {
+            return KeyboardOutcome::Ignored;
+        };
+        if !*enabled {
+            return KeyboardOutcome::Ignored;
+        }
+        let next = if decrement {
+            value.saturating_sub(*step)
+        } else {
+            value.saturating_add(*step).min(100)
+        };
+        if next == *value {
+            return KeyboardOutcome::Ignored;
+        }
+        *value = next;
+        KeyboardOutcome::ValueChanged(id.clone(), next)
+    }
+
     fn select_tab(&mut self, index: usize) -> KeyboardOutcome {
         let selected_id = self.controls[index].id().clone();
         if !matches!(
@@ -517,6 +604,10 @@ mod tests {
             &Tab::new("General").select(),
         ));
         tree.push(SemanticControl::tab("advanced", &Tab::new("Advanced")));
+        tree.push(SemanticControl::slider(
+            "hue",
+            &GlassSlider::new("Hue", 50).with_step(10),
+        ));
         tree
     }
 
@@ -583,6 +674,24 @@ mod tests {
         assert!(root.children[2].state.focused);
         assert!(root.children[2].state.editable);
         assert!(root.children[3].state.selected);
+    }
+
+    #[test]
+    fn keyboard_adjusts_a_slider_and_exposes_its_value() {
+        let mut tree = interaction_tree();
+        tree.focus("hue");
+        assert_eq!(
+            tree.handle_key(Key::ArrowRight),
+            KeyboardOutcome::ValueChanged(SemanticId::new("hue"), 60)
+        );
+        assert_eq!(
+            tree.accessibility_tree().children[5].value.as_deref(),
+            Some("60%")
+        );
+        assert_eq!(
+            tree.handle_key(Key::ArrowLeft),
+            KeyboardOutcome::ValueChanged(SemanticId::new("hue"), 50)
+        );
     }
 
     #[test]
