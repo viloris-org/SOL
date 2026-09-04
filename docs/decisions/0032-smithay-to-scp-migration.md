@@ -142,5 +142,5 @@ impl InputCoordinator {
 ## 参考
 
 - ADR-0028: No Wayland Compatibility
-- CLAUDE.md: "Platform security - Capability model enforced by the OS"
+- `README.md` and the PRD: platform security and OS ownership principles
 - [Android's SurfaceFlinger](https://source.android.com/docs/core/graphics/surfaceflinger-windowmanager) - 类似的"非X11/Wayland"架构

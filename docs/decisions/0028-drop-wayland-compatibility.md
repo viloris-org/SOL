@@ -232,7 +232,7 @@ This shim:
 - [ ] Remove Smithay handlers and delegate macros
 - [ ] Update `Cargo.toml` dependencies (remove smithay, add protobuf)
 - [ ] Write native SCP example clients for testing
-- [ ] Update `CLAUDE.md` with product philosophy
+- [x] Document the product philosophy in `README.md` and the PRD
 - [ ] Update Phase 1 roadmap acceptance criteria
 - [ ] Document SCP protocol for third-party developers
 

@@ -27,8 +27,6 @@ Inspired by systemd-networkd's robust architecture, the following enhancements h
 - **Configuration request queue** - Serialized configuration operations prevent race conditions during concurrent network changes
 - **Comprehensive event handlers** - Separate handlers for link up/down/change, address add/remove, and route changes with automatic state persistence
 
-See [IMPROVEMENTS-SYSTEMD.md](./IMPROVEMENTS-SYSTEMD.md) for detailed comparison with systemd-networkd architecture.
-
 ### Known implementation boundaries
 
 - iwd integration still needs validation and hardening against a real iwd daemon, including hidden and enterprise networks.
@@ -365,5 +363,4 @@ Example profile file structure:
 
 - [D-Bus API Reference](docs/dbus-api.md) - Complete API specification
 - [WiFi and VPN Usage Guide](docs/wifi-vpn-usage.md) - Usage examples with busctl and Python
-- [Implementation Status](docs/implementation-status.md) - Detailed phase-by-phase status
 - [Architecture Overview](docs/architecture.md) - System design and component interaction (coming soon)

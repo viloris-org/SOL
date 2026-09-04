@@ -365,6 +365,5 @@ API Version: 1.0 (Phase 1)
 
 ## See Also
 
-- [Implementation Status](./implementation-status.md)
 - [WiFi and VPN Usage Guide](./wifi-vpn-usage.md)
 - [Network Management Overview](./network-management.md)
